@@ -226,10 +226,24 @@ export default function ScrollingPapersPage() {
                   isExpanded ? (
                     // Fully expanded
                     <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900/50">
-                      <div className="mb-3">
+                      <div className="mb-3 flex items-center gap-2">
                         <span className="inline-block px-2 py-0.5 text-xs font-medium rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
                           5-Minute Summary
                         </span>
+                        {summary.arxiv_url && (
+                          <a
+                            href={summary.arxiv_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                            arXiv
+                          </a>
+                        )}
                       </div>
                       <div className="prose prose-sm dark:prose-invert max-w-none">
                         <ReactMarkdown

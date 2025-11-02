@@ -166,9 +166,13 @@ def create_paper(
         pass
     
     # Step 2: Create paper DTO for queuing
+    # Construct arxiv_url from arxiv_id
+    arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
+
     paper_dto = Paper(
         paper_uuid=str(uuid.uuid4()),
         arxiv_id=arxiv_id,
+        arxiv_url=arxiv_url,
         title=title,
         authors=authors,
         status='not_started',  # This queues the paper for processing!
