@@ -87,12 +87,12 @@ def update_paper_record(db: Session, paper_uuid: str, paper_data) -> PaperRecord
     return record
 
 
-def list_paper_records(db: Session, statuses: Optional[List[str]], limit: int) -> List[PaperRecord]:
+def list_paper_records(db: Session, statuses: Optional[List[str]], limit: int, offset: int = 0) -> List[PaperRecord]:
     """List paper records from database (without heavy processed_content column)."""
     q = db.query(PaperRecord).options(defer(PaperRecord.processed_content))
     if statuses:
         q = q.filter(PaperRecord.status.in_(statuses))
-    q = q.order_by(PaperRecord.created_at.desc()).limit(max(1, min(limit, 1000)))
+    q = q.order_by(PaperRecord.created_at.desc()).limit(max(1, min(limit, 1000))).offset(offset)
     return q.all()
 
 

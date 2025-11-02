@@ -1,4 +1,4 @@
-import { JobStatusResponse, Paper, type MinimalPaperItem } from '../types/paper';
+import { JobStatusResponse, Paper, type MinimalPaperItem, type PaginatedMinimalPapers } from '../types/paper';
 
 export const API_URL = '/api'; // The backend is on port 8000, but we're proxying, see next.config.js for dev, and /api/[...slug] for prod.
 
@@ -136,6 +136,18 @@ export const listMinimalPapers = async (): Promise<MinimalPaperItem[]> => {
     return response.json();
 }
 
+export const listMinimalPapersPaginated = async (page: number, limit: number): Promise<PaginatedMinimalPapers> => {
+    const url = new URL(`${API_URL}/papers/minimal`, window.location.origin);
+    url.searchParams.set('page', page.toString());
+    url.searchParams.set('limit', limit.toString());
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+    return response.json();
+}
+
 export const fetchPaperMarkdown = async (paperUuid: string): Promise<string> => {
     const response = await fetch(`${API_URL}/papers/${paperUuid}/markdown`);
     if (!response.ok) {
@@ -144,6 +156,15 @@ export const fetchPaperMarkdown = async (paperUuid: string): Promise<string> => 
     }
     const data = await response.json();
     return data.final_markdown;
+}
+
+export const fetchPaperSummary = async (paperUuid: string): Promise<Paper> => {
+    const response = await fetch(`${API_URL}/papers/${paperUuid}/summary`);
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+    return response.json();
 }
 
 // --- Public: check paper existence by arXiv ID ---

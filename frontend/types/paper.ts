@@ -76,3 +76,10 @@ export interface MinimalPaperItem {
   thumbnail_url: string | null;
   slug: string | null;
 }
+
+export interface PaginatedMinimalPapers {
+  items: MinimalPaperItem[];
+  total: number;
+  page: number;
+  has_more: boolean;
+}
