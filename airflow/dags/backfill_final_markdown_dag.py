@@ -182,33 +182,51 @@ def backfill_final_markdown_dag():
         papers_to_process = []
 
         with database_session() as session:
-            # Query all completed papers
-            papers = session.query(PaperRecord).filter(
+            # Get list of paper IDs first without loading the large JSON content
+            paper_ids = session.query(
+                PaperRecord.paper_uuid,
+                PaperRecord.arxiv_id,
+                PaperRecord.title,
+                PaperRecord.num_pages
+            ).filter(
                 PaperRecord.status == 'completed',
                 PaperRecord.processed_content.isnot(None)
             ).all()
 
-            print(f"Found {len(papers)} completed papers with processed content")
+            print(f"Found {len(paper_ids)} completed papers with processed content")
+            print("Checking each paper one by one to avoid memory issues...")
 
-            # Check each paper's JSON for final_markdown field
-            for paper in papers:
+            # Check each paper individually (load processed_content one at a time)
+            for idx, (paper_uuid, arxiv_id, title, num_pages) in enumerate(paper_ids, 1):
                 try:
-                    paper_json = json.loads(paper.processed_content)
+                    # Load only this paper's processed_content
+                    paper = session.query(PaperRecord).filter(
+                        PaperRecord.paper_uuid == paper_uuid
+                    ).first()
 
-                    # Check if final_markdown exists and is not None/empty
-                    if not paper_json.get('final_markdown'):
-                        papers_to_process.append({
-                            'paper_uuid': paper.paper_uuid,
-                            'arxiv_id': paper.arxiv_id,
-                            'title': paper.title or 'Untitled',
-                            'num_pages': paper.num_pages
-                        })
+                    if paper and paper.processed_content:
+                        paper_json = json.loads(paper.processed_content)
+
+                        # Check if final_markdown exists and is not None/empty
+                        if not paper_json.get('final_markdown'):
+                            papers_to_process.append({
+                                'paper_uuid': paper_uuid,
+                                'arxiv_id': arxiv_id,
+                                'title': title or 'Untitled',
+                                'num_pages': num_pages
+                            })
+                            print(f"  [{idx}/{len(paper_ids)}] {arxiv_id}: needs final_markdown")
+                        else:
+                            print(f"  [{idx}/{len(paper_ids)}] {arxiv_id}: already has final_markdown")
+
+                    # Expunge to free memory after checking each paper
+                    session.expunge_all()
 
                 except Exception as e:
-                    print(f"Error checking paper {paper.paper_uuid}: {e}")
+                    print(f"  [{idx}/{len(paper_ids)}] Error checking paper {paper_uuid}: {e}")
                     continue
 
-        print(f"Found {len(papers_to_process)} papers that need final_markdown")
+        print(f"\nTotal found: {len(papers_to_process)} papers that need final_markdown")
 
         if papers_to_process:
             # Print sample of papers to process
