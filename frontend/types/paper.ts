@@ -3,27 +3,24 @@ export interface Figure {
   short_id?: string;
   location_page: number;
   explanation: string;
-  image_path: string;
   image_data_url: string;
   referenced_on_pages: number[];
-  bounding_box: [number, number, number, number];
-  page_image_size: [number, number];
+  bounding_box: [number, number, number, number];  // Normalized coordinates (0-1)
 }
 
 export interface Page {
+  /** Deprecated: Page images are no longer stored */
   page_number: number;
-  image_data_url: string;
+  image_data_url?: string;
 }
 
 export interface Table {
   table_identifier: string;
   location_page: number;
   explanation: string;
-  image_path: string;
   image_data_url: string;
   referenced_on_pages: number[];
-  bounding_box: [number, number, number, number];
-  page_image_size: [number, number];
+  bounding_box: [number, number, number, number];  // Normalized coordinates (0-1)
 }
 
 export interface Section {
@@ -42,12 +39,13 @@ export interface Paper {
   authors?: string | null;
   arxiv_url?: string | null;
   thumbnail_data_url?: string | null;
+  thumbnail_url?: string | null;  // From summary endpoint
   five_minute_summary?: string | null;
   final_markdown?: string | null;
-  sections: Section[];
-  tables: Table[];
-  figures: Figure[];
-  pages: Page[];
+  sections?: Section[];
+  tables?: Table[];
+  figures?: Figure[];
+  pages?: Page[];
   usage_summary?: {
     currency: 'USD';
     total_cost: number;
