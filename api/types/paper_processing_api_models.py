@@ -2,28 +2,26 @@ from typing import List, Optional, Dict
 from pydantic import BaseModel
 
 class Page(BaseModel):
+    """Deprecated: Page images are no longer stored"""
     page_number: int
-    image_data_url: str
+    image_data_url: Optional[str] = None  # No longer stored
 
 class Figure(BaseModel):
     figure_identifier: str
+    short_id: Optional[str] = None
     location_page: int
     explanation: str
-    image_path: str
     image_data_url: str
     referenced_on_pages: List[int]
-    bounding_box: List[int]
-    page_image_size: List[int]
+    bounding_box: List[float]  # Normalized coordinates (0-1)
 
 class Table(BaseModel):
     table_identifier: str
     location_page: int
     explanation: str
-    image_path: str
     image_data_url: str
     referenced_on_pages: List[int]
-    bounding_box: List[int]
-    page_image_size: List[int]
+    bounding_box: List[float]  # Normalized coordinates (0-1)
 
 class Section(BaseModel):
     level: int

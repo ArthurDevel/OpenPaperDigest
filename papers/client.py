@@ -316,31 +316,28 @@ def save_paper(db: Session, processed_content: ProcessedDocument) -> Paper:
         "avg_cost_per_page": 0.0,
     }
     
-    # Convert pages to legacy format
-    for idx, page in enumerate(processed_content.pages):
-        result_dict["pages"].append({
-            "page_number": idx + 1,
-            "image_data_url": f"data:image/png;base64,{page.img_base64}",
-        })
+    # Don't store page images - only keep page count for metadata
+    # Page images are only needed during processing for OCR/metadata extraction
     
-    # Convert individual images from pages to legacy figures format
+    # Convert individual images from pages to figures format
     for page in processed_content.pages:
         for processed_image in page.images:
+            # Normalize bounding box coordinates to 0-1 range
+            normalized_bbox = [
+                processed_image.top_left_x / page.width,
+                processed_image.top_left_y / page.height,
+                processed_image.bottom_right_x / page.width,
+                processed_image.bottom_right_y / page.height
+            ]
+
             result_dict["figures"].append({
                 "figure_identifier": processed_image.uuid,
                 "short_id": processed_image.short_id,
                 "location_page": processed_image.page_number,
                 "explanation": "",  # Not extracted in current pipeline
-                "image_path": "",   # Not used - we store base64 directly
                 "image_data_url": f"data:image/png;base64,{processed_image.img_base64}",
                 "referenced_on_pages": [processed_image.page_number],
-                "bounding_box": [
-                    processed_image.top_left_x,
-                    processed_image.top_left_y,
-                    processed_image.bottom_right_x,
-                    processed_image.bottom_right_y
-                ],
-                "page_image_size": [page.width, page.height]
+                "bounding_box": normalized_bbox,  # Normalized coordinates (0-1)
             })
     
     # Set thumbnail from first page
