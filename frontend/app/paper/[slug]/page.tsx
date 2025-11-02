@@ -7,6 +7,7 @@ import { listMinimalPapers } from '../../../services/api';
 import { authClient } from '../../../services/auth';
 import { isPaperInUserList } from '../../../services/users';
 import AddToListButton from '../../../components/AddToListButton';
+import CopyMarkdownButton from '../../../components/CopyMarkdownButton';
 import { Loader, ExternalLink } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -260,7 +261,7 @@ export default function LayoutTestsPage() {
       <main ref={mainRef} className="flex-1 max-w-4xl mx-auto w-full p-2 sm:p-4 flex flex-col">
         {paperData ? (
           <>
-            <div className="mb-4 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg shadow-md overflow-hidden p-3 sm:p-4">
+            <div className="mb-4 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg shadow-md p-3 sm:p-4">
               <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4 max-w-full">
                 {(paperData as any)?.thumbnail_url && (
                   <img
@@ -269,7 +270,7 @@ export default function LayoutTestsPage() {
                     className="w-20 h-20 sm:w-24 sm:h-24 rounded-md object-cover flex-shrink-0 mx-auto sm:mx-0"
                   />
                 )}
-                <div className="min-w-0 flex-1 overflow-hidden break-words text-center sm:text-left">
+                <div className="min-w-0 flex-1 break-words text-center sm:text-left">
                   <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold mb-1 break-words whitespace-normal leading-tight">{paperData.title || 'Untitled'}</h1>
                   {paperData.authors && (
                     <p className="text-sm text-gray-700 dark:text-gray-300 mb-1 break-words whitespace-normal">{paperData.authors}</p>
@@ -287,8 +288,9 @@ export default function LayoutTestsPage() {
                       Open on arXiv
                     </a>
                   )}
-                  <div className="mt-3 flex items-center gap-3">
+                  <div className="mt-3 flex flex-col sm:flex-row items-start gap-3">
                     <AddToListButton paperId={paperData.paper_id} paperTitle={paperData.title || undefined} />
+                    <CopyMarkdownButton paperUuid={paperData.paper_id} fiveMinuteSummary={paperData.five_minute_summary} />
                   </div>
                   
                 </div>
