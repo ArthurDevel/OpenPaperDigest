@@ -212,6 +212,9 @@ def process_batch(batch_num: int) -> Dict[str, Any]:
     """
     Process a single batch of papers to remove page images and normalize bboxes.
 
+    MEMORY OPTIMIZATION: Process papers one at a time and commit immediately
+    to avoid loading 10 × 100MB+ papers into memory at once.
+
     Args:
         batch_num: Batch number (0-indexed)
 
@@ -220,55 +223,75 @@ def process_batch(batch_num: int) -> Dict[str, Any]:
     """
     offset = batch_num * BATCH_SIZE
 
-    with database_session() as session:
-        papers = get_papers_batch(session, offset, BATCH_SIZE)
+    total_bytes_saved = 0
+    total_pages_cleaned = 0
+    papers_processed = 0
 
-        if not papers:
-            print(f"✅ Batch {batch_num}: No papers found")
-            return {
-                'batch_num': batch_num,
-                'papers_processed': 0,
-                'bytes_saved': 0,
-                'pages_cleaned': 0
-            }
+    # Process one paper at a time to avoid memory issues
+    for i in range(BATCH_SIZE):
+        paper_offset = offset + i
 
-        total_bytes_saved = 0
-        total_pages_cleaned = 0
-        papers_processed = 0
+        session = SessionLocal()
+        try:
+            # Load ONE paper at a time
+            paper = (
+                session.query(PaperRecord)
+                .filter(PaperRecord.status == 'completed')
+                .filter(PaperRecord.processed_content.isnot(None))
+                .options(undefer(PaperRecord.processed_content))
+                .order_by(PaperRecord.created_at.desc())
+                .offset(paper_offset)
+                .limit(1)
+                .first()
+            )
 
-        for paper in papers:
-            try:
-                # Parse the processed_content JSON
-                paper_json = json.loads(paper.processed_content)
+            if not paper:
+                break  # No more papers in this batch
 
-                # Clean up images and normalize bboxes
-                modified_json, bytes_saved, pages_cleaned = cleanup_paper_images(paper_json)
+            # Parse the processed_content JSON
+            paper_json = json.loads(paper.processed_content)
 
-                # Save back to database
-                paper.processed_content = json.dumps(modified_json, ensure_ascii=False)
+            # Clean up images and normalize bboxes
+            modified_json, bytes_saved, pages_cleaned = cleanup_paper_images(paper_json)
 
-                total_bytes_saved += bytes_saved
-                total_pages_cleaned += pages_cleaned
-                papers_processed += 1
+            # Save back to database
+            paper.processed_content = json.dumps(modified_json, ensure_ascii=False)
 
-            except Exception as e:
-                print(f"❌ Error processing paper {paper.paper_uuid}: {e}")
-                continue
+            # Commit immediately and close session to free memory
+            session.commit()
 
-        session.commit()
+            total_bytes_saved += bytes_saved
+            total_pages_cleaned += pages_cleaned
+            papers_processed += 1
 
-        result = {
-            'batch_num': batch_num,
-            'papers_processed': papers_processed,
-            'bytes_saved': total_bytes_saved,
-            'pages_cleaned': total_pages_cleaned
-        }
+            print(f"  📄 Processed paper {paper.paper_uuid}: saved {bytes_saved / 1024:.1f} KB")
 
-        print(f"✅ Batch {batch_num}: Processed {papers_processed} papers, "
-              f"saved {total_bytes_saved / 1024 / 1024:.2f} MB, "
-              f"cleaned {total_pages_cleaned} pages")
+        except Exception as e:
+            session.rollback()
+            print(f"❌ Error processing paper at offset {paper_offset}: {e}")
+        finally:
+            session.close()
+            # Explicitly free memory
+            del session
+            if 'paper' in locals():
+                del paper
+            if 'paper_json' in locals():
+                del paper_json
+            if 'modified_json' in locals():
+                del modified_json
 
-        return result
+    result = {
+        'batch_num': batch_num,
+        'papers_processed': papers_processed,
+        'bytes_saved': total_bytes_saved,
+        'pages_cleaned': total_pages_cleaned
+    }
+
+    print(f"✅ Batch {batch_num}: Processed {papers_processed} papers, "
+          f"saved {total_bytes_saved / 1024 / 1024:.2f} MB, "
+          f"cleaned {total_pages_cleaned} pages")
+
+    return result
 
 
 @task
