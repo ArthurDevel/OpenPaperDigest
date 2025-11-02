@@ -304,6 +304,7 @@ def save_paper(db: Session, processed_content: ProcessedDocument) -> Paper:
         "authors": processed_content.authors,
         "thumbnail_data_url": None,  # Will be set from first page
         "five_minute_summary": processed_content.five_minute_summary,
+        "final_markdown": processed_content.final_markdown,  # Original OCR markdown
         "sections": [],
         "tables": [],
         "figures": [],

@@ -43,6 +43,7 @@ export interface Paper {
   arxiv_url?: string | null;
   thumbnail_data_url?: string | null;
   five_minute_summary?: string | null;
+  final_markdown?: string | null;
   sections: Section[];
   tables: Table[];
   figures: Figure[];

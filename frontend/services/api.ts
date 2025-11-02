@@ -136,6 +136,16 @@ export const listMinimalPapers = async (): Promise<MinimalPaperItem[]> => {
     return response.json();
 }
 
+export const fetchPaperMarkdown = async (paperUuid: string): Promise<string> => {
+    const response = await fetch(`${API_URL}/papers/${paperUuid}/markdown`);
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+    const data = await response.json();
+    return data.final_markdown;
+}
+
 // --- Public: check paper existence by arXiv ID ---
 export type CheckArxivResponse = {
     exists: boolean;

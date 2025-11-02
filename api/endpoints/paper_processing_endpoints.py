@@ -478,6 +478,65 @@ def get_paper_summary(paper_uuid: UUID, db: Session = Depends(get_session)):
         raise HTTPException(status_code=500, detail=f"Failed to retrieve paper summary: {str(e)}")
 
 
+@router.get("/papers/{paper_uuid}/markdown")
+def get_paper_markdown(paper_uuid: UUID, db: Session = Depends(get_session)):
+    """
+    Get the original markdown content from OCR processing.
+    Returns only the final_markdown field (concatenated OCR output from all pages).
+
+    This is a lightweight endpoint that returns only the text content without images,
+    making it suitable for copy-to-clipboard functionality.
+
+    Args:
+        paper_uuid: UUID of the paper to retrieve
+        db: Database session
+
+    Returns:
+        dict: Contains paper_uuid and final_markdown
+
+    Raises:
+        404: If paper not found, no processed content, or no markdown available
+        500: If JSON parsing fails
+    """
+    try:
+        # Get paper record - defer processed_content initially
+        from sqlalchemy.orm import defer
+        record = db.query(PaperRecord).options(
+            defer(PaperRecord.processed_content)
+        ).filter(PaperRecord.paper_uuid == str(paper_uuid)).first()
+
+        if not record:
+            raise HTTPException(status_code=404, detail="Paper not found")
+
+        # Load processed_content to extract final_markdown
+        db.refresh(record, ['processed_content'])
+
+        if not record.processed_content:
+            raise HTTPException(status_code=404, detail="No processed content available for this paper")
+
+        # Parse JSON to extract final_markdown
+        import json
+        paper_json = json.loads(record.processed_content)
+
+        final_markdown = paper_json.get("final_markdown")
+        if final_markdown is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Markdown not available for this paper. It may have been processed before markdown storage was implemented."
+            )
+
+        return {
+            "paper_uuid": str(paper_uuid),
+            "final_markdown": final_markdown
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retrieve paper markdown for {paper_uuid}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve paper markdown: {str(e)}")
+
+
 @router.get("/papers/{paper_uuid}")
 def get_paper_json(paper_uuid: UUID, db: Session = Depends(get_session)):
     """
