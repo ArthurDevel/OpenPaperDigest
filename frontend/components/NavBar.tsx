@@ -39,11 +39,6 @@ export default function NavBar({ className = '' }: NavBarProps) {
 
         <ul className="hidden md:flex items-center gap-6">
           <li>
-            <Link href="/papers" className="text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
-              All Papers
-            </Link>
-          </li>
-          <li>
             <Link href="/scrollingpapers" className="text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
               Papers Feed
             </Link>
