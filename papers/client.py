@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from papers.models import Paper, PaperSlug, Page, Section, ExternalPopularitySignal
 from papers.db.client import (
-    get_paper_record, create_paper_record, update_paper_record, list_paper_records, 
+    get_paper_record, create_paper_record, update_paper_record, list_paper_records,
     get_paper_slugs, get_all_paper_slugs, tombstone_paper_slugs,
     find_existing_paper_slug_record, find_slug_record_by_name, create_paper_slug_record
 )
@@ -187,19 +187,35 @@ def list_papers(db: Session, statuses: Optional[List[str]], limit: int) -> List[
     return [Paper.model_validate(record) for record in records]
 
 
-def list_minimal_papers(db: Session) -> List[Dict[str, Any]]:
+def list_minimal_papers(db: Session, page: Optional[int] = None, limit: Optional[int] = None) -> Dict[str, Any]:
     """
-    List all completed papers with minimal fields for overview page.
+    List completed papers with minimal fields for overview page.
     Reads from database only.
 
     Args:
         db: Active database session
+        page: Optional page number (1-indexed) for pagination
+        limit: Optional number of items per page
 
     Returns:
-        List[Dict]: List of papers with paper_uuid, title, authors, thumbnail_url, slug
+        If paginated: Dict with items, total, page, has_more
+        If not paginated: List[Dict] (legacy behavior for backward compatibility)
     """
-    # Step 1: Query all completed papers from database
-    completed_papers = list_paper_records(db, statuses=["completed"], limit=1000)
+    # Determine if we're using pagination
+    use_pagination = page is not None and limit is not None
+
+    if use_pagination:
+        # Calculate offset
+        offset = (page - 1) * limit
+
+        # Get total count of completed papers
+        total_count = db.query(PaperRecord).filter(PaperRecord.status == "completed").count()
+
+        # Query paginated papers
+        completed_papers = list_paper_records(db, statuses=["completed"], limit=limit, offset=offset)
+    else:
+        # Legacy behavior: return all papers
+        completed_papers = list_paper_records(db, statuses=["completed"], limit=1000)
 
     # Step 2: Build slug mapping (latest non-tombstone per paper_uuid)
     slug_records = get_all_paper_slugs(db, non_tombstone_only=True)
@@ -230,7 +246,16 @@ def list_minimal_papers(db: Session) -> List[Dict[str, Any]]:
 
         items.append(item)
 
-    return items
+    if use_pagination:
+        return {
+            "items": items,
+            "total": total_count,
+            "page": page,
+            "has_more": (offset + len(items)) < total_count
+        }
+    else:
+        # Legacy behavior: return just the list
+        return items
 
 
 def delete_paper(db: Session, paper_uuid: str) -> bool:

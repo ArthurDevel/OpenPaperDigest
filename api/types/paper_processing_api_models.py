@@ -71,3 +71,10 @@ class MinimalPaperItem(BaseModel):
     authors: Optional[str] = None
     thumbnail_url: Optional[str] = None
     slug: Optional[str] = None
+
+
+class PaginatedMinimalPapers(BaseModel):
+    items: List[MinimalPaperItem]
+    total: int
+    page: int
+    has_more: bool

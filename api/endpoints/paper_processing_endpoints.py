@@ -3,7 +3,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from typing import Union, List, Optional, Dict, Any
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from api.types.paper_processing_api_models import Paper, JobStatusResponse, MinimalPaperItem
+from api.types.paper_processing_api_models import Paper, JobStatusResponse, MinimalPaperItem, PaginatedMinimalPapers
 from api.types.paper_processing_endpoints import JobDbStatus
 from paperprocessor.client import process_paper_pdf
 from papers.client import build_paper_slug
@@ -214,14 +214,23 @@ async def enqueue_arxiv(req: EnqueueArxivRequest, db: Session = Depends(get_sess
 
 
  
-@router.get("/papers/minimal", response_model=List[MinimalPaperItem])
-def list_minimal_papers(db: Session = Depends(get_session)):
+@router.get("/papers/minimal")
+def list_minimal_papers(
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    db: Session = Depends(get_session)
+):
     """
     Returns a minimal list of papers: paper_uuid, title, authors, thumbnail_data_url, slug.
+    Supports optional pagination with page and limit query parameters.
+
+    If both page and limit are provided, returns paginated response.
+    Otherwise, returns legacy list format.
+
     Delegates to papers.client.list_minimal_papers.
     """
-    items = papers_client.list_minimal_papers(db)
-    return items
+    result = papers_client.list_minimal_papers(db, page=page, limit=limit)
+    return result
 
 
 

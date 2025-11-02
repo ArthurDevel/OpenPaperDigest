@@ -43,6 +43,11 @@ export default function NavBar({ className = '' }: NavBarProps) {
               All Papers
             </Link>
           </li>
+          <li>
+            <Link href="/scrollingpapers" className="text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
+              Papers Feed
+            </Link>
+          </li>
           {/*<li>
             <Link href="/donate" className="text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
               Donate Inference
@@ -117,6 +122,13 @@ export default function NavBar({ className = '' }: NavBarProps) {
                 className="block py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
               >
                 All Papers
+              </Link>
+              <Link
+                href="/scrollingpapers"
+                onClick={closeMobileMenu}
+                className="block py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+              >
+                Papers Feed
               </Link>
               <Link
                 href="https://github.com/ArthurDevel/papersummarizertool"
