@@ -24,11 +24,6 @@ from shared.db import SessionLocal
 from papers.db.models import PaperRecord
 
 
-### CONSTANTS ###
-
-BATCH_SIZE = 10  # Process 10 papers per batch
-
-
 ### DATABASE HELPERS ###
 
 @contextmanager
@@ -183,54 +178,33 @@ def cleanup_paper_images(paper_json: Dict[str, Any]) -> Tuple[Dict[str, Any], in
 ### AIRFLOW TASKS ###
 
 @task
-def get_batch_numbers() -> List[int]:
+def process_all_papers() -> Dict[str, Any]:
     """
-    Get list of batch numbers to process based on total papers count.
+    Process all papers sequentially to remove page images and normalize bboxes.
+
+    MEMORY OPTIMIZATION: Process papers one at a time and commit immediately
+    to avoid loading multiple 100MB+ papers into memory at once.
 
     Returns:
-        List[int]: List of batch numbers (0-indexed)
+        Dict containing overall statistics
     """
+    # First, count total papers
     with database_session() as session:
-        count = (
+        total_count = (
             session.query(PaperRecord)
             .filter(PaperRecord.status == 'completed')
             .filter(PaperRecord.processed_content.isnot(None))
             .count()
         )
 
-    num_batches = (count // BATCH_SIZE) + (1 if count % BATCH_SIZE > 0 else 0)
-    batch_numbers = list(range(num_batches))
-
-    print(f"📊 Total papers to clean: {count}")
-    print(f"📦 Number of batches: {num_batches}")
-
-    return batch_numbers
-
-
-@task
-def process_batch(batch_num: int) -> Dict[str, Any]:
-    """
-    Process a single batch of papers to remove page images and normalize bboxes.
-
-    MEMORY OPTIMIZATION: Process papers one at a time and commit immediately
-    to avoid loading 10 × 100MB+ papers into memory at once.
-
-    Args:
-        batch_num: Batch number (0-indexed)
-
-    Returns:
-        Dict containing batch statistics
-    """
-    offset = batch_num * BATCH_SIZE
+    print(f"📊 Total papers to clean: {total_count}")
 
     total_bytes_saved = 0
     total_pages_cleaned = 0
     papers_processed = 0
 
-    # Process one paper at a time to avoid memory issues
-    for i in range(BATCH_SIZE):
-        paper_offset = offset + i
-
+    # Process one paper at a time sequentially
+    for paper_offset in range(total_count):
         session = SessionLocal()
         try:
             # Load ONE paper at a time
@@ -246,7 +220,7 @@ def process_batch(batch_num: int) -> Dict[str, Any]:
             )
 
             if not paper:
-                break  # No more papers in this batch
+                break  # No more papers
 
             # Parse the processed_content JSON
             paper_json = json.loads(paper.processed_content)
@@ -264,7 +238,7 @@ def process_batch(batch_num: int) -> Dict[str, Any]:
             total_pages_cleaned += pages_cleaned
             papers_processed += 1
 
-            print(f"  📄 Processed paper {paper.paper_uuid}: saved {bytes_saved / 1024:.1f} KB")
+            print(f"  📄 [{papers_processed}/{total_count}] Processed paper {paper.paper_uuid}: saved {bytes_saved / 1024:.1f} KB")
 
         except Exception as e:
             session.rollback()
@@ -281,13 +255,12 @@ def process_batch(batch_num: int) -> Dict[str, Any]:
                 del modified_json
 
     result = {
-        'batch_num': batch_num,
         'papers_processed': papers_processed,
         'bytes_saved': total_bytes_saved,
         'pages_cleaned': total_pages_cleaned
     }
 
-    print(f"✅ Batch {batch_num}: Processed {papers_processed} papers, "
+    print(f"\n✅ Processing complete: {papers_processed} papers, "
           f"saved {total_bytes_saved / 1024 / 1024:.2f} MB, "
           f"cleaned {total_pages_cleaned} pages")
 
@@ -295,16 +268,16 @@ def process_batch(batch_num: int) -> Dict[str, Any]:
 
 
 @task
-def summarize_results(batch_results: List[Dict[str, Any]]) -> None:
+def summarize_results(results: Dict[str, Any]) -> None:
     """
-    Print summary of all batch processing results.
+    Print summary of processing results.
 
     Args:
-        batch_results: List of batch result dictionaries
+        results: Processing result dictionary
     """
-    total_papers = sum(r['papers_processed'] for r in batch_results)
-    total_bytes = sum(r['bytes_saved'] for r in batch_results)
-    total_pages = sum(r['pages_cleaned'] for r in batch_results)
+    total_papers = results['papers_processed']
+    total_bytes = results['bytes_saved']
+    total_pages = results['pages_cleaned']
 
     print("\n" + "="*60)
     print("🎉 PAGE IMAGE CLEANUP COMPLETE")
@@ -331,19 +304,15 @@ def cleanup_page_images_workflow():
     Main workflow to clean up page images from all existing papers.
 
     Steps:
-    1. Get list of batch numbers to process
-    2. Process papers in batches (remove images, normalize bboxes)
-    3. Summarize results
+    1. Process all papers sequentially (remove images, normalize bboxes)
+    2. Summarize results
     """
 
-    # Get batch numbers
-    batch_numbers = get_batch_numbers()
-
-    # Process all batches using task mapping
-    batch_results = process_batch.expand(batch_num=batch_numbers)
+    # Process all papers sequentially
+    results = process_all_papers()
 
     # Summarize
-    summarize_results(batch_results)
+    summarize_results(results)
 
 
 # Instantiate the DAG
