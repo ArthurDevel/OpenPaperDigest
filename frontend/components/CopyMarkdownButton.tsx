@@ -87,21 +87,18 @@ export default function CopyMarkdownButton({ paperUuid, fiveMinuteSummary }: Cop
   };
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative z-50" ref={dropdownRef}>
       <button
         onClick={() => {
           console.log('CopyMarkdownButton clicked! Current isOpen:', isOpen);
           setIsOpen(!isOpen);
           console.log('Setting isOpen to:', !isOpen);
         }}
-        className="px-3 py-1.5 text-sm rounded-md border bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300 text-xs"
         disabled={loading}
       >
         {copied ? (
-          <>
-            <Check className="w-4 h-4 text-green-600 dark:text-green-400" />
-            <span>Copied!</span>
-          </>
+          <span className="text-green-600 dark:text-green-400 font-medium">Copied</span>
         ) : loading ? (
           <>
             <Loader className="w-4 h-4 animate-spin" />
@@ -110,7 +107,7 @@ export default function CopyMarkdownButton({ paperUuid, fiveMinuteSummary }: Cop
         ) : (
           <>
             <Copy className="w-4 h-4" />
-            <span>Copy Markdown</span>
+            <span>Markdown</span>
             <ChevronDown className="w-3 h-3" />
           </>
         )}

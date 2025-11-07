@@ -3,18 +3,9 @@
 import React, { useEffect, useState, useRef, useCallback, useLayoutEffect } from 'react';
 import type { MinimalPaperItem, Paper } from '../../types/paper';
 import { listMinimalPapersPaginated, fetchPaperSummary } from '../../services/api';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import PaperCard from '../../components/PaperCard';
 
 const ITEMS_PER_PAGE = 20;
-
-// Preprocess backticked math expressions
-const preprocessBacktickedMath = (src: string): string => {
-  const looksMath = (s: string) => /[{}_^\\]|\\[a-zA-Z]+/.test(s);
-  return (src || '').replace(/`([^`]+)`/g, (m, inner) => (looksMath(inner) ? `$${inner}$` : m));
-};
 
 export default function ScrollingPapersPage() {
   const [papers, setPapers] = useState<MinimalPaperItem[]>([]);
@@ -178,113 +169,15 @@ export default function ScrollingPapersPage() {
             const isLoadingSummary = loadingSummaries.has(paper.paper_uuid);
 
             return (
-              <div
+              <PaperCard
                 key={paper.paper_uuid}
-                id={`paper-${paper.paper_uuid}`}
-                className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden shadow-sm transition-all"
-              >
-                {/* Title and Authors */}
-                <div className="p-4 pb-3">
-                  <h2 className="font-semibold text-lg text-gray-900 dark:text-gray-100 line-clamp-3">
-                    {paper.title || 'Untitled'}
-                  </h2>
-                  {paper.authors && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-2">
-                      {paper.authors}
-                    </p>
-                  )}
-                </div>
-
-                {/* Thumbnail - always clickable */}
-                <button
-                  onClick={() => toggleExpanded(paper.paper_uuid)}
-                  className="w-full text-left"
-                >
-                  <div className="w-full aspect-square bg-gray-100 dark:bg-gray-700 overflow-hidden hover:opacity-95 transition-opacity">
-                    {paper.thumbnail_url ? (
-                      <img
-                        src={paper.thumbnail_url}
-                        alt=""
-                        className="w-full h-full object-cover object-top"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">
-                        No thumbnail
-                      </div>
-                    )}
-                  </div>
-                </button>
-
-                {/* Summary Preview or Expanded Content */}
-                {isLoadingSummary ? (
-                  <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
-                    <div className="text-gray-600 dark:text-gray-400 text-sm">
-                      Loading summary...
-                    </div>
-                  </div>
-                ) : summary?.five_minute_summary ? (
-                  isExpanded ? (
-                    // Fully expanded
-                    <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900/50">
-                      <div className="mb-3 flex items-center gap-2">
-                        <span className="inline-block px-2 py-0.5 text-xs font-medium rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
-                          5-Minute Summary
-                        </span>
-                        {summary.arxiv_url && (
-                          <a
-                            href={summary.arxiv_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                            </svg>
-                            arXiv
-                          </a>
-                        )}
-                      </div>
-                      <div className="prose prose-sm dark:prose-invert max-w-none">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm, remarkMath]}
-                          rehypePlugins={[rehypeKatex]}
-                        >
-                          {preprocessBacktickedMath(summary.five_minute_summary)}
-                        </ReactMarkdown>
-                      </div>
-                      <button
-                        onClick={() => toggleExpanded(paper.paper_uuid)}
-                        className="mt-4 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                      >
-                        Show less
-                      </button>
-                    </div>
-                  ) : (
-                    // Preview with fade-out
-                    <button
-                      onClick={() => toggleExpanded(paper.paper_uuid)}
-                      className="w-full text-left border-t border-gray-200 dark:border-gray-700 px-4 pb-4 pt-3 relative group"
-                    >
-                      <div className="relative overflow-hidden" style={{ maxHeight: '10rem' }}>
-                        <div className="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm, remarkMath]}
-                            rehypePlugins={[rehypeKatex]}
-                          >
-                            {preprocessBacktickedMath(summary.five_minute_summary)}
-                          </ReactMarkdown>
-                        </div>
-                        {/* Fade overlay */}
-                        <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-white dark:from-gray-800 to-transparent pointer-events-none group-hover:from-gray-50 dark:group-hover:from-gray-750 transition-colors" />
-                      </div>
-                      <div className="mt-2 text-xs text-blue-600 dark:text-blue-400 group-hover:underline">
-                        Click to read more
-                      </div>
-                    </button>
-                  )
-                ) : null}
-              </div>
+                paper={paper}
+                isExpanded={isExpanded}
+                isLoadingSummary={isLoadingSummary}
+                summary={summary}
+                onToggleExpand={toggleExpanded}
+                onLoadSummary={loadPaperSummary}
+              />
             );
           })}
         </div>
