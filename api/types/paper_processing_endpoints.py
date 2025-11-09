@@ -12,7 +12,7 @@ class JobDbStatus(BaseModel):
     updated_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
-    arxiv_id: str
+    arxiv_id: str | None = None
     arxiv_version: str | None = None
     arxiv_url: str | None = None
     title: str | None = None

@@ -14,7 +14,7 @@ class PaperRecord(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     paper_uuid = Column(String(36), nullable=False)
-    arxiv_id = Column(String(64), nullable=False)
+    arxiv_id = Column(String(64), nullable=True)
     arxiv_version = Column(String(10), nullable=True)
     arxiv_url = Column(String(255), nullable=True)
     title = Column(String(512), nullable=True)
@@ -38,11 +38,17 @@ class PaperRecord(Base):
     external_popularity_signals = Column(JSON, nullable=True)
     # Complete processed paper JSON (replaces file system storage)
     processed_content = Column(Text().with_variant(LONGTEXT, 'mysql'), nullable=True)
+    # PDF content hash for non-arXiv papers (SHA-256)
+    content_hash = Column(String(64), nullable=True)
+    # Direct PDF URL for non-arXiv papers
+    pdf_url = Column(String(512), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("paper_uuid", name="uq_papers_paper_uuid"),
         UniqueConstraint("arxiv_id", name="uq_papers_arxiv_id"),
+        UniqueConstraint("content_hash", name="uq_papers_content_hash"),
         Index("ix_papers_initiated_by_user_id", "initiated_by_user_id"),
+        Index("ix_papers_content_hash", "content_hash"),
     )
 
 

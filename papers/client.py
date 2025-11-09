@@ -128,8 +128,9 @@ def create_paper_slug(db: Session, paper: Paper) -> PaperSlug:
 ### MAIN FUNCTIONS ###
 
 def create_paper(
-    db: Session, 
-    arxiv_id: str, 
+    db: Session,
+    arxiv_id: Optional[str] = None,
+    pdf_url: Optional[str] = None,
     title: Optional[str] = None,
     authors: Optional[str] = None,
     external_popularity_signals: Optional[List[ExternalPopularitySignal]] = None,
@@ -137,52 +138,79 @@ def create_paper(
 ) -> Paper:
     """
     Create a new paper and add it to the processing queue.
-    
+
     IMPORTANT: This function creates a paper with status 'not_started', which means
     it will be automatically picked up by the paper processing worker for full
     PDF processing, OCR, and content extraction.
-    
+
+    For arXiv papers: provide arxiv_id
+    For non-arXiv papers: provide pdf_url (hash will be calculated)
+
     Args:
         db: Active database session
-        arxiv_id: ArXiv paper identifier (e.g., "2509.14233")
+        arxiv_id: ArXiv paper identifier (e.g., "2509.14233") - optional
+        pdf_url: Direct PDF URL if no arXiv ID - optional
         title: Paper title (optional - will be extracted during processing if not provided)
         authors: Comma-separated author names (optional - will be extracted if not provided)
         external_popularity_signals: List of ExternalPopularitySignal objects with metrics
         initiated_by_user_id: User ID who requested processing (None for system jobs)
-        
+
     Returns:
         Paper: Created paper DTO with status 'not_started' (queued for processing)
-        
+
     Raises:
-        ValueError: If paper with this arXiv ID already exists in the database
+        ValueError: If paper already exists or if neither arxiv_id nor pdf_url provided
         RuntimeError: If database operation fails
     """
-    # Step 1: Check for duplicates using internal database layer
-    try:
-        existing_paper = get_paper_record(db, arxiv_id, by_arxiv_id=True)
-        raise ValueError(f"Paper with arXiv ID {arxiv_id} already exists in database")
-    except FileNotFoundError:
-        # This is good - paper doesn't exist yet
-        pass
-    
-    # Step 2: Create paper DTO for queuing
-    # Construct arxiv_url from arxiv_id
-    arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
+    # Step 1: Validate inputs
+    if not arxiv_id and not pdf_url:
+        raise ValueError("Must provide either arxiv_id or pdf_url")
 
+    content_hash = None
+    arxiv_url = None
+
+    # Step 2: Check for duplicates
+    if arxiv_id:
+        # Check by arXiv ID (fast)
+        try:
+            existing_paper = get_paper_record(db, arxiv_id, by_arxiv_id=True)
+            raise ValueError(f"Paper with arXiv ID {arxiv_id} already exists in database")
+        except FileNotFoundError:
+            # This is good - paper doesn't exist yet
+            pass
+
+        # Construct arxiv_url from arxiv_id
+        arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
+
+    else:
+        # Download PDF and check by hash
+        from shared.pdf_utils import download_pdf, calculate_pdf_hash
+
+        pdf_bytes = download_pdf(pdf_url)
+        content_hash = calculate_pdf_hash(pdf_bytes)
+
+        from papers.db.client import get_paper_by_content_hash
+        existing = get_paper_by_content_hash(db, content_hash)
+        if existing:
+            raise ValueError(f"Paper with content hash {content_hash} already exists in database")
+
+    # Step 3: Create paper DTO for queuing
     paper_dto = Paper(
         paper_uuid=str(uuid.uuid4()),
         arxiv_id=arxiv_id,
         arxiv_url=arxiv_url,
+        pdf_url=pdf_url,
+        content_hash=content_hash,
         title=title,
         authors=authors,
         status='not_started',  # This queues the paper for processing!
         initiated_by_user_id=initiated_by_user_id,
         external_popularity_signals=external_popularity_signals or []
     )
-    
-    # Step 3: Persist to database using internal layer
+
+    # Step 4: Persist to database using internal layer
     create_paper_record(db, paper_dto)
-    
+
     return paper_dto
 
 
@@ -295,21 +323,18 @@ def delete_paper(db: Session, paper_uuid: str) -> bool:
 def save_paper(db: Session, processed_content: ProcessedDocument) -> Paper:
     """
     Save processed document to database.
-    
+
     Args:
         db: Database session
         processed_content: ProcessedDocument with full processing results
-        
+
     Returns:
         Paper: Created or updated Paper object
-        
+
     Raises:
         ValueError: If creating new paper but arxiv_id already exists
         RuntimeError: If missing required fields
     """
-    if not processed_content.arxiv_id:
-        raise RuntimeError("ProcessedDocument must have arxiv_id")
-    
     # Step 1: Determine if this is create or update
     if processed_content.paper_uuid:
         # Update existing paper
@@ -318,10 +343,12 @@ def save_paper(db: Session, processed_content: ProcessedDocument) -> Paper:
         is_update = True
     else:
         # Create new paper - check for duplicates first
-        existing_paper = get_paper_record(db, processed_content.arxiv_id, by_arxiv_id=True)
-        if existing_paper:
-            raise ValueError(f"Paper with arXiv ID {processed_content.arxiv_id} already exists")
-        
+        # Note: arxiv_id may be None for non-arXiv papers
+        if processed_content.arxiv_id:
+            existing_paper = get_paper_record(db, processed_content.arxiv_id, by_arxiv_id=True)
+            if existing_paper:
+                raise ValueError(f"Paper with arXiv ID {processed_content.arxiv_id} already exists")
+
         paper_uuid = str(uuid.uuid4())
         arxiv_id = processed_content.arxiv_id
         is_update = False

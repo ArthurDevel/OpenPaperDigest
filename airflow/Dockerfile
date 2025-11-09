@@ -9,6 +9,8 @@ RUN apt-get update && \
         g++ \
         supervisor \
         sudo \
+        chromium \
+        chromium-driver \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

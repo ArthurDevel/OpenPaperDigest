@@ -27,7 +27,7 @@ class Section(BaseModel):
 
 class ExternalPopularitySignal(BaseModel):
     """External popularity metrics from various sources. This will be used in ranking papers."""
-    source: Literal["HuggingFace", "AlphaXiv"]  # Expandable to more sources
+    source: Literal["HuggingFace", "AlphaXiv", "GoogleResearch"]  # Expandable to more sources
     values: Dict[str, Any]  # Flexible values per source
     fetch_info: Dict[str, Any]  # Refetch metadata per source
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -62,14 +62,14 @@ class PaperSlug(BaseModel):
 class Paper(BaseModel):
     """
     Complete Paper DTO containing both metadata and full processing results.
-    
+
     Automatically converts from SQLAlchemy PaperRecord using model_validate().
     For metadata-only operations, content fields (pages, sections) will be empty.
     For full paper operations, all fields are populated from database + JSON.
     """
     # Database metadata fields
     paper_uuid: str
-    arxiv_id: str
+    arxiv_id: Optional[str] = None
     title: Optional[str] = None
     authors: Optional[str] = None
     status: str = "not_started"
@@ -86,11 +86,13 @@ class Paper(BaseModel):
     total_cost: Optional[float] = None
     avg_cost_per_page: Optional[float] = None
     thumbnail_data_url: Optional[str] = None
-    
+    content_hash: Optional[str] = None
+    pdf_url: Optional[str] = None
+
     # Full processing content fields (loaded from JSON when needed)
     pages: List[Page] = Field(default_factory=list)
     sections: List[Section] = Field(default_factory=list)
-    
+
     # External popularity signals from various platforms
     external_popularity_signals: List[ExternalPopularitySignal] = Field(default_factory=list)
     
@@ -121,7 +123,7 @@ class Paper(BaseModel):
     def to_orm(self):
         """Convert Paper DTO to SQLAlchemy PaperRecord."""
         from papers.db.models import PaperRecord
-        
+
         # Serialize external popularity signals to JSON
         signals_json = None
         if self.external_popularity_signals:
@@ -129,7 +131,7 @@ class Paper(BaseModel):
                 [signal.model_dump() for signal in self.external_popularity_signals],
                 default=str  # Convert datetime objects to strings
             )
-        
+
         return PaperRecord(
             paper_uuid=self.paper_uuid,
             arxiv_id=self.arxiv_id,
@@ -150,6 +152,8 @@ class Paper(BaseModel):
             avg_cost_per_page=self.avg_cost_per_page,
             thumbnail_data_url=self.thumbnail_data_url,
             external_popularity_signals=signals_json,
+            content_hash=self.content_hash,
+            pdf_url=self.pdf_url,
         )
     
     class Config:

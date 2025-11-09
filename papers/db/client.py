@@ -15,22 +15,22 @@ from papers.db.models import PaperRecord, PaperSlugRecord
 def get_paper_record(db: Session, paper_uuid: str, by_arxiv_id: bool = False, load_content: bool = False) -> PaperRecord:
     """
     Get paper record from database.
-    
+
     Args:
         db: Database session
         paper_uuid: Paper UUID or arXiv ID
         by_arxiv_id: If True, search by arXiv ID instead of UUID
         load_content: If True, load the processed_content column (heavy data)
-    
+
     Raises:
         FileNotFoundError: If paper not found
     """
     query = db.query(PaperRecord)
-    
+
     # Defer the heavy processed_content column by default
     if not load_content:
         query = query.options(defer(PaperRecord.processed_content))
-    
+
     if by_arxiv_id:
         record = query.filter(PaperRecord.arxiv_id == str(paper_uuid)).first()
         if not record:
@@ -40,6 +40,24 @@ def get_paper_record(db: Session, paper_uuid: str, by_arxiv_id: bool = False, lo
         if not record:
             raise FileNotFoundError(f"Paper with UUID {paper_uuid} not found")
     return record
+
+
+def get_paper_by_content_hash(db: Session, content_hash: str) -> Optional[PaperRecord]:
+    """
+    Get paper by PDF content hash.
+
+    Args:
+        db: Database session
+        content_hash: SHA-256 hash of PDF content
+
+    Returns:
+        Optional[PaperRecord]: Paper record if found, None otherwise
+    """
+    return db.query(PaperRecord).options(
+        defer(PaperRecord.processed_content)
+    ).filter(
+        PaperRecord.content_hash == content_hash
+    ).first()
 
 
 def create_paper_record(db: Session, paper_data) -> PaperRecord:

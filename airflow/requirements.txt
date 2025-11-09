@@ -7,6 +7,7 @@ pydantic-settings
 python-dotenv
 pymysql
 pendulum
+selenium
 
 # paperprocessor dependencies
 pillow

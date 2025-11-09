@@ -35,8 +35,9 @@ class JobInfo(NamedTuple):
     """Simple data structure for job information (avoids SQLAlchemy session issues)."""
     id: int
     paper_uuid: str
-    arxiv_id: str
+    arxiv_id: Optional[str]
     arxiv_url: Optional[str]
+    pdf_url: Optional[str]
 
 
 ### DATABASE HELPERS ###
@@ -67,38 +68,54 @@ def database_session():
 
 async def _download_and_process_paper(job: JobInfo) -> ProcessedDocument:
     """
-    Download PDF from arXiv and process it through the complete pipeline.
-    
+    Download PDF and process it through the complete pipeline.
+
+    Supports both arXiv papers and direct PDF URLs.
+
     Args:
-        job: Paper job information with arXiv details
-        
+        job: Paper job information with either arXiv details or PDF URL
+
     Returns:
         ProcessedDocument: Fully processed document with all content
-        
+
     Raises:
         Exception: If PDF download or processing fails, or if PDF has too many pages
+        ValueError: If neither arXiv ID nor PDF URL is provided
     """
-    print(f"Downloading PDF for arXiv ID: {job.arxiv_id}")
-    pdf_data = await fetch_pdf_for_processing(job.arxiv_url or job.arxiv_id)
-    
-    # Check page count before expensive processing
-    print(f"Checking page count for arXiv ID: {job.arxiv_id}")
-    pdf_document = fitz.open(stream=pdf_data.pdf_bytes, filetype="pdf")
+    # Step 1: Download PDF based on source
+    if job.arxiv_id:
+        # arXiv paper - use existing arXiv client
+        print(f"Downloading PDF for arXiv ID: {job.arxiv_id}")
+        pdf_data = await fetch_pdf_for_processing(job.arxiv_url or job.arxiv_id)
+        pdf_bytes = pdf_data.pdf_bytes
+    elif job.pdf_url:
+        # Non-arXiv paper - download from direct URL
+        print(f"Downloading PDF from URL: {job.pdf_url}")
+        from shared.pdf_utils import download_pdf
+        pdf_bytes = download_pdf(job.pdf_url)
+    else:
+        raise ValueError("Job must have either arxiv_id or pdf_url")
+
+    # Step 2: Check page count before expensive processing
+    identifier = job.arxiv_id or job.pdf_url
+    print(f"Checking page count for paper: {identifier}")
+    pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
     page_count = pdf_document.page_count
     pdf_document.close()
-    
+
     print(f"PDF has {page_count} pages")
-    
+
     if page_count > MAX_PDF_PAGES:
         raise Exception(f"Too many pages: {page_count} pages (maximum allowed: {MAX_PDF_PAGES})")
-    
+
+    # Step 3: Process PDF through pipeline
     print(f"Processing PDF through pipeline")
-    processed_document = await process_paper_pdf(pdf_data.pdf_bytes)
-    
-    # Add job metadata to processed document
+    processed_document = await process_paper_pdf(pdf_bytes)
+
+    # Step 4: Add job metadata to processed document
     processed_document.paper_uuid = job.paper_uuid
     processed_document.arxiv_id = job.arxiv_id
-    
+
     return processed_document
 
 
@@ -146,10 +163,11 @@ def _claim_next_job(session: Session) -> Optional[JobInfo]:
         id=job_record.id,
         paper_uuid=job_record.paper_uuid,
         arxiv_id=job_record.arxiv_id,
-        arxiv_url=job_record.arxiv_url
+        arxiv_url=job_record.arxiv_url,
+        pdf_url=job_record.pdf_url
     )
-    
-    print(f"Claimed job {job_info.id} for processing (arXiv: {job_info.arxiv_id})")
+
+    print(f"Claimed job {job_info.id} for processing (arXiv: {job_info.arxiv_id}, PDF URL: {job_info.pdf_url})")
     return job_info
 
 
