@@ -1,0 +1,251 @@
+{
+  "url": "https://research.google/blog/",
+  "posts": [
+    {
+      "index": 1,
+      "title": "Introducing Nested Learning: A new ML paradigm for continual learning",
+      "url": "https://research.google/blog/introducing-nested-learning-a-new-ml-paradigm-for-continual-learning/",
+      "paper_url": "http://abehrouz.github.io/files/NL.pdf",
+      "arxiv_id": null,
+      "additional_arxiv_links": [
+        {
+          "arxiv_id": "2504.13173",
+          "url": "https://arxiv.org/pdf/2504.13173",
+          "link_text": "Miras"
+        },
+        {
+          "arxiv_id": "2501.00663",
+          "url": "https://arxiv.org/abs/2501.00663",
+          "link_text": "Titans"
+        },
+        {
+          "arxiv_id": "2406.07522",
+          "url": "https://arxiv.org/pdf/2406.07522",
+          "link_text": "Samba"
+        },
+        {
+          "arxiv_id": "2407.04620",
+          "url": "https://arxiv.org/pdf/2407.04620",
+          "link_text": "TTT"
+        },
+        {
+          "arxiv_id": "2405.21060",
+          "url": "https://arxiv.org/pdf/2405.21060",
+          "link_text": "Mamba2"
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "title": "DS-STAR: A state-of-the-art versatile data science agent",
+      "url": "https://research.google/blog/ds-star-a-state-of-the-art-versatile-data-science-agent/",
+      "paper_url": "https://arxiv.org/pdf/2509.21825",
+      "arxiv_id": "2509.21825",
+      "additional_arxiv_links": [
+        {
+          "arxiv_id": "2402.18679",
+          "url": "https://arxiv.org/pdf/2402.18679",
+          "link_text": "recent research"
+        },
+        {
+          "arxiv_id": "2505.14738",
+          "url": "https://arxiv.org/pdf/2505.14738",
+          "link_text": "progress"
+        },
+        {
+          "arxiv_id": "2506.06541",
+          "url": "https://arxiv.org/pdf/2506.06541",
+          "link_text": "data science problems"
+        },
+        {
+          "arxiv_id": "2506.23719",
+          "url": "https://arxiv.org/pdf/2506.23719",
+          "link_text": "DABStep"
+        },
+        {
+          "arxiv_id": "2506.06541",
+          "url": "https://arxiv.org/pdf/2506.06541",
+          "link_text": "KramaBench"
+        },
+        {
+          "arxiv_id": "2410.07331",
+          "url": "https://arxiv.org/pdf/2410.07331",
+          "link_text": "DA-Code"
+        },
+        {
+          "arxiv_id": "2308.08155",
+          "url": "https://arxiv.org/pdf/2308.08155",
+          "link_text": "AutoGen"
+        },
+        {
+          "arxiv_id": "2410.07331",
+          "url": "https://arxiv.org/pdf/2410.07331",
+          "link_text": "DA-Agent"
+        },
+        {
+          "arxiv_id": "2506.23719",
+          "url": "https://arxiv.org/pdf/2506.23719",
+          "link_text": "DABStep"
+        },
+        {
+          "arxiv_id": "2506.06541",
+          "url": "https://arxiv.org/pdf/2506.06541",
+          "link_text": "KramaBench"
+        },
+        {
+          "arxiv_id": "2410.07331",
+          "url": "https://arxiv.org/pdf/2410.07331",
+          "link_text": "DA-Code"
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "title": "Forecasting the future of forests with AI: From counting losses to predicting risk",
+      "url": "https://research.google/blog/forecasting-the-future-of-forests-with-ai-from-counting-losses-to-predicting-risk/",
+      "paper_url": null,
+      "arxiv_id": null,
+      "additional_arxiv_links": []
+    },
+    {
+      "index": 4,
+      "title": "Exploring a space-based, scalable AI infrastructure system design",
+      "url": "https://research.google/blog/exploring-a-space-based-scalable-ai-infrastructure-system-design/",
+      "paper_url": "https://goo.gle/4qGsU8X",
+      "arxiv_id": null,
+      "additional_arxiv_links": []
+    },
+    {
+      "index": 5,
+      "title": "Accelerating the magic cycle of research breakthroughs and real-world applications",
+      "url": "https://research.google/blog/accelerating-the-magic-cycle-of-research-breakthroughs-and-real-world-applications/",
+      "paper_url": null,
+      "arxiv_id": null,
+      "additional_arxiv_links": [
+        {
+          "arxiv_id": "2510.18318",
+          "url": "https://arxiv.org/abs/2510.18318",
+          "link_text": "technical report"
+        },
+        {
+          "arxiv_id": "2510.19550",
+          "url": "https://arxiv.org/abs/2510.19550",
+          "link_text": "using nuclear magnetic resonance spectroscopy"
+        },
+        {
+          "arxiv_id": "2505.24858",
+          "url": "https://arxiv.org/abs/2505.24858",
+          "link_text": "convey uncertainty"
+        },
+        {
+          "arxiv_id": "2503.15299",
+          "url": "https://arxiv.org/abs/2503.15299",
+          "link_text": "encode more factual knowledge"
+        },
+        {
+          "arxiv_id": "2405.04682",
+          "url": "https://arxiv.org/abs/2405.04682",
+          "link_text": "Time-Aligned Captions"
+        },
+        {
+          "arxiv_id": "2407.11814",
+          "url": "https://arxiv.org/abs/2407.11814",
+          "link_text": "contrastive sequential video diffusion"
+        },
+        {
+          "arxiv_id": "2508.15734",
+          "url": "https://arxiv.org/abs/2508.15734",
+          "link_text": "energy innovation"
+        },
+        {
+          "arxiv_id": "2408.14837",
+          "url": "https://arxiv.org/abs/2408.14837",
+          "link_text": "real-time game engines"
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "title": "Toward provably private insights into AI use",
+      "url": "https://research.google/blog/toward-provably-private-insights-into-ai-use/",
+      "paper_url": "https://arxiv.org/abs/2510.21684",
+      "arxiv_id": "2510.21684",
+      "additional_arxiv_links": [
+        {
+          "arxiv_id": "2412.13678",
+          "url": "https://arxiv.org/abs/2412.13678",
+          "link_text": "1"
+        },
+        {
+          "arxiv_id": "2506.15924",
+          "url": "https://www.arxiv.org/abs/2506.15924",
+          "link_text": "known weaknesses"
+        },
+        {
+          "arxiv_id": "2506.04681",
+          "url": "https://arxiv.org/abs/2506.04681",
+          "link_text": "clustering"
+        },
+        {
+          "arxiv_id": "2510.18232",
+          "url": "https://arxiv.org/pdf/2510.18232",
+          "link_text": "synthetic data generation"
+        }
+      ]
+    },
+    {
+      "index": 7,
+      "title": "StreetReaderAI: Towards making street view accessible via context-aware multimodal AI",
+      "url": "https://research.google/blog/streetreaderai-towards-making-street-view-accessible-via-context-aware-multimodal-ai/",
+      "paper_url": "https://arxiv.org/pdf/2508.08524",
+      "arxiv_id": "2508.08524",
+      "additional_arxiv_links": []
+    },
+    {
+      "index": 8,
+      "title": "How we are building the personal health coach",
+      "url": "https://research.google/blog/how-we-are-building-the-personal-health-coach/",
+      "paper_url": null,
+      "arxiv_id": null,
+      "additional_arxiv_links": [
+        {
+          "arxiv_id": "2503.19328",
+          "url": "https://arxiv.org/pdf/2503.19328",
+          "link_text": "conversational agent"
+        },
+        {
+          "arxiv_id": "2406.06464",
+          "url": "https://arxiv.org/pdf/2406.06464",
+          "link_text": "leveraging code-generation capabilities as needed"
+        },
+        {
+          "arxiv_id": "2508.09349",
+          "url": "https://arxiv.org/pdf/2508.09349",
+          "link_text": "novel methods"
+        }
+      ]
+    },
+    {
+      "index": 9,
+      "title": "Google Earth AI: Unlocking geospatial insights with foundation models and cross-modal reasoning",
+      "url": "https://research.google/blog/google-earth-ai-unlocking-geospatial-insights-with-foundation-models-and-cross-modal-reasoning/",
+      "paper_url": null,
+      "arxiv_id": null,
+      "additional_arxiv_links": [
+        {
+          "arxiv_id": "2510.13050",
+          "url": "https://arxiv.org/abs/2510.13050",
+          "link_text": "precipitation nowcasts for the entire planet"
+        }
+      ]
+    },
+    {
+      "index": 10,
+      "title": "A verifiable quantum advantage",
+      "url": "https://research.google/blog/a-verifiable-quantum-advantage/",
+      "paper_url": "https://doi.org/10.1038/s41586-025-09526-6",
+      "arxiv_id": null,
+      "additional_arxiv_links": []
+    }
+  ]
+}
