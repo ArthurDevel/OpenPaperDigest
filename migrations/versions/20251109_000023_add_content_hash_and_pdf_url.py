@@ -13,67 +13,17 @@ depends_on = None
 
 def upgrade() -> None:
     """
-    Add support for non-arXiv papers:
-    - Make arxiv_id nullable
-    - Add content_hash column for PDF deduplication
-    - Add pdf_url column for non-arXiv papers
+    Add support for non-arXiv papers.
     """
-    # Use direct ALTER TABLE statements to avoid creating a full table copy
-    # This is more efficient and uses less disk space
-
-    # Make arxiv_id nullable
-    op.alter_column(
-        'papers',
-        'arxiv_id',
-        existing_type=sa.String(64),
-        nullable=True
-    )
-
-    # Add content_hash column
-    op.add_column(
-        'papers',
-        sa.Column('content_hash', sa.String(64), nullable=True)
-    )
-
-    # Add pdf_url column
-    op.add_column(
-        'papers',
-        sa.Column('pdf_url', sa.String(512), nullable=True)
-    )
-
-    # Add unique constraint for content_hash
-    op.create_unique_constraint(
-        'uq_papers_content_hash',
-        'papers',
-        ['content_hash']
-    )
-
-    # Add index for content_hash
-    op.create_index(
-        'ix_papers_content_hash',
-        'papers',
-        ['content_hash']
-    )
+    op.execute("ALTER TABLE papers MODIFY COLUMN arxiv_id VARCHAR(64) NULL")
+    op.execute("ALTER TABLE papers ADD COLUMN content_hash VARCHAR(64) NULL")
+    op.execute("ALTER TABLE papers ADD COLUMN pdf_url VARCHAR(512) NULL")
 
 
 def downgrade() -> None:
     """
     Revert changes for non-arXiv paper support.
     """
-    # Drop index
-    op.drop_index('ix_papers_content_hash', 'papers')
-
-    # Drop unique constraint
-    op.drop_constraint('uq_papers_content_hash', 'papers', type_='unique')
-
-    # Drop columns
-    op.drop_column('papers', 'pdf_url')
-    op.drop_column('papers', 'content_hash')
-
-    # Make arxiv_id non-nullable again
-    op.alter_column(
-        'papers',
-        'arxiv_id',
-        existing_type=sa.String(64),
-        nullable=False
-    )
+    op.execute("ALTER TABLE papers DROP COLUMN pdf_url")
+    op.execute("ALTER TABLE papers DROP COLUMN content_hash")
+    op.execute("ALTER TABLE papers MODIFY COLUMN arxiv_id VARCHAR(64) NOT NULL")
