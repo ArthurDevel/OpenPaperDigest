@@ -167,7 +167,7 @@ def database_session():
             title="Number of Papers to Add",
             description="Number of papers to add to the processing queue. Will scrape blog posts until this many papers with paper URLs are found.",
             minimum=1,
-            maximum=20
+            maximum=200
         )
     },
     doc_md="""
