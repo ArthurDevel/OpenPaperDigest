@@ -18,55 +18,62 @@ def upgrade() -> None:
     - Add content_hash column for PDF deduplication
     - Add pdf_url column for non-arXiv papers
     """
-    with op.batch_alter_table('papers') as batch_op:
-        # Make arxiv_id nullable
-        batch_op.alter_column(
-            'arxiv_id',
-            existing_type=sa.String(64),
-            nullable=True
-        )
+    # Use direct ALTER TABLE statements to avoid creating a full table copy
+    # This is more efficient and uses less disk space
 
-        # Add content_hash column
-        batch_op.add_column(
-            sa.Column('content_hash', sa.String(64), nullable=True)
-        )
+    # Make arxiv_id nullable
+    op.alter_column(
+        'papers',
+        'arxiv_id',
+        existing_type=sa.String(64),
+        nullable=True
+    )
 
-        # Add pdf_url column
-        batch_op.add_column(
-            sa.Column('pdf_url', sa.String(512), nullable=True)
-        )
+    # Add content_hash column
+    op.add_column(
+        'papers',
+        sa.Column('content_hash', sa.String(64), nullable=True)
+    )
 
-        # Add unique constraint for content_hash
-        batch_op.create_unique_constraint(
-            'uq_papers_content_hash',
-            ['content_hash']
-        )
+    # Add pdf_url column
+    op.add_column(
+        'papers',
+        sa.Column('pdf_url', sa.String(512), nullable=True)
+    )
 
-        # Add index for content_hash
-        batch_op.create_index(
-            'ix_papers_content_hash',
-            ['content_hash']
-        )
+    # Add unique constraint for content_hash
+    op.create_unique_constraint(
+        'uq_papers_content_hash',
+        'papers',
+        ['content_hash']
+    )
+
+    # Add index for content_hash
+    op.create_index(
+        'ix_papers_content_hash',
+        'papers',
+        ['content_hash']
+    )
 
 
 def downgrade() -> None:
     """
     Revert changes for non-arXiv paper support.
     """
-    with op.batch_alter_table('papers') as batch_op:
-        # Drop index
-        batch_op.drop_index('ix_papers_content_hash')
+    # Drop index
+    op.drop_index('ix_papers_content_hash', 'papers')
 
-        # Drop unique constraint
-        batch_op.drop_constraint('uq_papers_content_hash', type_='unique')
+    # Drop unique constraint
+    op.drop_constraint('uq_papers_content_hash', 'papers', type_='unique')
 
-        # Drop columns
-        batch_op.drop_column('pdf_url')
-        batch_op.drop_column('content_hash')
+    # Drop columns
+    op.drop_column('papers', 'pdf_url')
+    op.drop_column('papers', 'content_hash')
 
-        # Make arxiv_id non-nullable again
-        batch_op.alter_column(
-            'arxiv_id',
-            existing_type=sa.String(64),
-            nullable=False
-        )
+    # Make arxiv_id non-nullable again
+    op.alter_column(
+        'papers',
+        'arxiv_id',
+        existing_type=sa.String(64),
+        nullable=False
+    )
