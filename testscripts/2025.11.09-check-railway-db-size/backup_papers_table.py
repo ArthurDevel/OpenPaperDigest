@@ -23,7 +23,16 @@ from sqlalchemy.orm import sessionmaker
 # CONFIGURATION
 # ============================================================================
 
-RAILWAY_DATABASE_URL = ""
+MYSQL_USER = os.getenv('MYSQL_USER')
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD')
+MYSQL_HOST = os.getenv('MYSQL_HOST')
+MYSQL_PORT = os.getenv('MYSQL_PORT', '3306')
+MYSQL_DATABASE = os.getenv('MYSQL_DATABASE')
+
+if not all([MYSQL_USER, MYSQL_PASSWORD, MYSQL_HOST, MYSQL_DATABASE]):
+    raise ValueError("MySQL environment variables (MYSQL_USER, MYSQL_PASSWORD, MYSQL_HOST, MYSQL_DATABASE) are required")
+
+DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
 BACKUP_DIR = os.path.join(os.path.dirname(__file__), 'backups')
 
 
@@ -49,9 +58,9 @@ def main():
     print(f"Backup will be saved to: {backup_file}")
     print()
 
-    # Connect to Railway database
-    print("Connecting to Railway database...")
-    engine = create_engine(RAILWAY_DATABASE_URL)
+    # Connect to database
+    print("Connecting to database...")
+    engine = create_engine(DATABASE_URL)
     Session = sessionmaker(bind=engine)
     session = Session()
 
