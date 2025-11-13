@@ -18,6 +18,7 @@ rapidfuzz
 openai
 mistralai
 aiofiles
+pdf2image
 
 # shared module dependencies  
 qdrant-client
