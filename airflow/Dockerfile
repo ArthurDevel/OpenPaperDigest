@@ -11,6 +11,7 @@ RUN apt-get update && \
         sudo \
         chromium \
         chromium-driver \
+        poppler-utils \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
