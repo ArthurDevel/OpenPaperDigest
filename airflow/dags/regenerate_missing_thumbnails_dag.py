@@ -1,8 +1,7 @@
 import sys
 import pendulum
 import json
-from datetime import datetime
-from contextmanager import contextmanager
+from contextlib import contextmanager
 from typing import List, Dict
 
 from airflow.decorators import dag, task
