@@ -88,7 +88,9 @@ def regenerate_missing_thumbnails_dag():
     @task
     def regenerate_thumbnails(paper_uuids: List[str]) -> Dict[str, int]:
         """
-        Regenerate thumbnails from processed_content.
+        Regenerate thumbnails from PDF files.
+
+        Downloads PDFs from arXiv, converts first page to image, creates thumbnail.
 
         Args:
             paper_uuids: List of paper UUIDs to process
@@ -96,6 +98,12 @@ def regenerate_missing_thumbnails_dag():
         Returns:
             Dict with success/failure counts
         """
+        import requests
+        import io
+        import base64
+        from PIL import Image
+        from pdf2image import convert_from_bytes
+
         if not paper_uuids:
             print("No papers to process")
             return {'success': 0, 'failed': 0}
@@ -119,28 +127,36 @@ def regenerate_missing_thumbnails_dag():
                         failed_count += 1
                         continue
 
-                    if not paper.processed_content:
-                        print(f"  No processed_content, skipping")
+                    if not paper.arxiv_url:
+                        print(f"  No arXiv URL, skipping")
                         failed_count += 1
                         continue
 
-                    # Parse processed_content JSON
-                    processed = json.loads(paper.processed_content)
+                    # Download PDF from arXiv
+                    pdf_url = paper.arxiv_url.replace('/abs/', '/pdf/') + '.pdf'
+                    response = requests.get(pdf_url, timeout=30)
+                    response.raise_for_status()
 
-                    # Extract first page image
-                    if not processed.get('pages') or len(processed['pages']) == 0:
-                        print(f"  No pages in processed_content, skipping")
-                        failed_count += 1
-                        continue
+                    # Convert first page to image
+                    images = convert_from_bytes(response.content, first_page=1, last_page=1, dpi=150)
+                    first_page_img = images[0]
 
-                    first_page = processed['pages'][0]
-                    if not first_page.get('img_base64'):
-                        print(f"  No image in first page, skipping")
-                        failed_count += 1
-                        continue
+                    # Crop to square from top
+                    width, height = first_page_img.size
+                    size = min(width, height)
+                    cropped = first_page_img.crop((0, 0, size, size))
 
-                    # Set thumbnail from first page
-                    thumbnail_data_url = f"data:image/png;base64,{first_page['img_base64']}"
+                    # Resize to 400x400
+                    thumbnail = cropped.resize((400, 400), Image.Resampling.LANCZOS)
+
+                    # Convert to PNG base64 data URL
+                    buffer = io.BytesIO()
+                    thumbnail.save(buffer, format='PNG')
+                    buffer.seek(0)
+                    encoded = base64.b64encode(buffer.read()).decode('utf-8')
+                    thumbnail_data_url = f'data:image/png;base64,{encoded}'
+
+                    # Update database
                     paper.thumbnail_data_url = thumbnail_data_url
 
                     success_count += 1
