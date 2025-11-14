@@ -44,7 +44,7 @@ export default function PaperCard({
       return;
     }
 
-    const shareUrl = `${window.location.origin}/sharedpaper/${paper.slug}`;
+    const shareUrl = `${window.location.origin}/paper/${paper.slug}`;
 
     try {
       await navigator.clipboard.writeText(shareUrl);
