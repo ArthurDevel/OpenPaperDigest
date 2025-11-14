@@ -39,7 +39,7 @@ export default function NavBar({ className = '' }: NavBarProps) {
 
         <ul className="hidden md:flex items-center gap-6">
           <li>
-            <Link href="/scrollingpapers" className="text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
+            <Link href="/" className="text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
               Papers Feed
             </Link>
           </li>
@@ -119,7 +119,7 @@ export default function NavBar({ className = '' }: NavBarProps) {
                 All Papers
               </Link>
               <Link
-                href="/scrollingpapers"
+                href="/"
                 onClick={closeMobileMenu}
                 className="block py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
               >

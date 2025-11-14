@@ -1,8 +1,26 @@
+/**
+ * Individual Paper Page
+ *
+ * Server-side rendered page for displaying individual research papers with full SEO metadata.
+ * Responsibilities:
+ * - Fetch paper data server-side for SEO
+ * - Generate dynamic metadata for search engines and social sharing
+ * - Render paper details with client-side interactivity
+ */
+
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import SharedPaperClient from './SharedPaperClient';
 
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface PageProps {
   params: {
@@ -10,8 +28,25 @@ interface PageProps {
   };
 }
 
-// Fetch paper data server-side for SEO
-async function getPaperData(slug: string) {
+interface PaperData {
+  paper_id: string;
+  title: string | null;
+  authors: string | null;
+  arxiv_url: string | null;
+  five_minute_summary: string | null;
+  thumbnail_url: string | null;
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Fetches paper data from the API using the slug
+ * @param slug - The paper slug to fetch
+ * @returns Paper data or null if not found
+ */
+async function getPaperData(slug: string): Promise<PaperData | null> {
   try {
     // Resolve slug to paper_uuid
     const slugRes = await fetch(`${API_URL}/papers/slug/${encodeURIComponent(slug)}`, {
@@ -56,7 +91,15 @@ async function getPaperData(slug: string) {
   }
 }
 
-// Generate metadata for SEO
+// ============================================================================
+// METADATA GENERATION
+// ============================================================================
+
+/**
+ * Generates SEO metadata for the paper page
+ * @param params - Page parameters containing the slug
+ * @returns Metadata object for Next.js
+ */
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const paperData = await getPaperData(params.slug);
 
@@ -111,6 +154,15 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   };
 }
 
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
+/**
+ * Paper page component that displays a single paper with full details
+ * @param params - Page parameters containing the slug
+ * @returns Rendered paper page
+ */
 export default async function PaperPage({ params }: PageProps) {
   const paperData = await getPaperData(params.slug);
 
