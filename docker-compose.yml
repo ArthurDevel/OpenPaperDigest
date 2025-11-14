@@ -106,6 +106,45 @@ services:
 
 
   #--------------------------------------------------------------------------
+  # Analytics Service
+  #
+  # Umami is a self-hosted, privacy-focused web analytics solution.
+  # Provides visitor insights, page views, and location data without cookies.
+  # You can access the UI at http://localhost:${HOSTPORT_UMAMI:-3001}
+  # Default login: admin / umami (change after first login)
+  #--------------------------------------------------------------------------
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    container_name: papersummarizer-umami
+    restart: always
+    ports:
+      - "${HOSTPORT_UMAMI:-3001}:3000"
+    environment:
+      DATABASE_URL: postgresql://${UMAMI_DB_USER:-umami}:${UMAMI_DB_PASSWORD:-umami}@umami-postgres:5432/${UMAMI_DB_NAME:-umami}
+      DATABASE_TYPE: postgresql
+      APP_SECRET: ${UMAMI_APP_SECRET:-replace-me-with-a-random-string}
+    depends_on:
+      umami-postgres:
+        condition: service_healthy
+
+  umami-postgres:
+    image: postgres:15-alpine
+    container_name: papersummarizer-umami-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${UMAMI_DB_NAME:-umami}
+      POSTGRES_USER: ${UMAMI_DB_USER:-umami}
+      POSTGRES_PASSWORD: ${UMAMI_DB_PASSWORD:-umami}
+    volumes:
+      - ./data/umami-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${UMAMI_DB_USER:-umami}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+
+  #--------------------------------------------------------------------------
   # Airflow Services
   #
   # Combined service approach mirrors Railway deployment due to Railway's limitation
