@@ -22,6 +22,7 @@
  */
 export default function UmamiScript() {
   const websiteId = process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID;
+  const umamiUrl = process.env.NEXT_PUBLIC_UMAMI_URL || 'http://localhost:3001';
 
   if (!websiteId) {
     return null;
@@ -30,7 +31,7 @@ export default function UmamiScript() {
   return (
     <script
       defer
-      src="http://localhost:3001/script.js"
+      src={`${umamiUrl}/script.js`}
       data-website-id={websiteId}
     />
   );

@@ -17,6 +17,7 @@
 - `UMAMI_APP_SECRET` - Secret key for encrypting data (generate random 32-character string)
 
 **Next.js Frontend:**
+- `NEXT_PUBLIC_UMAMI_URL` - Umami server URL (default: http://localhost:3001, set to your Railway URL in production)
 - `NEXT_PUBLIC_UMAMI_WEBSITE_ID` - Website tracking ID from Umami dashboard (get this after creating website in Umami)
 
 ## Quick Start
