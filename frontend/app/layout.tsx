@@ -17,10 +17,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <head>
-        <UmamiScript />
-      </head>
       <body className="min-h-screen flex flex-col bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+        <UmamiScript />
         <div className="flex flex-col min-h-screen">
           <NavBar />
           <Suspense fallback={<div className="flex-1 min-h-0" />}>
