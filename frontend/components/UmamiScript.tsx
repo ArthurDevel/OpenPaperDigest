@@ -25,8 +25,11 @@ export default function UmamiScript() {
   const umamiUrl = process.env.NEXT_PUBLIC_UMAMI_URL || 'http://localhost:3001';
 
   if (!websiteId) {
+    console.warn('Umami: NEXT_PUBLIC_UMAMI_WEBSITE_ID is not set');
     return null;
   }
+
+  console.log('Umami config:', { websiteId, umamiUrl, scriptSrc: `${umamiUrl}/script.js` });
 
   return (
     <script
