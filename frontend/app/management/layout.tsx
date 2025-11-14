@@ -7,6 +7,6 @@ export const metadata: Metadata = {
   },
 };
 
-export default function UserLayout({ children }: { children: React.ReactNode }) {
+export default function ManagementLayout({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
