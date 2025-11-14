@@ -8,7 +8,12 @@ RUN npm ci --no-audit --no-fund
 
 # Set build-time env after deps install so changing it doesn't invalidate the npm cache layer
 ARG CONTAINERPORT_API
+ARG NEXT_PUBLIC_UMAMI_URL
+ARG NEXT_PUBLIC_UMAMI_WEBSITE_ID
+
 ENV NEXT_PUBLIC_CONTAINERPORT_API=$CONTAINERPORT_API
+ENV NEXT_PUBLIC_UMAMI_URL=$NEXT_PUBLIC_UMAMI_URL
+ENV NEXT_PUBLIC_UMAMI_WEBSITE_ID=$NEXT_PUBLIC_UMAMI_WEBSITE_ID
 
 COPY frontend ./
 RUN npm run build
