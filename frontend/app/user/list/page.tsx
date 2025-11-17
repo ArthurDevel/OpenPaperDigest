@@ -102,11 +102,11 @@ export default function UserListPage() {
                       <td className="p-2 align-top whitespace-nowrap text-xs text-gray-700 dark:text-gray-300">{addedStr}</td>
                       <td className="p-2 align-top">
                         <div className="flex gap-2">
-                          <a href={href} className="text-xs px-2 py-1 rounded border bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">View</a>
+                          <a href={href} className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">View</a>
                           <button
                             onClick={() => handleRemove(it.paper_uuid)}
                             disabled={removing === it.paper_uuid}
-                            className="text-xs px-2 py-1 rounded border bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
+                            className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
                           >
                             {removing === it.paper_uuid ? 'Removing…' : 'Remove'}
                           </button>

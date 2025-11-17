@@ -177,7 +177,7 @@ export default function PaperCard({
                 </ReactMarkdown>
               </div>
               {/* Fade overlay */}
-              <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-white dark:from-gray-800 to-transparent pointer-events-none group-hover:from-gray-50 dark:group-hover:from-gray-750 transition-colors" />
+              <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-white dark:from-gray-800 to-transparent pointer-events-none group-hover:from-gray-50 dark:group-hover:from-gray-700 transition-colors" />
             </div>
             <div className="mt-2 text-xs text-blue-600 dark:text-blue-400 group-hover:underline">
               Click to read more

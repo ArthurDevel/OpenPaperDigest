@@ -84,8 +84,6 @@ body {
 }
 
 /* Dark mode: subtle darker dots instead of bright ones */
-@media (prefers-color-scheme: dark) {
-  body {
-    background-image: radial-gradient(theme('colors.gray.700') 1px, transparent 1px);
-  }
+.dark body {
+  background-image: radial-gradient(theme('colors.gray.700') 1px, transparent 1px);
 }

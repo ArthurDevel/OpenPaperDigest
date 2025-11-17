@@ -5,6 +5,7 @@ import Image from 'next/image';
 import React, { useState } from 'react';
 import { Github, User as UserIcon, X, Menu } from 'lucide-react';
 import { authClient } from '../services/auth';
+import ThemeToggle from './ThemeToggle';
 
 type NavBarProps = {
   className?: string;
@@ -82,6 +83,9 @@ export default function NavBar({ className = '' }: NavBarProps) {
         </ul>
 
         <div className="flex items-center gap-3">
+          <div className="hidden md:block">
+            <ThemeToggle />
+          </div>
           {isLoggedIn ? (
             <Link
               href="/user"
@@ -122,13 +126,6 @@ export default function NavBar({ className = '' }: NavBarProps) {
           <div className="px-4 py-4">
             <nav className="space-y-3 text-center">
               <Link
-                href="/papers"
-                onClick={closeMobileMenu}
-                className="block py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
-              >
-                All Papers
-              </Link>
-              <Link
                 href="/"
                 onClick={closeMobileMenu}
                 className="block py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -145,6 +142,10 @@ export default function NavBar({ className = '' }: NavBarProps) {
                 <Github size={16} />
                 <span>Star us on GitHub</span>
               </Link>
+              <div className="flex items-center justify-center gap-2 py-2">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Theme:</span>
+                <ThemeToggle />
+              </div>
               {isLoggedIn ? (
                 <Link
                   href="/user"
