@@ -15,12 +15,50 @@ import React, { useEffect, useState, useRef, useCallback, useLayoutEffect } from
 import type { MinimalPaperItem, Paper } from '../types/paper';
 import { listMinimalPapersPaginated, fetchPaperSummary } from '../services/api';
 import PaperCard from '../components/PaperCard';
+import { usePaperImpression, trackPaperOpened } from '../hooks/useUmamiTracking';
 
 // ============================================================================
 // CONSTANTS
 // ============================================================================
 
 const ITEMS_PER_PAGE = 20;
+
+// ============================================================================
+// HELPER COMPONENT
+// ============================================================================
+
+/**
+ * A wrapper for PaperCard that adds impression tracking.
+ */
+const PaperCardWithImpressionTracking = ({
+  paper,
+  isExpanded,
+  isLoadingSummary,
+  summary,
+  onToggleExpand,
+  onLoadSummary,
+}: {
+  paper: MinimalPaperItem;
+  isExpanded: boolean;
+  isLoadingSummary: boolean;
+  summary?: Paper;
+  onToggleExpand: (paperUuid: string) => void;
+  onLoadSummary?: (paperUuid: string) => void;
+}) => {
+  const impressionRef = usePaperImpression(paper.paper_uuid, true);
+
+  return (
+    <PaperCard
+      ref={impressionRef}
+      paper={paper}
+      isExpanded={isExpanded}
+      isLoadingSummary={isLoadingSummary}
+      summary={summary}
+      onToggleExpand={onToggleExpand}
+      onLoadSummary={onLoadSummary}
+    />
+  );
+};
 
 // ============================================================================
 // MAIN COMPONENT
@@ -94,6 +132,9 @@ export default function ScrollingPapersPage() {
         return next;
       });
     } else {
+      // Track the "paper opened" event
+      trackPaperOpened(paperUuid);
+
       // Expanding a new one - need to handle scroll preservation
       const previouslyExpanded = Array.from(expandedPaperIds)[0];
 
@@ -209,7 +250,7 @@ export default function ScrollingPapersPage() {
             const isLoadingSummary = loadingSummaries.has(paper.paper_uuid);
 
             return (
-              <PaperCard
+              <PaperCardWithImpressionTracking
                 key={paper.paper_uuid}
                 paper={paper}
                 isExpanded={isExpanded}

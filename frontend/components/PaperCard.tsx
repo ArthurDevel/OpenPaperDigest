@@ -25,14 +25,14 @@ interface PaperCardProps {
   onLoadSummary?: (paperUuid: string) => void;
 }
 
-export default function PaperCard({
+const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
   paper,
   isExpanded,
   isLoadingSummary,
   summary,
   onToggleExpand,
   onLoadSummary,
-}: PaperCardProps) {
+}, ref) => {
   const [copied, setCopied] = useState(false);
 
   // Handle share button click - always copy to clipboard
@@ -64,6 +64,7 @@ export default function PaperCard({
 
   return (
     <div
+      ref={ref}
       id={`paper-${paper.paper_uuid}`}
       className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm transition-all"
     >
@@ -187,4 +188,8 @@ export default function PaperCard({
       ) : null}
     </div>
   );
-}
+});
+
+PaperCard.displayName = 'PaperCard';
+
+export default PaperCard;
