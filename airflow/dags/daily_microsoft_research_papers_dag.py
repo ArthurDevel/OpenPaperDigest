@@ -443,12 +443,9 @@ def daily_microsoft_research_papers_dag():
                     # Create popularity signal for Microsoft Research
                     microsoft_signal = ExternalPopularitySignal(
                         source="MicrosoftResearch",
-                        values={
-                            "publication_url": paper.get('url')
-                        },
+                        values={},
                         fetch_info={
-                            "publication_title": title,
-                            "publication_date": paper.get('publication_date')
+                            "publication_url": paper.get('url'),
                         }
                     )
 
