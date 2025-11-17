@@ -92,5 +92,16 @@ async def _log_request_and_match(request: Request, call_next):
 def read_root():
     return {"message": "Welcome to the API"}
 
+
+@app.get("/health")
+def health_check():
+    """
+    Health check endpoint for Railway deployment.
+    Returns 200 OK if the backend service is running.
+    The frontend proxy automatically handles /api/health -> /health.
+    """
+    return {"status": "healthy"}
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=settings.CONTAINERPORT_API)
