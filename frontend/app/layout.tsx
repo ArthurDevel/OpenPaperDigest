@@ -15,17 +15,31 @@ export const metadata = {
   authors: [{ name: 'Open Paper Digest' }],
   creator: 'Open Paper Digest',
   publisher: 'Open Paper Digest',
+  icons: {
+    icon: '/opdlogo.svg',
+    shortcut: '/opdlogo.svg',
+    apple: '/opdlogo.svg',
+  },
   openGraph: {
     type: 'website',
     locale: 'en_US',
     siteName: 'Open Paper Digest',
     title: 'Open Paper Digest - Daily Research Papers Without a PhD',
     description: 'Daily digest of popular research papers made accessible for everyone. Stay up to date with advanced research through a continuous feed of digestible paper summaries.',
+    images: [
+      {
+        url: '/opdlogo.svg',
+        width: 100,
+        height: 100,
+        alt: 'Open Paper Digest Logo',
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Open Paper Digest - Daily Research Papers Without a PhD',
     description: 'Daily digest of popular research papers made accessible for everyone. Stay up to date with advanced research through a continuous feed of digestible paper summaries.',
+    images: ['/opdlogo.svg'],
   },
 }
 

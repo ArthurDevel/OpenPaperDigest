@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import React, { useState } from 'react';
 import { Github, User as UserIcon, X, Menu } from 'lucide-react';
 import { authClient } from '../services/auth';
@@ -35,7 +36,16 @@ export default function NavBar({ className = '' }: NavBarProps) {
   return (
     <nav className={`w-full ${className}`}>
       <div className="w-full px-4 sm:px-6 lg:px-10 pt-7 pb-3 flex items-center justify-between">
-        <div className="text-base font-semibold text-gray-900 dark:text-gray-100">Open Paper Digest</div>
+        <Link href="/" className="flex items-center gap-2">
+          <Image
+            src="/opdlogo.svg"
+            alt="Open Paper Digest Logo"
+            width={32}
+            height={32}
+            className="w-8 h-8"
+          />
+          <span className="text-base font-semibold text-gray-900 dark:text-gray-100">Open Paper Digest</span>
+        </Link>
 
         <ul className="hidden md:flex items-center gap-6">
           <li>
