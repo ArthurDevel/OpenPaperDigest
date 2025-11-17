@@ -139,7 +139,7 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
 
   // Handle share button click
   const handleShare = async () => {
-    const shareUrl = `${window.location.origin}/sharedpaper/${slug}`;
+    const shareUrl = `${window.location.origin}/paper/${slug}`;
 
     try {
       if (navigator.share) {
