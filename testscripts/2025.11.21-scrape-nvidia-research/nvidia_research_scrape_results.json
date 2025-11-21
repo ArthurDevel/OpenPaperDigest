@@ -1,0 +1,95 @@
+{
+  "url": "https://research.nvidia.com/publications",
+  "publications": [
+    {
+      "index": 1,
+      "title": "Play4D: Accelerated and Interactive Free-viewpoint Video Streaming for Virtual Reality and Light Field Displays",
+      "url": "https://research.nvidia.com/publication/2025-12_play4d-accelerated-and-interactive-free-viewpoint-video-streaming-virtual",
+      "paper_url": "https://d1qx31qr3h6wln.cloudfront.net/publications/SIGGRAPH_ASIA_2025_E_Tech__2_page_%20%281%29.pdf",
+      "arxiv_id": null,
+      "pdf_hash": "fbf2b6cfe3222b2d641127c4ae5a0f25edd394f37bc8dcf0ee94ac1a6f9e3be5",
+      "publication_date": "Monday, December 15, 2025"
+    },
+    {
+      "index": 2,
+      "title": "Policy Optimized Text-to-Image Pipeline Design",
+      "url": "https://research.nvidia.com/publication/2025-12_policy-optimized-text-image-pipeline-design",
+      "paper_url": "https://arxiv.org/abs/2505.21478",
+      "arxiv_id": "2505.21478",
+      "pdf_hash": null,
+      "publication_date": "Wednesday, December 3, 2025"
+    },
+    {
+      "index": 3,
+      "title": "Elucidated Rolling Diffusion Models for Probabilistic Weather Forecasting",
+      "url": "https://research.nvidia.com/publication/2025-12_elucidated-rolling-diffusion-models-probabilistic-weather-forecasting",
+      "paper_url": "https://arxiv.org/abs/2506.20024",
+      "arxiv_id": "2506.20024",
+      "pdf_hash": null,
+      "publication_date": "Tuesday, December 2, 2025"
+    },
+    {
+      "index": 4,
+      "title": "Align Your Flow: Scaling Continuous-Time Flow Map Distillation",
+      "url": "https://research.nvidia.com/publication/2025-12_align-your-flow-scaling-continuous-time-flow-map-distillation",
+      "paper_url": "https://arxiv.org/abs/2506.14603",
+      "arxiv_id": "2506.14603",
+      "pdf_hash": null,
+      "publication_date": "Tuesday, December 2, 2025"
+    },
+    {
+      "index": 5,
+      "title": "ThinkAct: Vision-Language-Action Reasoning via Reinforced Visual Latent Planning",
+      "url": "https://research.nvidia.com/publication/2025-12_thinkact-vision-language-action-reasoning-reinforced-visual-latent-planning",
+      "paper_url": "https://arxiv.org/pdf/2507.16815",
+      "arxiv_id": "2507.16815",
+      "pdf_hash": null,
+      "publication_date": "Tuesday, December 2, 2025"
+    },
+    {
+      "index": 6,
+      "title": "Generalizable Domain Adaptation for Sim-and-Real Policy Co-Training",
+      "url": "https://research.nvidia.com/publication/2025-12_generalizable-domain-adaptation-sim-and-real-policy-co-training",
+      "paper_url": "https://arxiv.org/abs/2509.18631",
+      "arxiv_id": "2509.18631",
+      "pdf_hash": null,
+      "publication_date": "Tuesday, December 2, 2025"
+    },
+    {
+      "index": 7,
+      "title": "RaySt3R: Predicting Novel Depth Maps for Zero-Shot Object Completion",
+      "url": "https://research.nvidia.com/publication/2025-12_rayst3r-predicting-novel-depth-maps-zero-shot-object-completion",
+      "paper_url": "https://arxiv.org/abs/2506.05285",
+      "arxiv_id": "2506.05285",
+      "pdf_hash": null,
+      "publication_date": "Monday, December 1, 2025"
+    },
+    {
+      "index": 8,
+      "title": "Attention on the Sphere",
+      "url": "https://research.nvidia.com/publication/2025-11_attention-sphere",
+      "paper_url": "https://arxiv.org/abs/2505.11157",
+      "arxiv_id": "2505.11157",
+      "pdf_hash": null,
+      "publication_date": "Sunday, November 30, 2025"
+    },
+    {
+      "index": 9,
+      "title": "Seeing What Matters: Generalizable AI-generated Video Detection with Forensic-Oriented Augmentation",
+      "url": "https://research.nvidia.com/publication/2025-11_seeing-what-matters-generalizable-ai-generated-video-detection-forensic",
+      "paper_url": "https://arxiv.org/abs/2506.16802",
+      "arxiv_id": "2506.16802",
+      "pdf_hash": null,
+      "publication_date": "Sunday, November 30, 2025"
+    },
+    {
+      "index": 10,
+      "title": "Augmenting Simulated Noisy Quantum Data Collection by Orders of Magnitude Using Pre-Trajectory Sampling with Batched Execution",
+      "url": "https://research.nvidia.com/publication/2025-11_augmenting-simulated-noisy-quantum-data-collection-orders-magnitude-using-pre",
+      "paper_url": "https://arxiv.org/abs/2504.16297",
+      "arxiv_id": "2504.16297",
+      "pdf_hash": null,
+      "publication_date": "Sunday, November 16, 2025"
+    }
+  ]
+}
