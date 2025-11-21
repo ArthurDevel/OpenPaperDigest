@@ -1,5 +1,6 @@
 # Dependencies for Airflow DAGs
 requests
+beautifulsoup4
 mysqlclient
 sqlalchemy
 pydantic
