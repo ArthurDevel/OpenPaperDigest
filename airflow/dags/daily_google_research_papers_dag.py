@@ -363,10 +363,9 @@ def daily_google_research_papers_dag():
                     # Create popularity signal for Google Research
                     google_signal = ExternalPopularitySignal(
                         source="GoogleResearch",
-                        values={
-                            "blog_post_url": paper.get('url')
-                        },
+                        values={},
                         fetch_info={
+                            "blog_post_url": paper.get('url'),
                             "blog_post_title": title
                         }
                     )
