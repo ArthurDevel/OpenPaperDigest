@@ -263,3 +263,19 @@ export const searchPapers = async (payload: SearchQueryRequest): Promise<SearchQ
     return response.json();
 }
 
+// --- Admin: Cumulative daily papers count ---
+export type CumulativeDailyPaperItem = {
+    date: string;
+    daily_count: number;
+    cumulative_count: number;
+};
+
+export const getCumulativeDailyPapers = async (): Promise<CumulativeDailyPaperItem[]> => {
+    const response = await fetch(`${API_URL}/admin/papers/cumulative_daily`);
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+    return response.json();
+}
+
