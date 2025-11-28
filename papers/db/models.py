@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text, UniqueConstraint, Float, Boolean, Index, JSON
+from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text, UniqueConstraint, Float, Boolean, Index, JSON, Date
 from sqlalchemy.dialects.mysql import MEDIUMTEXT, LONGTEXT
 
 from shared.db import Base
@@ -63,3 +63,22 @@ class PaperSlugRecord(Base):
     # Tombstone preserves the slug after deletion of the paper
     tombstone = Column(Boolean, nullable=False, default=False)
     deleted_at = Column(DateTime, nullable=True)
+
+
+class PaperStatusHistory(Base):
+    """SQLAlchemy model for paper_status_history table."""
+    __tablename__ = "paper_status_history"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    date = Column(Date, nullable=False, unique=True)
+    total_count = Column(Integer, nullable=False)
+    failed_count = Column(Integer, nullable=False)
+    processed_count = Column(Integer, nullable=False)
+    not_started_count = Column(Integer, nullable=False)
+    processing_count = Column(Integer, nullable=False)
+    snapshot_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("date", name="uq_paper_status_history_date"),
+        Index("ix_paper_status_history_date", "date"),
+    )

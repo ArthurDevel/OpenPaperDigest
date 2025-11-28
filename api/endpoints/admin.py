@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, date as date_type
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,7 +20,7 @@ from api.types.admin import (
 from paperprocessor.client import get_processing_metrics_for_admin
 from papers.client import build_paper_slug
 from papers.models import Paper, PaperSlug
-from papers.db.models import PaperRecord, PaperSlugRecord
+from papers.db.models import PaperRecord, PaperSlugRecord, PaperStatusHistory
 from papers.client import get_paper_metadata
 from shared.arxiv.client import normalize_id, fetch_metadata, download_pdf
 from shared.db import get_session
@@ -357,7 +357,7 @@ def admin_get_processing_metrics(paper_uuid: str, _admin: bool = Depends(require
 def admin_get_cumulative_daily_papers(db: Session = Depends(get_session), _admin: bool = Depends(require_admin)):
     """
     Get cumulative daily count of papers from first paper to today.
-    Uses MySQL window function to calculate cumulative totals per status.
+    Uses historical snapshots for past dates and live inference for recent dates.
     Includes all dates in range, even days with zero papers.
     
     Returns:
@@ -366,66 +366,154 @@ def admin_get_cumulative_daily_papers(db: Session = Depends(get_session), _admin
     # Check if there are any papers first
     paper_count = db.query(func.count(PaperRecord.id)).scalar()
     if paper_count == 0:
+        logger.info("No papers found in database")
         return []
     
-    # Use raw SQL with recursive CTE to generate date series and calculate cumulative per status
-    # MySQL 8.0 supports recursive CTEs and window functions
-    query = text("""
+    # Get latest snapshot date from history table
+    # SQLAlchemy Date columns return date objects
+    latest_snapshot = db.query(func.max(PaperStatusHistory.date)).scalar()
+    latest_snapshot_date = latest_snapshot if latest_snapshot else None
+    
+    logger.info(f"Latest snapshot date: {latest_snapshot_date}, Total papers: {paper_count}")
+    
+    # Get earliest paper creation date
+    # MySQL DATE() function returns date objects via SQLAlchemy
+    earliest_date_result = db.execute(text("SELECT MIN(DATE(created_at)) FROM papers")).scalar()
+    earliest_date = earliest_date_result if earliest_date_result else None
+    
+    if earliest_date is None:
+        logger.info("No earliest date found")
+        return []
+    
+    logger.info(f"Earliest paper date: {earliest_date}")
+    
+    # Generate date series from earliest date to today
+    # Cast to DATE to ensure consistent return type
+    date_series_query = text("""
         WITH RECURSIVE date_series AS (
-            SELECT MIN(DATE(created_at)) AS date
-            FROM papers
+            SELECT CAST(:earliest_date AS DATE) AS date
             UNION ALL
             SELECT DATE_ADD(date, INTERVAL 1 DAY)
             FROM date_series
             WHERE date < CURDATE()
-        ),
-        daily_counts AS (
-            SELECT 
-                DATE(created_at) AS date,
-                COUNT(*) AS daily_count
-            FROM papers
-            GROUP BY DATE(created_at)
-        ),
-        daily_status_counts AS (
-            SELECT 
-                DATE(created_at) AS date,
-                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS daily_failed,
-                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS daily_processed,
-                SUM(CASE WHEN status = 'not_started' THEN 1 ELSE 0 END) AS daily_not_started,
-                SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS daily_processing
-            FROM papers
-            GROUP BY DATE(created_at)
         )
-        SELECT 
-            ds.date,
-            COALESCE(dc.daily_count, 0) AS daily_count,
-            SUM(COALESCE(dc.daily_count, 0)) OVER (ORDER BY ds.date) AS cumulative_count,
-            SUM(COALESCE(dsc.daily_failed, 0)) OVER (ORDER BY ds.date) AS cumulative_failed,
-            SUM(COALESCE(dsc.daily_processed, 0)) OVER (ORDER BY ds.date) AS cumulative_processed,
-            SUM(COALESCE(dsc.daily_not_started, 0)) OVER (ORDER BY ds.date) AS cumulative_not_started,
-            SUM(COALESCE(dsc.daily_processing, 0)) OVER (ORDER BY ds.date) AS cumulative_processing
-        FROM date_series ds
-        LEFT JOIN daily_counts dc ON ds.date = dc.date
-        LEFT JOIN daily_status_counts dsc ON ds.date = dsc.date
-        ORDER BY ds.date
+        SELECT CAST(date AS DATE) AS date FROM date_series ORDER BY date
     """)
     
-    result = db.execute(query)
-    rows = result.fetchall()
+    date_series_result = db.execute(date_series_query, {"earliest_date": earliest_date})
+    all_dates = [row[0] for row in date_series_result.fetchall()]
     
-    # Convert to response model
-    return [
-        CumulativeDailyPaperItem(
-            date=row.date.isoformat() if hasattr(row.date, 'isoformat') else str(row.date),
-            daily_count=int(row.daily_count),
-            cumulative_count=int(row.cumulative_count),
-            cumulative_failed=int(row.cumulative_failed),
-            cumulative_processed=int(row.cumulative_processed),
-            cumulative_not_started=int(row.cumulative_not_started),
-            cumulative_processing=int(row.cumulative_processing)
-        )
-        for row in rows
-    ]
+    result_items = []
+    history_count = 0
+    live_count = 0
+    
+    # Process dates: use history for past dates, live inference for recent dates
+    for target_date in all_dates:
+        # Normalize date: raw SQL with text() returns DATE columns as strings
+        if isinstance(target_date, datetime):
+            target_date_obj = target_date.date()
+        elif isinstance(target_date, date_type):
+            target_date_obj = target_date
+        elif isinstance(target_date, str):
+            # MySQL DATE columns are returned as strings when using raw SQL
+            target_date_obj = datetime.strptime(target_date.split()[0], '%Y-%m-%d').date()
+        else:
+            # Fallback: convert to string and parse
+            target_date_obj = datetime.strptime(str(target_date).split()[0], '%Y-%m-%d').date()
+        
+        target_date_str = target_date_obj.isoformat()
+        
+        # Use historical snapshot if available
+        if latest_snapshot_date and target_date_obj <= latest_snapshot_date:
+            snapshot = db.query(PaperStatusHistory).filter(
+                PaperStatusHistory.date == target_date_obj
+            ).first()
+            
+            if snapshot:
+                history_count += 1
+                # Calculate daily_count from previous day's total
+                prev_total = 0
+                if target_date_obj > earliest_date:
+                    prev_date = target_date_obj - timedelta(days=1)
+                    prev_snapshot = db.query(PaperStatusHistory).filter(
+                        PaperStatusHistory.date == prev_date
+                    ).first()
+                    if prev_snapshot:
+                        prev_total = prev_snapshot.total_count
+                    elif len(result_items) > 0:
+                        # Fallback to last result if no snapshot found
+                        prev_total = result_items[-1].cumulative_count
+                
+                daily_count = snapshot.total_count - prev_total
+                
+                result_items.append(CumulativeDailyPaperItem(
+                    date=target_date_str,
+                    daily_count=daily_count,
+                    cumulative_count=snapshot.total_count,
+                    cumulative_failed=snapshot.failed_count,
+                    cumulative_processed=snapshot.processed_count,
+                    cumulative_not_started=snapshot.not_started_count,
+                    cumulative_processing=snapshot.processing_count
+                ))
+                continue
+            else:
+                logger.warning(f"No snapshot found for date {target_date_str} (within snapshot range)")
+        
+        # Use live inference for dates after latest snapshot
+        # Calculate cumulative counts using timestamp inference
+        target_datetime = datetime.combine(target_date_obj, datetime.min.time())
+        live_query = text("""
+            SELECT 
+                COUNT(*) AS total_count,
+                SUM(CASE 
+                    WHEN (started_at IS NULL OR started_at > :target_datetime) THEN 1 
+                    ELSE 0 
+                END) AS not_started_count,
+                SUM(CASE 
+                    WHEN (started_at IS NOT NULL AND started_at <= :target_datetime 
+                          AND (finished_at IS NULL OR finished_at > :target_datetime)) THEN 1 
+                    ELSE 0 
+                END) AS processing_count,
+                SUM(CASE 
+                    WHEN (finished_at IS NOT NULL AND finished_at <= :target_datetime 
+                          AND error_message IS NOT NULL) THEN 1 
+                    ELSE 0 
+                END) AS failed_count,
+                SUM(CASE 
+                    WHEN (finished_at IS NOT NULL AND finished_at <= :target_datetime 
+                          AND error_message IS NULL) THEN 1 
+                    ELSE 0 
+                END) AS processed_count
+            FROM papers
+            WHERE DATE(created_at) <= :target_date
+        """)
+        
+        live_result = db.execute(live_query, {
+            "target_date": target_date_obj,
+            "target_datetime": target_datetime
+        }).first()
+        
+        if live_result:
+            # Calculate daily_count from previous day's total
+            prev_total = 0
+            if len(result_items) > 0:
+                prev_total = result_items[-1].cumulative_count
+            
+            daily_count = (live_result.total_count or 0) - prev_total
+            live_count += 1
+            
+            result_items.append(CumulativeDailyPaperItem(
+                date=target_date_str,
+                daily_count=daily_count,
+                cumulative_count=int(live_result.total_count or 0),
+                cumulative_failed=int(live_result.failed_count or 0),
+                cumulative_processed=int(live_result.processed_count or 0),
+                cumulative_not_started=int(live_result.not_started_count or 0),
+                cumulative_processing=int(live_result.processing_count or 0)
+            ))
+    
+    logger.info(f"Returning {len(result_items)} items: {history_count} from history, {live_count} from live inference")
+    return result_items
 
 
 
