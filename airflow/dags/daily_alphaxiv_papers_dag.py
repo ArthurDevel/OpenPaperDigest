@@ -18,15 +18,43 @@ from shared.db import SessionLocal
 from papers.models import ExternalPopularitySignal
 from papers.client import create_paper
 
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+
 
 ### CONSTANTS ###
-ALPHAXIV_API_URL = "https://api.alphaxiv.org/papers/v2/feed"
 ALPHAXIV_BASE_URL = "https://www.alphaxiv.org"
-PAGE_SIZE = 20  # Number of papers to fetch per page from API
-TIME_INTERVAL = "3 Days"  # Time window for hot papers
 
 
 ### HELPER FUNCTIONS ###
+
+def setup_driver():
+    """
+    Set up Selenium Chrome driver with headless options.
+
+    Returns:
+        webdriver.Chrome: Configured Chrome WebDriver instance
+    """
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+
+    # Point to system chromium binary
+    chrome_options.binary_location = "/usr/bin/chromium"
+
+    # Point to system chromedriver
+    service = Service(executable_path="/usr/bin/chromedriver")
+
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    return driver
+
 
 def fetch_paper_page_signals(arxiv_id: str) -> Optional[Dict[str, Any]]:
     """
@@ -127,19 +155,11 @@ def database_session():
             title="Time Interval",
             description="How far back in time to fetch hot papers from AlphaXiv."
         ),
-        "max_pages_to_check": Param(
-            type="integer",
-            default=10,
-            title="Max Pages to Check",
-            description="Maximum number of pages to fetch from AlphaXiv API before sorting and selecting top papers.",
-            minimum=1,
-            maximum=50
-        ),
         "papers_to_add": Param(
             type="integer",
             default=10,
             title="Number of Papers to Add",
-            description="The number of top papers to add to the processing queue.",
+            description="The number of top papers to scrape and add to the processing queue.",
             minimum=1,
             maximum=50
         )
@@ -147,105 +167,152 @@ def database_session():
     doc_md="""
     ### Daily AlphaXiv Papers DAG
 
-    This DAG fetches hot papers from AlphaXiv and adds the top N papers to the processing queue.
-    - Fetches papers sorted by "Hot" ranking from AlphaXiv API
-    - Extracts popularity signals (views, likes, comments)
+    This DAG scrapes hot papers from AlphaXiv homepage and adds the top N papers to the processing queue.
+    - Scrapes papers from AlphaXiv homepage using Selenium (API is no longer available)
+    - Extracts popularity signals (views, likes, comments) from individual paper pages
     - Adds top papers to the processing queue for summarization
-    - When run on its daily schedule, it fetches papers from the last 3 days.
-    - When run manually, you can customize the time interval (3, 7, 30, or 90 days) and number of papers to add.
+    - When run on its daily schedule, it fetches papers from the homepage.
+    - When run manually, you can customize the number of papers to add.
     """,
 )
 def daily_alphaxiv_papers_dag():
 
     @task
-    def fetch_hot_papers(time_interval: str, max_pages_to_check: int) -> List[Dict[str, Any]]:
+    def fetch_hot_papers(time_interval: str, papers_to_add: int) -> List[Dict[str, Any]]:
         """
-        Fetch hot papers from AlphaXiv API across multiple pages.
+        Scrape hot papers from AlphaXiv homepage using Selenium.
 
-        Since the API doesn't return papers in a guaranteed order, we fetch multiple
-        pages and will sort them later by popularity metrics.
-
-        Uses PAGE_SIZE constant defined at module level.
+        The API endpoint is no longer available (404), so we scrape the homepage
+        directly to extract paper IDs from the feed. Uses URL parameters to filter.
 
         Args:
             time_interval: Time window for fetching hot papers (e.g., "3 Days", "7 Days")
-            max_pages_to_check: Maximum number of pages to fetch from the API
+            papers_to_add: Number of papers to scrape from the homepage
 
         Returns:
-            List[Dict[str, Any]]: List of paper data from all fetched pages
+            List[Dict[str, Any]]: List of paper data with ArXiv IDs
 
         Raises:
-            Exception: If API call fails or returns invalid data
+            Exception: If scraping fails
         """
-        max_pages_to_check = int(max_pages_to_check)
-        print(f"Fetching hot papers from AlphaXiv")
-        print(f"  Time interval: {time_interval}, Page size: {PAGE_SIZE}")
-        print(f"  Max pages to check: {max_pages_to_check}")
-        print(f"  API URL: {ALPHAXIV_API_URL}")
+        papers_to_add = int(papers_to_add)
+        
+        # Format interval for URL (e.g., "3 Days" -> "3+Days")
+        interval_param = time_interval.replace(" ", "+")
+        url = f"{ALPHAXIV_BASE_URL}/?sort=Hot&interval={interval_param}"
+        
+        print(f"Scraping hot papers from AlphaXiv homepage")
+        print(f"  URL: {url}")
+        print(f"  Time interval: {time_interval}")
+        print(f"  Papers to fetch: {papers_to_add}")
 
-        all_papers = []
-        page_num = 1
+        driver = setup_driver()
 
-        while page_num <= max_pages_to_check:
-            params = {
-                "pageNum": page_num,
-                "sortBy": "Hot",
-                "pageSize": PAGE_SIZE,
-                "interval": time_interval
-            }
+        try:
+            driver.get(url)
+            print("Page loaded, waiting for content to render...")
 
-            print(f"Fetching page {page_num}/{max_pages_to_check}...")
+            # Wait for body to load
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            print("Body element found!")
 
-            try:
-                response = requests.get(ALPHAXIV_API_URL, params=params, timeout=30)
-                response.raise_for_status()
-            except requests.exceptions.RequestException as e:
-                raise Exception(f"Failed to fetch papers from AlphaXiv API (page {page_num}): {e}")
+            # Give it time for JavaScript rendering
+            time.sleep(10)
 
-            try:
-                response_data = response.json()
-            except ValueError as e:
-                raise Exception(f"Invalid JSON response from AlphaXiv API (page {page_num}): {e}")
+            print("Looking for paper links...")
 
-            # Extract papers array from response
-            papers_on_page = response_data.get('papers', [])
+            # Find all paper links on homepage
+            links = driver.find_elements(By.CSS_SELECTOR, "a[href*='/abs/']")
 
-            # If no papers on this page, we've reached the end
-            if not papers_on_page:
-                print(f"No papers found on page {page_num}, stopping pagination")
-                break
+            print(f"Found {len(links)} potential paper links")
 
-            all_papers.extend(papers_on_page)
-            print(f"  Fetched {len(papers_on_page)} papers from page {page_num} (total so far: {len(all_papers)})")
+            # Extract unique paper IDs
+            papers = []
+            seen_ids = set()
 
-            page_num += 1
+            for link in links:
+                if len(papers) >= papers_to_add:
+                    break
 
-            # Rate limit: wait 1 second before next API call (unless we're done)
-            if page_num <= max_pages_to_check and papers_on_page:
-                time.sleep(1)
+                href = link.get_attribute('href')
+                if href and '/abs/' in href:
+                    # Extract ArXiv ID
+                    parts = href.split('/abs/')
+                    if len(parts) > 1:
+                        arxiv_id = parts[1].split('?')[0]  # Remove query params
 
-        if not all_papers:
-            print(f"No papers found in AlphaXiv response")
-            return []  # Return empty list to allow DAG to complete gracefully
+                        if arxiv_id and arxiv_id not in seen_ids:
+                            seen_ids.add(arxiv_id)
 
-        print(f"\nSuccessfully fetched {len(all_papers)} total papers from {page_num - 1} page(s)")
+                            # Try to extract title from link text
+                            title = None
+                            try:
+                                text = link.text.strip()
+                                if text and len(text) > 10:
+                                    title = text
+                            except:
+                                pass
 
-        # Sort papers by popularity metrics (views, likes, public votes)
-        # Prioritize: public_total_votes > likes > views
-        def get_popularity_score(paper: Dict[str, Any]) -> tuple:
-            metrics = paper.get('metrics', {})
-            public_votes = metrics.get('public_total_votes', 0)
-            visits = metrics.get('visits_count', {})
-            views = visits.get('all', 0) if isinstance(visits, dict) else 0
+                            # Extract metrics from the paper container using SVG identifiers
+                            likes = 0
+                            views = 0
+                            
+                            try:
+                                # Find the parent container (the paper card)
+                                container = driver.execute_script(
+                                    "return arguments[0].closest('div[class*=\"mb-\"]');",
+                                    link
+                                )
+                                
+                                if container:
+                                    # Extract LIKES - button with lucide-thumbs-up SVG
+                                    try:
+                                        thumbs_up_button = container.find_element(By.XPATH, ".//button[.//svg[contains(@class, 'lucide-thumbs-up')]]")
+                                        likes_element = thumbs_up_button.find_element(By.CSS_SELECTOR, "p")
+                                        likes = int(likes_element.text.replace(',', ''))
+                                    except:
+                                        pass
+                                    
+                                    # Extract VIEWS - div with lucide-chart-no-axes-column SVG
+                                    try:
+                                        chart_div = container.find_element(By.XPATH, ".//div[.//svg[contains(@class, 'lucide-chart-no-axes-column')]]")
+                                        # Get text content, it's between the two SVGs
+                                        views_text = chart_div.text.strip()
+                                        # Parse the number (format: "1,609" with trailing icon)
+                                        import re
+                                        match = re.search(r'([\d,]+)', views_text)
+                                        if match:
+                                            views = int(match.group(1).replace(',', ''))
+                                    except:
+                                        pass
+                            except Exception as e:
+                                print(f"  Warning: Could not extract metrics for {arxiv_id}: {e}")
 
-            # Get likes from the paper page (we'll fetch these later, for now use 0)
-            # For sorting purposes, we'll use public_votes as primary metric
-            return (public_votes, views)
+                            papers.append({
+                                'universal_paper_id': arxiv_id,
+                                'title': title,
+                                'id': arxiv_id,
+                                'metrics': {
+                                    'public_total_votes': likes,  # Using likes as votes
+                                    'total_votes': likes,
+                                    'visits_count': {'all': views}
+                                }
+                            })
 
-        sorted_papers = sorted(all_papers, key=get_popularity_score, reverse=True)
-        print(f"Sorted {len(sorted_papers)} papers by popularity (public_votes, views)")
+                            print(f"  Found paper {len(papers)}/{papers_to_add}: {arxiv_id} (likes: {likes}, views: {views})")
 
-        return sorted_papers
+            if not papers:
+                print("Warning: No papers found!")
+                return []
+
+            print(f"\nSuccessfully scraped {len(papers)} papers from AlphaXiv homepage")
+            return papers
+
+        finally:
+            driver.quit()
+            print("Browser closed")
 
     @task
     def print_papers_info(papers_data: List[Dict[str, Any]], papers_to_add: int) -> None:
@@ -352,11 +419,7 @@ def daily_alphaxiv_papers_dag():
                     # Create popularity signal with data from paper page
                     alphaxiv_signal = ExternalPopularitySignal(
                         source="AlphaXiv",
-                        values={
-                            "views": page_signals['views'],
-                            "likes": page_signals['likes'],
-                            "comments": page_signals['comments']
-                        },
+                        values={},
                         fetch_info={
                             "alphaxiv_paper_id": paper.get('id'),
                             "paper_group_id": paper.get('paper_group_id'),
@@ -401,10 +464,9 @@ def daily_alphaxiv_papers_dag():
 
     # Define task dependencies
     interval = "{{ params.time_interval }}"
-    max_pages = "{{ params.max_pages_to_check }}"
     num_papers = "{{ params.papers_to_add }}"
 
-    papers = fetch_hot_papers(time_interval=interval, max_pages_to_check=max_pages)
+    papers = fetch_hot_papers(time_interval=interval, papers_to_add=num_papers)
     print_papers_info(papers, papers_to_add=num_papers)
     add_top_papers_to_queue(papers, papers_to_add=num_papers)
 
