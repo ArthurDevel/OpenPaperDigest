@@ -26,7 +26,8 @@ from users.client import set_requests_processed
 
 ### CONSTANTS ###
 
-MAX_PDF_PAGES = 50
+MAX_PDF_PAGES = 70
+MAX_PAPERS_PER_RUN = 10
 
 
 ### DATA STRUCTURES ###
@@ -135,7 +136,7 @@ def _claim_next_job(session: Session) -> Optional[JobInfo]:
             """
             SELECT id FROM papers
             WHERE status = 'not_started'
-            ORDER BY created_at ASC
+            ORDER BY RAND()
             LIMIT 1
             FOR UPDATE SKIP LOCKED
             """
@@ -242,16 +243,17 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
 @dag(
     dag_id="paper_processing_worker",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
-    schedule="*/2 * * * *",  # Every 2 minutes
+    schedule="0 2,14 * * *",  # Twice daily at 2 AM and 2 PM UTC
     catchup=False,
     max_active_runs=1,  # Prevent overlapping runs
     tags=["papers", "worker"],
     doc_md="""
     ### Paper Processing Worker DAG
 
-    This DAG continuously processes papers from the queue that are in 'not_started' status.
+    This DAG processes papers from the queue that are in 'not_started' status.
 
-    - Runs every 2 minutes to check for new papers
+    - Runs twice daily at 2 AM and 2 PM UTC
+    - Processes up to 10 papers per run (randomly selected)
     - Processes papers through simplified pipeline: PDF download → OCR → metadata extraction → summary generation → saving → slug creation
     - Uses database locking to prevent race conditions
     - Handles errors gracefully and marks failed jobs
@@ -275,7 +277,7 @@ def paper_processing_worker_dag():
         
         print("Checking for papers to process...")
         
-        while True:
+        while processed_count + failed_count < MAX_PAPERS_PER_RUN:
             # Step 1: Try to claim next available job
             with database_session() as session:
                 next_job = _claim_next_job(session)
