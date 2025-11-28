@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { X, Bell } from 'lucide-react';
 import { countPapersSince } from '../services/api';
 import { getLastVisitTimestamp, setLastVisitTimestamp } from '../utils/lastVisitStorage';
 
@@ -74,22 +74,29 @@ export default function NewPapersBanner() {
   }
 
   return (
-    <div className="w-full bg-indigo-600 dark:bg-indigo-700 text-white px-4 sm:px-6 lg:px-10 py-3 flex items-center justify-between">
-      <div className="flex-1 text-sm">
-        {count === 1 ? (
-          <span>1 new paper added since you last opened from this device</span>
-        ) : (
-          <span>{count} new papers added since you last opened from this device</span>
-        )}
+    <div className="mb-6 w-full bg-blue-50 dark:bg-slate-800 border border-blue-100 dark:border-blue-800 rounded-lg p-4 flex items-start gap-3 shadow-sm transition-all">
+      <div className="flex-shrink-0 text-blue-600 dark:text-blue-400 mt-0.5">
+        <Bell size={20} />
+      </div>
+      <div className="flex-1 pt-0.5">
+        <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+          New Papers Available
+        </p>
+        <p className="text-sm text-blue-600 dark:text-blue-300 mt-0.5">
+          {count === 1 ? (
+            <span>1 new paper has been added since your last visit.</span>
+          ) : (
+            <span>{count} new papers have been added since your last visit.</span>
+          )}
+        </p>
       </div>
       <button
         onClick={handleDismiss}
-        className="ml-4 flex-shrink-0 inline-flex items-center justify-center p-1 rounded-md hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors"
+        className="flex-shrink-0 -mr-1 -mt-1 p-1.5 rounded-md text-blue-500 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-slate-700 transition-colors"
         aria-label="Dismiss banner"
       >
-        <X size={18} />
+        <X size={16} />
       </button>
     </div>
   );
 }
-

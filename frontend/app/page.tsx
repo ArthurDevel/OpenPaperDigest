@@ -230,8 +230,8 @@ export default function ScrollingPapersPage() {
 
   return (
     <main className="w-full">
-      <NewPapersBanner />
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <NewPapersBanner />
         <div className="mb-4">
           <h1 className="text-3xl font-bold">Papers Feed</h1>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
