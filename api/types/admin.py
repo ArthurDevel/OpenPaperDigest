@@ -37,3 +37,9 @@ class ImportResult(BaseModel):
     status: str
 
 
+class CumulativeDailyPaperItem(BaseModel):
+    date: str
+    daily_count: int
+    cumulative_count: int
+
+

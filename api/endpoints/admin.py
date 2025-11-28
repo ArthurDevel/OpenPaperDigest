@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy import func, text
 
 from api.types.paper_processing_endpoints import JobDbStatus
 from api.types.admin import (
@@ -14,6 +15,7 @@ from api.types.admin import (
     DeleteRequestedResponse,
     RestartPaperRequest,
     ImportResult,
+    CumulativeDailyPaperItem,
 )
 from paperprocessor.client import get_processing_metrics_for_admin
 from papers.client import build_paper_slug
@@ -348,6 +350,63 @@ def admin_get_processing_metrics(paper_uuid: str, _admin: bool = Depends(require
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     except RuntimeError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+
+# --- Admin: cumulative daily papers count ---
+@router.get("/admin/papers/cumulative_daily", response_model=List[CumulativeDailyPaperItem])
+def admin_get_cumulative_daily_papers(db: Session = Depends(get_session), _admin: bool = Depends(require_admin)):
+    """
+    Get cumulative daily count of papers from first paper to today.
+    Uses MySQL window function to calculate cumulative totals.
+    Includes all dates in range, even days with zero papers.
+    
+    Returns:
+        List of daily data with date, daily_count, and cumulative_count
+    """
+    # Check if there are any papers first
+    paper_count = db.query(func.count(PaperRecord.id)).scalar()
+    if paper_count == 0:
+        return []
+    
+    # Use raw SQL with recursive CTE to generate date series and calculate cumulative
+    # MySQL 8.0 supports recursive CTEs and window functions
+    query = text("""
+        WITH RECURSIVE date_series AS (
+            SELECT MIN(DATE(created_at)) AS date
+            FROM papers
+            UNION ALL
+            SELECT DATE_ADD(date, INTERVAL 1 DAY)
+            FROM date_series
+            WHERE date < CURDATE()
+        ),
+        daily_counts AS (
+            SELECT 
+                DATE(created_at) AS date,
+                COUNT(*) AS daily_count
+            FROM papers
+            GROUP BY DATE(created_at)
+        )
+        SELECT 
+            ds.date,
+            COALESCE(dc.daily_count, 0) AS daily_count,
+            SUM(COALESCE(dc.daily_count, 0)) OVER (ORDER BY ds.date) AS cumulative_count
+        FROM date_series ds
+        LEFT JOIN daily_counts dc ON ds.date = dc.date
+        ORDER BY ds.date
+    """)
+    
+    result = db.execute(query)
+    rows = result.fetchall()
+    
+    # Convert to response model
+    return [
+        CumulativeDailyPaperItem(
+            date=row.date.isoformat() if hasattr(row.date, 'isoformat') else str(row.date),
+            daily_count=int(row.daily_count),
+            cumulative_count=int(row.cumulative_count)
+        )
+        for row in rows
+    ]
 
 
 
