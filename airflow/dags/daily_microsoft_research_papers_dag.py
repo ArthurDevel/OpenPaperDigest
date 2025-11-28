@@ -22,6 +22,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import WebDriverException
 import re
 
 
@@ -112,6 +113,32 @@ def compute_pdf_hash(pdf_url: str) -> str:
     return pdf_hash
 
 
+def close_extra_tabs(driver):
+    """
+    Close any extra tabs opened by pages, keeping only the main tab.
+
+    Args:
+        driver: Selenium WebDriver instance
+    """
+    try:
+        window_handles = driver.window_handles
+        if len(window_handles) > 1:
+            # Switch to main tab (first one)
+            main_tab = window_handles[0]
+            driver.switch_to.window(main_tab)
+            
+            # Close all other tabs
+            for handle in window_handles[1:]:
+                driver.switch_to.window(handle)
+                driver.close()
+            
+            # Switch back to main tab
+            driver.switch_to.window(main_tab)
+    except Exception:
+        # If driver is crashed or unusable, ignore
+        pass
+
+
 def scrape_individual_publication(driver, pub_url: str, index: int) -> Optional[Dict[str, Any]]:
     """
     Visit an individual publication page and extract paper link from Related Resources sidebar.
@@ -127,21 +154,28 @@ def scrape_individual_publication(driver, pub_url: str, index: int) -> Optional[
     try:
         driver.get(pub_url)
         time.sleep(2)
+        
+        # Close any extra tabs opened by the page
+        close_extra_tabs(driver)
 
         # Extract title
         title = None
         try:
             title_element = driver.find_element(By.CSS_SELECTOR, "h1")
             title = title_element.text.strip()
-        except:
-            title = driver.title
+        except Exception:
+            try:
+                title = driver.title
+            except Exception:
+                # Driver might be crashed, will be caught below
+                pass
 
         # Extract publication date
         pub_date = None
         try:
             date_element = driver.find_element(By.CSS_SELECTOR, ".date, .publication-date, time")
             pub_date = date_element.text.strip()
-        except:
+        except Exception:
             pass
 
         # Look for paper link in the "Related resources" sidebar ONLY
@@ -206,6 +240,14 @@ def scrape_individual_publication(driver, pub_url: str, index: int) -> Optional[
 
         return pub_data
 
+    except WebDriverException as e:
+        # Check if this is a tab crash
+        if "tab crashed" in str(e).lower():
+            print(f"  Tab crashed while scraping publication {index}, skipping")
+            return None
+        # Re-raise other WebDriverExceptions
+        print(f"  Error scraping publication {index}: {e}")
+        raise
     except Exception as e:
         print(f"  Error scraping publication {index}: {e}")
         raise
@@ -321,6 +363,9 @@ def daily_microsoft_research_papers_dag():
                 print(f"\n--- Page {current_page}: {page_url} ---")
                 driver.get(page_url)
                 time.sleep(3)
+                
+                # Close any extra tabs opened by the page
+                close_extra_tabs(driver)
 
                 # Extract publication URLs from current page
                 publication_links = []
