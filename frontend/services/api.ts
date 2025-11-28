@@ -268,6 +268,10 @@ export type CumulativeDailyPaperItem = {
     date: string;
     daily_count: number;
     cumulative_count: number;
+    cumulative_failed: number;
+    cumulative_processed: number;
+    cumulative_not_started: number;
+    cumulative_processing: number;
 };
 
 export const getCumulativeDailyPapers = async (): Promise<CumulativeDailyPaperItem[]> => {

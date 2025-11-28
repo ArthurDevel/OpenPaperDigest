@@ -53,7 +53,19 @@ export default function PapersOverviewPage() {
             Daily: <span className="font-medium">{data.daily_count}</span>
           </p>
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Cumulative: <span className="font-medium">{data.cumulative_count}</span>
+            Total: <span className="font-medium">{data.cumulative_count}</span>
+          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Processed: <span className="font-medium">{data.cumulative_processed}</span>
+          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Failed: <span className="font-medium">{data.cumulative_failed}</span>
+          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Processing: <span className="font-medium">{data.cumulative_processing}</span>
+          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Not Started: <span className="font-medium">{data.cumulative_not_started}</span>
           </p>
         </div>
       );
@@ -120,7 +132,39 @@ export default function PapersOverviewPage() {
                 stroke="#3b82f6"
                 strokeWidth={2}
                 dot={false}
-                name="Cumulative Total"
+                name="Total"
+              />
+              <Line
+                type="monotone"
+                dataKey="cumulative_failed"
+                stroke="#fca5a5"
+                strokeWidth={2}
+                dot={false}
+                name="Failed"
+              />
+              <Line
+                type="monotone"
+                dataKey="cumulative_processed"
+                stroke="#4ade80"
+                strokeWidth={2}
+                dot={false}
+                name="Processed"
+              />
+              <Line
+                type="monotone"
+                dataKey="cumulative_not_started"
+                stroke="#d1d5db"
+                strokeWidth={2}
+                dot={false}
+                name="Not Started"
+              />
+              <Line
+                type="monotone"
+                dataKey="cumulative_processing"
+                stroke="#f97316"
+                strokeWidth={2}
+                dot={false}
+                name="Processing"
               />
             </LineChart>
           </ResponsiveContainer>

@@ -41,5 +41,9 @@ class CumulativeDailyPaperItem(BaseModel):
     date: str
     daily_count: int
     cumulative_count: int
+    cumulative_failed: int
+    cumulative_processed: int
+    cumulative_not_started: int
+    cumulative_processing: int
 
 

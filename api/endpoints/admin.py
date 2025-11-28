@@ -357,18 +357,18 @@ def admin_get_processing_metrics(paper_uuid: str, _admin: bool = Depends(require
 def admin_get_cumulative_daily_papers(db: Session = Depends(get_session), _admin: bool = Depends(require_admin)):
     """
     Get cumulative daily count of papers from first paper to today.
-    Uses MySQL window function to calculate cumulative totals.
+    Uses MySQL window function to calculate cumulative totals per status.
     Includes all dates in range, even days with zero papers.
     
     Returns:
-        List of daily data with date, daily_count, and cumulative_count
+        List of daily data with date, daily_count, cumulative_count, and cumulative counts per status
     """
     # Check if there are any papers first
     paper_count = db.query(func.count(PaperRecord.id)).scalar()
     if paper_count == 0:
         return []
     
-    # Use raw SQL with recursive CTE to generate date series and calculate cumulative
+    # Use raw SQL with recursive CTE to generate date series and calculate cumulative per status
     # MySQL 8.0 supports recursive CTEs and window functions
     query = text("""
         WITH RECURSIVE date_series AS (
@@ -385,13 +385,28 @@ def admin_get_cumulative_daily_papers(db: Session = Depends(get_session), _admin
                 COUNT(*) AS daily_count
             FROM papers
             GROUP BY DATE(created_at)
+        ),
+        daily_status_counts AS (
+            SELECT 
+                DATE(created_at) AS date,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS daily_failed,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS daily_processed,
+                SUM(CASE WHEN status = 'not_started' THEN 1 ELSE 0 END) AS daily_not_started,
+                SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS daily_processing
+            FROM papers
+            GROUP BY DATE(created_at)
         )
         SELECT 
             ds.date,
             COALESCE(dc.daily_count, 0) AS daily_count,
-            SUM(COALESCE(dc.daily_count, 0)) OVER (ORDER BY ds.date) AS cumulative_count
+            SUM(COALESCE(dc.daily_count, 0)) OVER (ORDER BY ds.date) AS cumulative_count,
+            SUM(COALESCE(dsc.daily_failed, 0)) OVER (ORDER BY ds.date) AS cumulative_failed,
+            SUM(COALESCE(dsc.daily_processed, 0)) OVER (ORDER BY ds.date) AS cumulative_processed,
+            SUM(COALESCE(dsc.daily_not_started, 0)) OVER (ORDER BY ds.date) AS cumulative_not_started,
+            SUM(COALESCE(dsc.daily_processing, 0)) OVER (ORDER BY ds.date) AS cumulative_processing
         FROM date_series ds
         LEFT JOIN daily_counts dc ON ds.date = dc.date
+        LEFT JOIN daily_status_counts dsc ON ds.date = dsc.date
         ORDER BY ds.date
     """)
     
@@ -403,7 +418,11 @@ def admin_get_cumulative_daily_papers(db: Session = Depends(get_session), _admin
         CumulativeDailyPaperItem(
             date=row.date.isoformat() if hasattr(row.date, 'isoformat') else str(row.date),
             daily_count=int(row.daily_count),
-            cumulative_count=int(row.cumulative_count)
+            cumulative_count=int(row.cumulative_count),
+            cumulative_failed=int(row.cumulative_failed),
+            cumulative_processed=int(row.cumulative_processed),
+            cumulative_not_started=int(row.cumulative_not_started),
+            cumulative_processing=int(row.cumulative_processing)
         )
         for row in rows
     ]
