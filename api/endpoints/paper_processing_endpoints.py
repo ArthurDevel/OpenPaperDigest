@@ -233,6 +233,39 @@ def list_minimal_papers(
     return result
 
 
+class CountPapersSinceResponse(BaseModel):
+    count: int
+
+
+@router.get("/papers/count_since", response_model=CountPapersSinceResponse)
+def count_papers_since(since: str, db: Session = Depends(get_session)):
+    """
+    Counts completed papers created after the given timestamp.
+    
+    Args:
+        since: ISO timestamp string (e.g., "2025-01-20T10:30:00.000Z")
+        db: Database session
+        
+    Returns:
+        Count of completed papers with created_at > since
+    """
+    try:
+        # Parse ISO timestamp and convert to naive UTC datetime for database comparison
+        since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+        # Database stores naive UTC datetimes, so convert timezone-aware to naive UTC
+        if since_dt.tzinfo is not None:
+            since_dt = since_dt.replace(tzinfo=None)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Invalid timestamp format. Expected ISO format.")
+    
+    count = db.query(PaperRecord).filter(
+        PaperRecord.status == "completed",
+        PaperRecord.created_at > since_dt
+    ).count()
+    
+    return CountPapersSinceResponse(count=count)
+
+
 
 
 

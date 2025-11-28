@@ -148,6 +148,21 @@ export const listMinimalPapersPaginated = async (page: number, limit: number): P
     return response.json();
 }
 
+export type CountPapersSinceResponse = {
+    count: number;
+};
+
+export const countPapersSince = async (since: string): Promise<CountPapersSinceResponse> => {
+    const url = new URL(`${API_URL}/papers/count_since`, window.location.origin);
+    url.searchParams.set('since', since);
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+    return response.json();
+}
+
 export const fetchPaperMarkdown = async (paperUuid: string): Promise<string> => {
     const response = await fetch(`${API_URL}/papers/${paperUuid}/markdown`);
     if (!response.ok) {
