@@ -110,12 +110,12 @@ def extract_arxiv_id_from_path(path: str) -> Optional[str]:
 def daily_huggingface_trending_papers_dag():
     
     @task
-    def fetch_trending_papers(max_papers: int) -> List[Dict[str, Any]]:
+    def fetch_trending_papers(**context) -> List[Dict[str, Any]]:
         """
         Scrape trending papers from Hugging Face trending page.
         
         Args:
-            max_papers: Maximum number of papers to scrape
+            **context: Airflow context containing params
             
         Returns:
             List[Dict[str, Any]]: List of paper data from the trending page
@@ -123,6 +123,7 @@ def daily_huggingface_trending_papers_dag():
         Raises:
             Exception: If scraping fails or returns invalid data
         """
+        max_papers = int(context["params"]["max_papers"])
         print(f"Fetching trending papers page: {HUGGINGFACE_TRENDING_URL}")
         
         headers = {
@@ -370,9 +371,7 @@ def daily_huggingface_trending_papers_dag():
             print(f"===========================\n")
         
     # Define task dependencies
-    max_papers_param = "{{ params.max_papers }}"
-
-    papers = fetch_trending_papers(max_papers=max_papers_param)
+    papers = fetch_trending_papers()
     print_papers_info(papers)
     add_papers_to_queue(papers)
 
