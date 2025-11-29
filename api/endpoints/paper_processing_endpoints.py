@@ -240,14 +240,14 @@ class CountPapersSinceResponse(BaseModel):
 @router.get("/papers/count_since", response_model=CountPapersSinceResponse)
 def count_papers_since(since: str, db: Session = Depends(get_session)):
     """
-    Counts completed papers created after the given timestamp.
+    Counts completed papers processed after the given timestamp.
     
     Args:
         since: ISO timestamp string (e.g., "2025-01-20T10:30:00.000Z")
         db: Database session
         
     Returns:
-        Count of completed papers with created_at > since
+        Count of completed papers with finished_at > since
     """
     try:
         # Parse ISO timestamp and convert to naive UTC datetime for database comparison
@@ -260,7 +260,7 @@ def count_papers_since(since: str, db: Session = Depends(get_session)):
     
     count = db.query(PaperRecord).filter(
         PaperRecord.status == "completed",
-        PaperRecord.created_at > since_dt
+        PaperRecord.finished_at > since_dt
     ).count()
     
     return CountPapersSinceResponse(count=count)
