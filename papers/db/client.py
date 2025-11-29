@@ -110,7 +110,7 @@ def list_paper_records(db: Session, statuses: Optional[List[str]], limit: int, o
     q = db.query(PaperRecord).options(defer(PaperRecord.processed_content))
     if statuses:
         q = q.filter(PaperRecord.status.in_(statuses))
-    q = q.order_by(PaperRecord.created_at.desc()).limit(max(1, min(limit, 1000))).offset(offset)
+    q = q.order_by(PaperRecord.finished_at.desc()).limit(max(1, min(limit, 1000))).offset(offset)
     return q.all()
 
 
