@@ -59,7 +59,7 @@ def database_session():
         ),
         "papers_to_add": Param(
             type="integer",
-            default=10,
+            default=20,
             title="Number of Papers to Add",
             description="The number of top papers to add to the processing queue.",
             minimum=1,
