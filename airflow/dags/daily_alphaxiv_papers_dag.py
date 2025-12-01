@@ -56,6 +56,39 @@ def setup_driver():
     return driver
 
 
+def fetch_title_from_paper_page(arxiv_id: str) -> Optional[str]:
+    """
+    Fetch title from h1 tag on AlphaXiv paper page.
+
+    Args:
+        arxiv_id: The arXiv ID (universal_paper_id) of the paper
+
+    Returns:
+        Title string or None if fetch fails
+    """
+    paper_url = f"{ALPHAXIV_BASE_URL}/abs/{arxiv_id}"
+
+    try:
+        response = requests.get(paper_url, timeout=10)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"  Warning: Failed to fetch paper page for {arxiv_id}: {e}")
+        return None
+
+    # Extract title from h1 tag
+    match = re.search(r'<h1[^>]*>(.+?)</h1>', response.text, re.DOTALL | re.IGNORECASE)
+
+    if not match:
+        print(f"  Warning: Could not find h1 tag for {arxiv_id}")
+        return None
+
+    # Clean up HTML tags and whitespace
+    title = match.group(1)
+    title = re.sub(r'<[^>]+>', '', title).strip()
+
+    return title if title else None
+
+
 def fetch_paper_page_signals(arxiv_id: str) -> Optional[Dict[str, Any]]:
     """
     Fetch popularity signals from individual AlphaXiv paper page.
@@ -401,6 +434,11 @@ def daily_alphaxiv_papers_dag():
                     # For now, we'll use None and let it be filled in later during processing
                     authors_str = None
                     title = paper.get('title')
+
+                    # If title is missing from homepage scraping, fetch it from the paper page
+                    if not title:
+                        print(f"  Title missing from homepage, fetching from paper page...")
+                        title = fetch_title_from_paper_page(arxiv_id)
 
                     if not title:
                         print(f"Skipping {arxiv_id} - no title found")
