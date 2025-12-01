@@ -93,7 +93,7 @@ def fetch_paper_page_signals(arxiv_id: str) -> Optional[Dict[str, Any]]:
     """
     Fetch popularity signals from individual AlphaXiv paper page.
 
-    Extracts data from the JSON-LD script tag on the paper detail page,
+    Extracts data from dehydrated React Query data in the HTML,
     which contains view counts, like counts, and comment counts.
 
     Args:
@@ -111,37 +111,41 @@ def fetch_paper_page_signals(arxiv_id: str) -> Optional[Dict[str, Any]]:
         print(f"  Warning: Failed to fetch paper page for {arxiv_id}: {e}")
         return None
 
-    # Extract JSON-LD data from the page
-    match = re.search(
-        r'<script data-alphaxiv-id="json-ld-paper-detail-view" type="application/ld\+json">(.+?)</script>',
-        response.text
-    )
+    html = response.text
 
-    if not match:
-        print(f"  Warning: Could not find JSON-LD data for {arxiv_id}")
+    # Extract metrics from dehydrated React Query data
+    # Pattern: metrics:$R[number]={questions_count:X,upvotes_count:Y,...,visits_count:$R[number]={...,all:Z}}
+    metrics_pattern = r'metrics:\$R\[\d+\]=(\{[^}]+\})'
+    metrics_match = re.search(metrics_pattern, html)
+
+    if not metrics_match:
+        print(f"  Warning: Could not find metrics data for {arxiv_id}")
         return None
 
-    try:
-        json_ld = json.loads(match.group(1))
-    except json.JSONDecodeError as e:
-        print(f"  Warning: Failed to parse JSON-LD for {arxiv_id}: {e}")
-        return None
-
-    # Extract interaction statistics
-    interaction_stats = json_ld.get('interactionStatistic', [])
+    metrics_str = metrics_match.group(1)
     views = 0
     likes = 0
+    comments = 0
 
-    for stat in interaction_stats:
-        interaction_type = stat.get('interactionType', {}).get('@type', '')
-        count = stat.get('userInteractionCount', 0)
+    # Extract upvotes_count (likes)
+    upvotes_match = re.search(r'upvotes_count:(\d+)', metrics_str)
+    if upvotes_match:
+        likes = int(upvotes_match.group(1))
 
-        if interaction_type == 'ViewAction':
-            views = count
-        elif interaction_type == 'LikeAction':
-            likes = count
+    # Extract questions_count (comments)
+    questions_match = re.search(r'questions_count:(\d+)', metrics_str)
+    if questions_match:
+        comments = int(questions_match.group(1))
 
-    comments = json_ld.get('commentCount', 0)
+    # Extract visits_count.all (views)
+    # Pattern: visits_count:$R[number]={...,all:number}
+    visits_pattern = r'visits_count:\$R\[\d+\]=(\{[^}]+\})'
+    visits_match = re.search(visits_pattern, html)
+    if visits_match:
+        visits_str = visits_match.group(1)
+        all_match = re.search(r'all:(\d+)', visits_str)
+        if all_match:
+            views = int(all_match.group(1))
 
     return {
         'views': views,
