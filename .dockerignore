@@ -28,3 +28,7 @@ publaynet_model.pth
 
 data/
 testscripts/
+
+# Logs
+logs/
+airflow/logs/
