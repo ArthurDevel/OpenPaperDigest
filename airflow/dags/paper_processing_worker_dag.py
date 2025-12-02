@@ -5,7 +5,7 @@ import asyncio
 import fitz  # PyMuPDF
 from datetime import datetime
 from contextlib import contextmanager
-from typing import Optional, NamedTuple
+from typing import Optional, NamedTuple, List, Dict, Any
 
 from airflow.decorators import dag, task
 from sqlalchemy import text
@@ -24,13 +24,18 @@ from paperprocessor.models import ProcessedDocument
 from users.client import set_requests_processed
 
 
-### CONSTANTS ###
+# ============================================================================
+# CONSTANTS
+# ============================================================================
 
 MAX_PDF_PAGES = 70
 MAX_PAPERS_PER_RUN = 10
+MAX_PARALLEL_TASKS = 10
 
 
-### DATA STRUCTURES ###
+# ============================================================================
+# DATA STRUCTURES
+# ============================================================================
 
 class JobInfo(NamedTuple):
     """Simple data structure for job information (avoids SQLAlchemy session issues)."""
@@ -39,9 +44,45 @@ class JobInfo(NamedTuple):
     arxiv_id: Optional[str]
     arxiv_url: Optional[str]
     pdf_url: Optional[str]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert JobInfo to dictionary for Airflow task serialization.
+        
+        Returns:
+            Dict[str, Any]: Dictionary containing all job information fields
+        """
+        return {
+            "id": self.id,
+            "paper_uuid": self.paper_uuid,
+            "arxiv_id": self.arxiv_id,
+            "arxiv_url": self.arxiv_url,
+            "pdf_url": self.pdf_url
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "JobInfo":
+        """
+        Create JobInfo instance from dictionary.
+        
+        Args:
+            data: Dictionary containing job information fields
+            
+        Returns:
+            JobInfo: JobInfo instance created from dictionary data
+        """
+        return cls(
+            id=data["id"],
+            paper_uuid=data["paper_uuid"],
+            arxiv_id=data.get("arxiv_id"),
+            arxiv_url=data.get("arxiv_url"),
+            pdf_url=data.get("pdf_url")
+        )
 
 
-### DATABASE HELPERS ###
+# ============================================================================
+# DATABASE HELPERS
+# ============================================================================
 
 @contextmanager
 def database_session():
@@ -65,7 +106,9 @@ def database_session():
         session.close()
 
 
-### PAPER PROCESSING FUNCTIONS ###
+# ============================================================================
+# PAPER PROCESSING FUNCTIONS
+# ============================================================================
 
 async def _download_and_process_paper(job: JobInfo) -> ProcessedDocument:
     """
@@ -172,6 +215,28 @@ def _claim_next_job(session: Session) -> Optional[JobInfo]:
     return job_info
 
 
+def _claim_available_jobs(session: Session, max_jobs: int) -> List[JobInfo]:
+    """
+    Claim multiple available paper jobs using database locking.
+    
+    Args:
+        session: Active database session
+        max_jobs: Maximum number of jobs to claim
+        
+    Returns:
+        List[JobInfo]: List of claimed jobs (may be fewer than max_jobs if queue is empty)
+    """
+    claimed_jobs = []
+    
+    for _ in range(max_jobs):
+        job = _claim_next_job(session)
+        if not job:
+            break
+        claimed_jobs.append(job)
+    
+    return claimed_jobs
+
+
 def _mark_job_failed(session: Session, job_id: int, error_message: str) -> None:
     """
     Mark a job as failed with error details.
@@ -246,6 +311,7 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
     schedule="0 2,14 * * *",  # Twice daily at 2 AM and 2 PM UTC
     catchup=False,
     max_active_runs=1,  # Prevent overlapping runs
+    max_active_tasks=MAX_PARALLEL_TASKS,  # Maximum concurrent paper processing tasks
     tags=["papers", "worker"],
     doc_md="""
     ### Paper Processing Worker DAG
@@ -253,10 +319,11 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
     This DAG processes papers from the queue that are in 'not_started' status.
 
     - Runs twice daily at 2 AM and 2 PM UTC
-    - Processes up to 10 papers per run (randomly selected)
+    - Processes up to 10 papers per run (randomly selected, processed in parallel)
     - Processes papers through simplified pipeline: PDF download → OCR → metadata extraction → summary generation → saving → slug creation
     - Uses database locking to prevent race conditions
     - Handles errors gracefully and marks failed jobs
+    - Processes papers in parallel using Airflow dynamic task mapping
 
     Simplified pipeline (no section rewriting): faster processing and lower costs.
     Replaces the previous supervisord-based worker with better Airflow integration.
@@ -265,46 +332,69 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
 def paper_processing_worker_dag():
     
     @task
-    def process_available_papers() -> dict:
+    def claim_available_jobs() -> List[Dict[str, Any]]:
         """
-        Process all available papers in the queue.
+        Claim available paper jobs from the queue.
         
+        Returns:
+            List[Dict]: List of job dictionaries for parallel processing
+        """
+        print(f"Claiming up to {MAX_PAPERS_PER_RUN} jobs from queue...")
+        
+        with database_session() as session:
+            jobs = _claim_available_jobs(session, MAX_PAPERS_PER_RUN)
+        
+        if not jobs:
+            print("No papers found in queue")
+            return []
+        
+        print(f"Claimed {len(jobs)} jobs for parallel processing")
+        
+        # Convert to dictionaries for Airflow serialization
+        return [job.to_dict() for job in jobs]
+    
+    @task
+    def process_single_paper(job_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process a single paper job through the complete pipeline.
+        
+        Args:
+            job_dict: Job information dictionary
+            
+        Returns:
+            dict: Processing result with status and job_id
+        """
+        job = JobInfo.from_dict(job_dict)
+        
+        try:
+            # Run async processing function
+            asyncio.run(_process_paper_job_complete(job))
+            return {"status": "success", "job_id": job.id}
+        except Exception as e:
+            print(f"Failed to process job {job.id}: {e}")
+            
+            # Mark job as failed to prevent stuck 'processing' status
+            with database_session() as session:
+                _mark_job_failed(session, job.id, str(e))
+            
+            return {"status": "failed", "job_id": job.id, "error": str(e)}
+    
+    @task
+    def aggregate_results(results: List[Dict[str, Any]]) -> dict:
+        """
+        Aggregate processing results from all parallel tasks.
+        
+        Args:
+            results: List of result dictionaries from parallel processing tasks
+            
         Returns:
             dict: Summary of processing results
         """
-        processed_count = 0
-        failed_count = 0
+        processed_count = sum(1 for r in results if r.get("status") == "success")
+        failed_count = sum(1 for r in results if r.get("status") == "failed")
         
-        print("Checking for papers to process...")
-        
-        while processed_count + failed_count < MAX_PAPERS_PER_RUN:
-            # Step 1: Try to claim next available job
-            with database_session() as session:
-                next_job = _claim_next_job(session)
-            
-            if not next_job:
-                # No more jobs available
-                break
-            
-            # Step 2: Process the claimed job
-            try:
-                # Run async processing function
-                asyncio.run(_process_paper_job_complete(next_job))
-                processed_count += 1
-                
-            except Exception as e:
-                print(f"Failed to process job {next_job.id}: {e}")
-                
-                # Mark job as failed to prevent stuck 'processing' status
-                with database_session() as session:
-                    _mark_job_failed(session, next_job.id, str(e))
-                
-                failed_count += 1
-                # Continue processing other jobs
-        
-        # Step 3: Return summary
         if processed_count == 0 and failed_count == 0:
-            print("No papers found in queue")
+            print("No papers were processed")
         else:
             print(f"Processing complete: {processed_count} successful, {failed_count} failed")
         
@@ -314,8 +404,14 @@ def paper_processing_worker_dag():
             "total": processed_count + failed_count
         }
     
-    # Single task that processes all available papers
-    process_available_papers()
+    # Step 1: Claim available jobs
+    claimed_jobs = claim_available_jobs()
+    
+    # Step 2: Process each job in parallel using dynamic task mapping
+    processing_results = process_single_paper.expand(job_dict=claimed_jobs)
+    
+    # Step 3: Aggregate results
+    aggregate_results(processing_results)
 
 
 paper_processing_worker_dag()
