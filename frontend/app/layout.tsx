@@ -7,7 +7,7 @@ import 'katex/dist/katex.min.css';
 
 export const metadata = {
   title: {
-    default: 'Open Paper Digest - Daily Research Papers Without a PhD',
+    default: 'Open Paper Digest - Doomscrolling for Smart People',
     template: '%s | Open Paper Digest'
   },
   description: 'Daily digest of popular research papers made accessible for everyone. Stay up to date with advanced research through a continuous feed of digestible paper summaries.',
@@ -24,7 +24,7 @@ export const metadata = {
     type: 'website',
     locale: 'en_US',
     siteName: 'Open Paper Digest',
-    title: 'Open Paper Digest - Daily Research Papers Without a PhD',
+    title: 'Open Paper Digest - Doomscrolling for Smart People',
     description: 'Daily digest of popular research papers made accessible for everyone. Stay up to date with advanced research through a continuous feed of digestible paper summaries.',
     images: [
       {
@@ -37,7 +37,7 @@ export const metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Open Paper Digest - Daily Research Papers Without a PhD',
+    title: 'Open Paper Digest - Doomscrolling for Smart People',
     description: 'Daily digest of popular research papers made accessible for everyone. Stay up to date with advanced research through a continuous feed of digestible paper summaries.',
     images: ['/opdlogo.svg'],
   },

@@ -37,15 +37,18 @@ export default function NavBar({ className = '' }: NavBarProps) {
   return (
     <nav className={`w-full ${className}`}>
       <div className="w-full px-4 sm:px-6 lg:px-10 pt-7 pb-3 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2">
-          <Image
-            src="/opdlogo.svg"
-            alt="Open Paper Digest Logo"
-            width={32}
-            height={32}
-            className="w-8 h-8"
-          />
-          <span className="text-base font-semibold text-gray-900 dark:text-gray-100">Open Paper Digest</span>
+        <Link href="/" className="flex flex-col">
+          <div className="flex items-center gap-2">
+            <Image
+              src="/opdlogo.svg"
+              alt="Open Paper Digest Logo"
+              width={32}
+              height={32}
+              className="w-8 h-8"
+            />
+            <span className="text-base font-semibold text-gray-900 dark:text-gray-100">Open Paper Digest</span>
+          </div>
+          <span className="text-sm text-gray-600 dark:text-gray-400">Doomscrolling for Smart People</span>
         </Link>
 
         <ul className="hidden md:flex items-center gap-6">

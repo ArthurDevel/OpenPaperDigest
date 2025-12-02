@@ -12,7 +12,7 @@ export default function Footer({ className = '' }: FooterProps) {
           <div className="flex items-center gap-2">
             <span className="font-semibold text-gray-900 dark:text-gray-100">Open Paper Digest</span>
             <span className="text-gray-400">·</span>
-            <span>Research papers made accessible for people without a PhD</span>
+            <span>Doomscrolling for Smart People</span>
           </div>
           <div className="flex items-center gap-4">
             <a href="#" className="hover:text-gray-900 dark:hover:text-white transition-colors">Privacy</a>
