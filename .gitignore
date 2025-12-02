@@ -47,6 +47,7 @@ debug_output/
 
 # Logs
 *.log
+logs/
 
 # Generated OCR output
 ocr_output.txt
