@@ -1,0 +1,35 @@
+---
+description: When creating/adding/modifying python code, follow these coding guideliness.
+alwaysApply: false
+---
+## Formatting of Code Guide
+
+You must format the code such that it is easy to read for a junior developer. Make sure to keep functionality the same, except if stated otherwise. Keep code simple, do not use fallbacks except if the user requests this, prefer raising errors in a simple way. Do not overcomplicate, simple is best.
+
+## Code Guideliness
+- Use Descriptive Names: Good code is readable. It uses clear, full names for functions and variables (calculate_rectangle_area) instead of short, cryptic ones (ca), so you know what it does without having to read the code itself.
+- Write Single-Purpose Functions: Good code is modular. Each function should do only one specific job. Instead of a single process function that both cleans data and sums it, you have a clean_data function and a separate calculate_total function, making your code easier to test and reuse. BUT KEEP IN MIND: do not over-do this, readability always has priority. 
+- Be Explicit with Type Hints: Good code is predictable. It uses type hints (like width: float) to specify what kind of data a function expects and what it returns. This prevents errors by making it clear how to use the function correctly, avoiding crashes like add_numbers(2, "3").
+- Build Robust Code: Good code is resilient and doesn't crash easily. It anticipates potential problems, like receiving a number as a string ("3"), and handles them gracefully instead of throwing an error.
+- Document Your Code: Good code is self-explanatory. It includes docstrings ("""...""") that describe what a function does, what its arguments are, and what it returns. This allows others to use your code without having to decipher its logic.
+-  Code remains easy to read. Where less easy to read, comments annotate complicated sets of instructions. Prefer readability over performance, except if the user explicitely requests otherwise.
+- for longer pieces of code, comment the code with "logical blocks" (eg. # Step 1: code does this # Step 2: code does this)
+- section the python file using ### CONSTANTS ###, ### HELPER FUNCTIONS ###, etc
+- only add constants for things that the user indicated they would like to change, or for things that are repeated. do not include a constant for every single thing that can be changed. 
+- use simple language, avoid jargon
+- NO FUCKING FALLBACKS, KEEP IT SIMPLE
+- methods that are only referenced inside the file should be precedded with an underscore (_)
+- never use emoji's
+- documentation should say what the current code does, not reference previous code
+- use DTO pattern where appropriate
+- Fail Fast! Throw an error if something is not right, do not continue with a default or a fallback.
+- For not implemented features, throw an error, do not implement fallbacks or hardcode responses.
+
+
+
+## Example sections
+# ============================================================================
+# SECTION NAME
+# ============================================================================
+
+Now, please await your instructions

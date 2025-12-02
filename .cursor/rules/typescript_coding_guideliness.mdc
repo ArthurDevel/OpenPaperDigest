@@ -1,0 +1,57 @@
+---
+description: When creating/adding/modifying typescript code, follow these coding guideliness.
+alwaysApply: false
+---
+## GUIDE: Coding Practices for Typescript
+
+Format the code such that it is easy to read for a junior developer. Make sure to keep functionality the same, except if stated otherwise. Keep code simple, do not use fallbacks except if the user requests this, prefer raising errors in a simple way. Do not overcomplicate, simple is best.
+
+
+## Coding Rules
+
+- use JSDoc, including the params with a short explanation and what the function returns
+- use interface for data transfer objects when data needs to be passed between classes. Where applicable, the result of a function should be an (updated) DTO.
+- use dependency injection to inject instances of other classes that are needed
+- prioritize readability 
+- Each function or class method should do only one specific job. Instead of a single processData method that both validates and saves, you should have a validateData method and a separate saveData method. This makes your code easier to test, reuse, and reason about. Keep readability as the top priority and avoid over-modularizing.
+- Be explicit: always define the types for function parameters and return values. Use specific types instead of any (or use interface where logical)
+- Where a block of code is complex, use comments (//) to annotate the steps. Prefer simple, readable code over clever but confusing optimizations unless performance is a critical, stated requirement.
+- Add constants at the top of the file for things that the user indicates they would like to change or are often repeated. Do not overdo this.
+- No Emoji's
+- NO OVERENGINEERING, NO FALLBACKS
+- For not implemented features, throw an error, do not implement fallbacks or hardcode responses.
+- Fail fast, throw errors immediately if values are not as expected.
+- Create code sections MAIN HANDLERS / ENDPOINTS / MAIN ENTRYPOINTS / ... (depends on the situation), and HELPER FUNCTIONS. Put the MAIN HANDLERS (or equivalent) at the top of the file
+- Add a description of what the file does. This should first be a short, human-readable summary to understand it, followed by a couple bullet points with the responsibilities
+
+
+
+## Naming Conventions
+
+- **Component files**: Use PascalCase (e.g., `MyComponent.tsx`)
+- **Component names**: Use PascalCase (e.g., `const MyComponent = () => {...}`)
+- **Props**: Use camelCase (e.g., `onClick`, `backgroundColor`)
+- **Variable names**: Use camelCase (e.g., `userProfile`, `setIsLoading`)
+- **Custom hooks**: Start with "use" (e.g., `useWindowSize`)
+
+
+## Code sections example
+// ============================================================================
+// SECTION NAME
+// ============================================================================
+
+Common sections for backend files
+- constants
+- helper files
+- entry point
+- main logic
+
+Common sections for frontend files
+- constants
+- event handlers (possibly header per group of event handlers)
+- components
+- render
+
+## Next steps
+Please await your instructions
+
