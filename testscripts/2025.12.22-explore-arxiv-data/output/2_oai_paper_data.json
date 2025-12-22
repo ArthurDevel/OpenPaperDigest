@@ -1,0 +1,52 @@
+{
+  "OAI-PMH": {
+    "@xmlns": "http://www.openarchives.org/OAI/2.0/",
+    "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+    "@xsi:schemaLocation": "http://www.openarchives.org/OAI/2.0/ http://www.openarchives.org/OAI/2.0/OAI-PMH.xsd",
+    "responseDate": "2025-12-22T10:00:23Z",
+    "request": {
+      "@verb": "GetRecord",
+      "@identifier": "oai:arXiv.org:2312.00752",
+      "@metadataPrefix": "arXiv",
+      "#text": "http://oaipmh.arxiv.org/oai"
+    },
+    "GetRecord": {
+      "record": {
+        "header": {
+          "identifier": "oai:arXiv.org:2312.00752",
+          "datestamp": "2024-06-03",
+          "setSpec": [
+            "cs:cs:LG",
+            "cs:cs:AI"
+          ]
+        },
+        "metadata": {
+          "arXiv": {
+            "@xmlns": "http://arxiv.org/OAI/arXiv/",
+            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+            "@xsi:schemaLocation": "http://arxiv.org/OAI/arXiv/ https://oaipmh.arxiv.org/OAI/arXiv.xsd",
+            "id": "2312.00752",
+            "created": "2024-05-31",
+            "updated": "2024-06-03",
+            "authors": {
+              "author": [
+                {
+                  "keyname": "Gu",
+                  "forenames": "Albert"
+                },
+                {
+                  "keyname": "Dao",
+                  "forenames": "Tri"
+                }
+              ]
+            },
+            "title": "Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
+            "categories": "cs.LG cs.AI",
+            "license": "http://creativecommons.org/licenses/by/4.0/",
+            "abstract": "Foundation models, now powering most of the exciting applications in deep learning, are almost universally based on the Transformer architecture and its core attention module. Many subquadratic-time architectures such as linear attention, gated convolution and recurrent models, and structured state space models (SSMs) have been developed to address Transformers' computational inefficiency on long sequences, but they have not performed as well as attention on important modalities such as language. We identify that a key weakness of such models is their inability to perform content-based reasoning, and make several improvements. First, simply letting the SSM parameters be functions of the input addresses their weakness with discrete modalities, allowing the model to selectively propagate or forget information along the sequence length dimension depending on the current token. Second, even though this change prevents the use of efficient convolutions, we design a hardware-aware parallel algorithm in recurrent mode. We integrate these selective SSMs into a simplified end-to-end neural network architecture without attention or even MLP blocks (Mamba). Mamba enjoys fast inference (5$\\times$ higher throughput than Transformers) and linear scaling in sequence length, and its performance improves on real data up to million-length sequences. As a general sequence model backbone, Mamba achieves state-of-the-art performance across several modalities such as language, audio, and genomics. On language modeling, our Mamba-3B model outperforms Transformers of the same size and matches Transformers twice its size, both in pretraining and downstream evaluation."
+          }
+        }
+      }
+    }
+  }
+}

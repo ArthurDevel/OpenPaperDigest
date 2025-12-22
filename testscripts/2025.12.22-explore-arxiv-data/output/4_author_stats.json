@@ -1,0 +1,260 @@
+[
+  {
+    "authorId": "2269161650",
+    "externalIds": {
+      "DBLP": [
+        "Albert Gu"
+      ]
+    },
+    "url": "https://www.semanticscholar.org/author/2269161650",
+    "name": "Albert Gu",
+    "affiliations": [],
+    "homepage": null,
+    "paperCount": 8,
+    "citationCount": 6192,
+    "hIndex": 7,
+    "papers": [
+      {
+        "paperId": "52e3cae9449c603361f759f3d6da854542aff64f",
+        "externalIds": {
+          "DBLP": "journals/corr/abs-2502-10807",
+          "ArXiv": "2502.10807",
+          "DOI": "10.48550/arXiv.2502.10807",
+          "CorpusId": 276408054
+        },
+        "title": "HybriDNA: A Hybrid Transformer-Mamba2 Long-Range DNA Language Model",
+        "venue": "arXiv.org",
+        "year": 2025,
+        "citationCount": 7
+      },
+      {
+        "paperId": "6c1578d9eff8f9d25ddf0398a77ffcc888a4593b",
+        "externalIds": {
+          "ArXiv": "2403.03234",
+          "DBLP": "conf/icml/SchiffKGDGK24",
+          "CorpusId": 268253280,
+          "PubMed": "40567809"
+        },
+        "title": "Caduceus: Bi-Directional Equivariant Long-Range DNA Sequence Modeling",
+        "venue": "International Conference on Machine Learning",
+        "year": 2024,
+        "citationCount": 153
+      },
+      {
+        "paperId": "bab5d963ba2d59fd74cc22f36bf14924025f1b5a",
+        "externalIds": {
+          "DBLP": "journals/corr/abs-2408-10189",
+          "ArXiv": "2408.10189",
+          "DOI": "10.48550/arXiv.2408.10189",
+          "CorpusId": 271903923
+        },
+        "title": "Transformers to SSMs: Distilling Quadratic Knowledge to Subquadratic Models",
+        "venue": "Neural Information Processing Systems",
+        "year": 2024,
+        "citationCount": 50
+      },
+      {
+        "paperId": "ca9f5b3bf0f54ad97513e6175b30497873670fed",
+        "externalIds": {
+          "DBLP": "conf/icml/DaoG24",
+          "ArXiv": "2405.21060",
+          "CorpusId": 270199762
+        },
+        "title": "Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality",
+        "venue": "International Conference on Machine Learning",
+        "year": 2024,
+        "citationCount": 986
+      },
+      {
+        "paperId": "d668f557b922d0cac746c8ec82f7975f06ac906b",
+        "externalIds": {
+          "ArXiv": "2406.07887",
+          "DBLP": "journals/corr/abs-2406-07887",
+          "CorpusId": 270391285
+        },
+        "title": "An Empirical Study of Mamba-based Language Models",
+        "venue": "arXiv.org",
+        "year": 2024,
+        "citationCount": 140
+      },
+      {
+        "paperId": "ea507df05bb5fe32cd8af80602708713c9bd2ba2",
+        "externalIds": {
+          "ArXiv": "2407.09941",
+          "DBLP": "conf/nips/HwangLPDG24",
+          "DOI": "10.48550/arXiv.2407.09941",
+          "CorpusId": 271213165
+        },
+        "title": "Hydra: Bidirectional State Space Models Through Generalized Matrix Mixers",
+        "venue": "Neural Information Processing Systems",
+        "year": 2024,
+        "citationCount": 36
+      },
+      {
+        "paperId": "7bbc7595196a0606a07506c4fb1473e5e87f6082",
+        "externalIds": {
+          "ArXiv": "2312.00752",
+          "DBLP": "journals/corr/abs-2312-00752",
+          "CorpusId": 265551773
+        },
+        "title": "Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
+        "venue": "arXiv.org",
+        "year": 2023,
+        "citationCount": 4921
+      },
+      {
+        "paperId": "d35000d1b1079209e9d9297e4cab309b219526f5",
+        "externalIds": {
+          "CorpusId": 280322401
+        },
+        "title": "FRAMES: Boosting LLMs with A Four-Quadrant Multi-Stage Pretraining Strategy",
+        "venue": "",
+        "year": null,
+        "citationCount": 0
+      }
+    ],
+    "avgCitationsPerPaper": 774.0
+  },
+  {
+    "authorId": "2269146652",
+    "externalIds": {
+      "DBLP": [
+        "Tri Dao"
+      ]
+    },
+    "url": "https://www.semanticscholar.org/author/2269146652",
+    "name": "Tri Dao",
+    "affiliations": [],
+    "homepage": null,
+    "paperCount": 10,
+    "citationCount": 6244,
+    "hIndex": 8,
+    "papers": [
+      {
+        "paperId": "52e3cae9449c603361f759f3d6da854542aff64f",
+        "externalIds": {
+          "DBLP": "journals/corr/abs-2502-10807",
+          "ArXiv": "2502.10807",
+          "DOI": "10.48550/arXiv.2502.10807",
+          "CorpusId": 276408054
+        },
+        "title": "HybriDNA: A Hybrid Transformer-Mamba2 Long-Range DNA Language Model",
+        "venue": "arXiv.org",
+        "year": 2025,
+        "citationCount": 7
+      },
+      {
+        "paperId": "9ba7158d20f54a24c24dea101bd9607407eb9ad4",
+        "externalIds": {
+          "DBLP": "journals/corr/abs-2502-20339",
+          "ArXiv": "2502.20339",
+          "DOI": "10.48550/arXiv.2502.20339",
+          "CorpusId": 276647416
+        },
+        "title": "Thinking Slow, Fast: Scaling Inference Compute with Distilled Reasoners",
+        "venue": "arXiv.org",
+        "year": 2025,
+        "citationCount": 16
+      },
+      {
+        "paperId": "bb18fd3f21ece2b48257c8294c17a49b00807a74",
+        "externalIds": {
+          "DBLP": "journals/corr/abs-2504-10449",
+          "ArXiv": "2504.10449",
+          "DOI": "10.48550/arXiv.2504.10449",
+          "CorpusId": 277781065
+        },
+        "title": "M1: Towards Scalable Test-Time Compute with Mamba Reasoning Models",
+        "venue": "arXiv.org",
+        "year": 2025,
+        "citationCount": 11
+      },
+      {
+        "paperId": "230762f388c4b6f0e8af4554e2df5fd4248b522d",
+        "externalIds": {
+          "ArXiv": "2408.15237",
+          "DBLP": "journals/corr/abs-2408-15237",
+          "DOI": "10.48550/arXiv.2408.15237",
+          "CorpusId": 271963049
+        },
+        "title": "The Mamba in the Llama: Distilling and Accelerating Hybrid Models",
+        "venue": "Neural Information Processing Systems",
+        "year": 2024,
+        "citationCount": 75
+      },
+      {
+        "paperId": "6c1578d9eff8f9d25ddf0398a77ffcc888a4593b",
+        "externalIds": {
+          "ArXiv": "2403.03234",
+          "DBLP": "conf/icml/SchiffKGDGK24",
+          "CorpusId": 268253280,
+          "PubMed": "40567809"
+        },
+        "title": "Caduceus: Bi-Directional Equivariant Long-Range DNA Sequence Modeling",
+        "venue": "International Conference on Machine Learning",
+        "year": 2024,
+        "citationCount": 153
+      },
+      {
+        "paperId": "ca9f5b3bf0f54ad97513e6175b30497873670fed",
+        "externalIds": {
+          "DBLP": "conf/icml/DaoG24",
+          "ArXiv": "2405.21060",
+          "CorpusId": 270199762
+        },
+        "title": "Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality",
+        "venue": "International Conference on Machine Learning",
+        "year": 2024,
+        "citationCount": 986
+      },
+      {
+        "paperId": "d668f557b922d0cac746c8ec82f7975f06ac906b",
+        "externalIds": {
+          "ArXiv": "2406.07887",
+          "DBLP": "journals/corr/abs-2406-07887",
+          "CorpusId": 270391285
+        },
+        "title": "An Empirical Study of Mamba-based Language Models",
+        "venue": "arXiv.org",
+        "year": 2024,
+        "citationCount": 140
+      },
+      {
+        "paperId": "ea507df05bb5fe32cd8af80602708713c9bd2ba2",
+        "externalIds": {
+          "ArXiv": "2407.09941",
+          "DBLP": "conf/nips/HwangLPDG24",
+          "DOI": "10.48550/arXiv.2407.09941",
+          "CorpusId": 271213165
+        },
+        "title": "Hydra: Bidirectional State Space Models Through Generalized Matrix Mixers",
+        "venue": "Neural Information Processing Systems",
+        "year": 2024,
+        "citationCount": 36
+      },
+      {
+        "paperId": "7bbc7595196a0606a07506c4fb1473e5e87f6082",
+        "externalIds": {
+          "ArXiv": "2312.00752",
+          "DBLP": "journals/corr/abs-2312-00752",
+          "CorpusId": 265551773
+        },
+        "title": "Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
+        "venue": "arXiv.org",
+        "year": 2023,
+        "citationCount": 4921
+      },
+      {
+        "paperId": "d35000d1b1079209e9d9297e4cab309b219526f5",
+        "externalIds": {
+          "CorpusId": 280322401
+        },
+        "title": "FRAMES: Boosting LLMs with A Four-Quadrant Multi-Stage Pretraining Strategy",
+        "venue": "",
+        "year": null,
+        "citationCount": 0
+      }
+    ],
+    "avgCitationsPerPaper": 624.4
+  }
+]
