@@ -21,11 +21,12 @@ mistralai
 aiofiles
 pdf2image
 
-# shared module dependencies  
+# shared module dependencies
 qdrant-client
 httpx
 aiohttp
 email-validator
+xmltodict
 
 # Fix protobuf version conflicts
 protobuf==3.20.3

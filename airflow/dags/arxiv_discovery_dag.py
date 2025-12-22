@@ -36,6 +36,8 @@ S2_API_URL = "https://api.semanticscholar.org/graph/v1"
 TIMEOUT_SECONDS = 60
 PAGE_SIZE = 500
 S2_BACKOFF_SEQUENCE = [1, 2, 3, 4, 5]
+S2_PAPER_BATCH_SIZE = 500   # Max 500 paper IDs per batch request
+S2_AUTHOR_BATCH_SIZE = 1000  # Max 1000 author IDs per batch request
 
 DEFAULT_HEADERS = {
     "User-Agent": "papersummarizer/0.1",
@@ -210,22 +212,23 @@ def _parse_arxiv_entry(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 # ============================================================================
-# SEMANTIC SCHOLAR API HELPERS
+# SEMANTIC SCHOLAR BATCH API HELPERS
 # ============================================================================
 
-def _fetch_with_retry(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
+def _post_with_retry(url: str, params: Dict[str, str], json_body: Dict) -> Optional[List]:
     """
-    Fetch URL with incremental backoff on failure.
+    POST to URL with incremental backoff on failure.
 
     On 429 or error: wait 1s, 2s, 3s, 4s, 5s (then stay at 5s).
     Gives up after 10 consecutive failures.
 
     Args:
-        url: URL to fetch.
-        params: Query parameters.
+        url: URL to POST to.
+        params: Query parameters (e.g., fields).
+        json_body: JSON body with IDs.
 
     Returns:
-        JSON response dict, or None if failed/not found.
+        List of results, or None if failed.
     """
     backoff_idx = 0
     max_retries = 10
@@ -233,13 +236,10 @@ def _fetch_with_retry(url: str, params: Optional[Dict] = None) -> Optional[Dict]
     for attempt in range(max_retries):
         try:
             with httpx.Client(headers=DEFAULT_HEADERS, timeout=TIMEOUT_SECONDS, follow_redirects=True) as client:
-                resp = client.get(url, params=params)
+                resp = client.post(url, params=params, json=json_body)
 
                 if resp.status_code == 200:
                     return resp.json()
-
-                if resp.status_code == 404:
-                    return None
 
                 if resp.status_code == 429:
                     wait = S2_BACKOFF_SEQUENCE[min(backoff_idx, len(S2_BACKOFF_SEQUENCE) - 1)]
@@ -260,133 +260,208 @@ def _fetch_with_retry(url: str, params: Optional[Dict] = None) -> Optional[Dict]
     return None
 
 
-def _get_s2_paper_data(arxiv_id: str) -> Optional[Dict[str, Any]]:
+def _batch_get_s2_paper_data(arxiv_ids: List[str]) -> Dict[str, Dict[str, Any]]:
     """
-    Get paper data from Semantic Scholar including authors, citations, and embedding.
+    Batch fetch paper data from Semantic Scholar for multiple arXiv IDs.
 
     Args:
-        arxiv_id: ArXiv paper ID (without version).
+        arxiv_ids: List of arXiv paper IDs (without version).
 
     Returns:
-        Dict with S2 paper data, or None if not found.
+        Dict mapping arxiv_id -> S2 paper data. Missing papers are not included.
     """
-    url = f"{S2_API_URL}/paper/ARXIV:{arxiv_id}"
+    if not arxiv_ids:
+        return {}
+
+    results: Dict[str, Dict[str, Any]] = {}
+    url = f"{S2_API_URL}/paper/batch"
     params = {
         "fields": "paperId,authors,authors.authorId,authors.name,citationCount,influentialCitationCount,embedding"
     }
-    return _fetch_with_retry(url, params)
+
+    # Process in batches of S2_PAPER_BATCH_SIZE
+    for i in range(0, len(arxiv_ids), S2_PAPER_BATCH_SIZE):
+        batch = arxiv_ids[i:i + S2_PAPER_BATCH_SIZE]
+        batch_num = i // S2_PAPER_BATCH_SIZE + 1
+        total_batches = (len(arxiv_ids) + S2_PAPER_BATCH_SIZE - 1) // S2_PAPER_BATCH_SIZE
+        print(f"  Fetching paper batch {batch_num}/{total_batches} ({len(batch)} papers)...")
+
+        # S2 expects ARXIV: prefix for arXiv IDs
+        ids_with_prefix = [f"ARXIV:{aid}" for aid in batch]
+        json_body = {"ids": ids_with_prefix}
+
+        response = _post_with_retry(url, params, json_body)
+        if response:
+            # Response is a list in same order as input IDs
+            # null entries mean paper not found
+            for arxiv_id, paper_data in zip(batch, response):
+                if paper_data is not None:
+                    results[arxiv_id] = paper_data
+
+        # Small delay between batches to be nice to the API
+        if i + S2_PAPER_BATCH_SIZE < len(arxiv_ids):
+            time.sleep(0.5)
+
+    print(f"  Found {len(results)}/{len(arxiv_ids)} papers in Semantic Scholar")
+    return results
 
 
-def _get_author_stats(author_id: str, cache: Dict[str, Dict]) -> Optional[Dict[str, Any]]:
+def _batch_get_author_stats(author_ids: List[str]) -> Dict[str, Dict[str, Any]]:
     """
-    Get author stats from Semantic Scholar with caching.
+    Batch fetch author stats from Semantic Scholar for multiple author IDs.
 
     Args:
-        author_id: S2 author ID.
-        cache: Dict to cache author stats.
+        author_ids: List of S2 author IDs.
 
     Returns:
-        Dict with author stats including h-index and avg citations per paper.
+        Dict mapping author_id -> author stats with h-index and computed avgCitationsPerPaper.
     """
-    if author_id in cache:
-        return cache[author_id]
+    if not author_ids:
+        return {}
 
-    url = f"{S2_API_URL}/author/{author_id}"
+    results: Dict[str, Dict[str, Any]] = {}
+    url = f"{S2_API_URL}/author/batch"
     params = {"fields": "authorId,name,paperCount,citationCount,hIndex"}
 
-    data = _fetch_with_retry(url, params)
-    if data:
-        paper_count = data.get("paperCount", 0)
-        citation_count = data.get("citationCount", 0)
-        data["avgCitationsPerPaper"] = citation_count / paper_count if paper_count > 0 else 0
-        cache[author_id] = data
+    # Process in batches of S2_AUTHOR_BATCH_SIZE
+    for i in range(0, len(author_ids), S2_AUTHOR_BATCH_SIZE):
+        batch = author_ids[i:i + S2_AUTHOR_BATCH_SIZE]
+        batch_num = i // S2_AUTHOR_BATCH_SIZE + 1
+        total_batches = (len(author_ids) + S2_AUTHOR_BATCH_SIZE - 1) // S2_AUTHOR_BATCH_SIZE
+        print(f"  Fetching author batch {batch_num}/{total_batches} ({len(batch)} authors)...")
 
-    return data
+        json_body = {"ids": batch}
+
+        response = _post_with_retry(url, params, json_body)
+        if response:
+            for author_data in response:
+                if author_data is not None:
+                    author_id = author_data.get("authorId")
+                    if author_id:
+                        # Compute avgCitationsPerPaper
+                        paper_count = author_data.get("paperCount", 0)
+                        citation_count = author_data.get("citationCount", 0)
+                        author_data["avgCitationsPerPaper"] = (
+                            citation_count / paper_count if paper_count > 0 else 0
+                        )
+                        results[author_id] = author_data
+
+        # Small delay between batches
+        if i + S2_AUTHOR_BATCH_SIZE < len(author_ids):
+            time.sleep(0.5)
+
+    print(f"  Found stats for {len(results)}/{len(author_ids)} authors")
+    return results
 
 
-def _enrich_with_semantic_scholar(paper: Dict[str, Any], author_cache: Dict[str, Dict]) -> Dict[str, Any]:
+def _enrich_papers_batch(papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Enrich a paper dict with Semantic Scholar data.
+    Enrich multiple papers with Semantic Scholar data using batch APIs.
+
+    This is much faster than enriching one paper at a time.
 
     Args:
-        paper: Paper dict from arXiv.
-        author_cache: Cache for author stats.
+        papers: List of paper dicts from arXiv.
 
     Returns:
-        Enriched paper dict with S2 data (or null S2 fields if not found).
+        List of enriched paper dicts with S2 data.
     """
-    arxiv_id = paper["arxiv_id"]
-    s2_data = _get_s2_paper_data(arxiv_id)
+    if not papers:
+        return []
 
-    # Initialize S2 fields as None
-    enriched = {
-        **paper,
-        "semantic_scholar_id": None,
-        "citation_count": None,
-        "influential_citation_count": None,
-        "embedding_model": None,
-        "embedding_vector": None,
-        "authors_with_ids": [],
-        "avg_author_h_index": None,
-        "avg_author_citations_per_paper": None,
-        "total_author_h_index": None,
-    }
+    # Step 1: Batch fetch all paper data from S2
+    arxiv_ids = [p["arxiv_id"] for p in papers]
+    print(f"Batch fetching S2 data for {len(arxiv_ids)} papers...")
+    s2_paper_data = _batch_get_s2_paper_data(arxiv_ids)
 
-    if not s2_data:
-        # S2 doesn't have this paper yet, save with null S2 fields
-        enriched["authors_with_ids"] = [
-            {"name": name, "semantic_scholar_id": None}
-            for name in paper.get("author_names", [])
-        ]
-        return enriched
+    # Step 2: Collect all unique author IDs from S2 responses
+    all_author_ids = set()
+    for paper_data in s2_paper_data.values():
+        for author in paper_data.get("authors", []):
+            author_id = author.get("authorId")
+            if author_id:
+                all_author_ids.add(author_id)
 
-    # Basic S2 data
-    enriched["semantic_scholar_id"] = s2_data.get("paperId")
-    enriched["citation_count"] = s2_data.get("citationCount")
-    enriched["influential_citation_count"] = s2_data.get("influentialCitationCount")
+    # Step 3: Batch fetch all author stats
+    print(f"Batch fetching stats for {len(all_author_ids)} unique authors...")
+    author_stats = _batch_get_author_stats(list(all_author_ids))
 
-    # Embedding
-    embedding_data = s2_data.get("embedding")
-    if embedding_data:
-        enriched["embedding_model"] = embedding_data.get("model")
-        enriched["embedding_vector"] = embedding_data.get("vector")
+    # Step 4: Combine everything into enriched papers
+    enriched_papers = []
+    for paper in papers:
+        arxiv_id = paper["arxiv_id"]
+        s2_data = s2_paper_data.get(arxiv_id)
 
-    # Authors with S2 IDs
-    s2_authors = s2_data.get("authors", [])
-    authors_with_ids = []
-    for author in s2_authors:
-        authors_with_ids.append({
-            "name": author.get("name", ""),
-            "semantic_scholar_id": author.get("authorId"),
-        })
-    enriched["authors_with_ids"] = authors_with_ids
+        # Initialize with null S2 fields
+        enriched = {
+            **paper,
+            "semantic_scholar_id": None,
+            "citation_count": None,
+            "influential_citation_count": None,
+            "embedding_model": None,
+            "embedding_vector": None,
+            "authors_with_ids": [],
+            "avg_author_h_index": None,
+            "avg_author_citations_per_paper": None,
+            "total_author_h_index": None,
+        }
 
-    # Compute author credibility scores
-    h_indices = []
-    avg_citations = []
+        if not s2_data:
+            # S2 doesn't have this paper, use arXiv author names with null S2 IDs
+            enriched["authors_with_ids"] = [
+                {"name": name, "semantic_scholar_id": None}
+                for name in paper.get("author_names", [])
+            ]
+        else:
+            # Basic S2 data
+            enriched["semantic_scholar_id"] = s2_data.get("paperId")
+            enriched["citation_count"] = s2_data.get("citationCount")
+            enriched["influential_citation_count"] = s2_data.get("influentialCitationCount")
 
-    for author in s2_authors:
-        author_id = author.get("authorId")
-        if not author_id:
-            continue
+            # Embedding
+            embedding_data = s2_data.get("embedding")
+            if embedding_data:
+                enriched["embedding_model"] = embedding_data.get("model")
+                enriched["embedding_vector"] = embedding_data.get("vector")
 
-        stats = _get_author_stats(author_id, author_cache)
-        if stats:
-            h_index = stats.get("hIndex")
-            avg_cit = stats.get("avgCitationsPerPaper", 0)
+            # Authors with S2 IDs
+            s2_authors = s2_data.get("authors", [])
+            enriched["authors_with_ids"] = [
+                {
+                    "name": author.get("name", ""),
+                    "semantic_scholar_id": author.get("authorId"),
+                }
+                for author in s2_authors
+            ]
 
-            if h_index is not None:
-                h_indices.append(h_index)
-            if avg_cit:
-                avg_citations.append(avg_cit)
+            # Compute author credibility scores using pre-fetched stats
+            h_indices = []
+            avg_citations = []
 
-    if h_indices:
-        enriched["avg_author_h_index"] = sum(h_indices) / len(h_indices)
-        enriched["total_author_h_index"] = sum(h_indices)
-    if avg_citations:
-        enriched["avg_author_citations_per_paper"] = sum(avg_citations) / len(avg_citations)
+            for author in s2_authors:
+                author_id = author.get("authorId")
+                if not author_id:
+                    continue
 
-    return enriched
+                stats = author_stats.get(author_id)
+                if stats:
+                    h_index = stats.get("hIndex")
+                    avg_cit = stats.get("avgCitationsPerPaper", 0)
+
+                    if h_index is not None:
+                        h_indices.append(h_index)
+                    if avg_cit:
+                        avg_citations.append(avg_cit)
+
+            if h_indices:
+                enriched["avg_author_h_index"] = sum(h_indices) / len(h_indices)
+                enriched["total_author_h_index"] = sum(h_indices)
+            if avg_citations:
+                enriched["avg_author_citations_per_paper"] = sum(avg_citations) / len(avg_citations)
+
+        enriched_papers.append(enriched)
+
+    return enriched_papers
 
 
 def _convert_to_dto(paper: Dict[str, Any]) -> ArxivDiscoveredPaper:
@@ -498,7 +573,11 @@ def arxiv_discovery_dag():
     @task
     def enrich_papers(papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Enrich papers with Semantic Scholar data.
+        Enrich papers with Semantic Scholar data using batch APIs.
+
+        Uses S2 batch endpoints to fetch paper and author data efficiently:
+        - Up to 500 papers per batch request
+        - Up to 1000 authors per batch request
 
         Args:
             papers: List of paper dicts from arXiv.
@@ -510,16 +589,7 @@ def arxiv_discovery_dag():
             print("No papers to enrich")
             return []
 
-        author_cache: Dict[str, Dict] = {}
-        enriched_papers = []
-
-        for i, paper in enumerate(papers):
-            if i == 0 or (i + 1) % 10 == 0 or i == len(papers) - 1:
-                print(f"Enriching paper {i + 1}/{len(papers)}: {paper['arxiv_id']}")
-
-            enriched = _enrich_with_semantic_scholar(paper, author_cache)
-            enriched_papers.append(enriched)
-
+        enriched_papers = _enrich_papers_batch(papers)
         print(f"Enriched {len(enriched_papers)} papers")
         return enriched_papers
 
