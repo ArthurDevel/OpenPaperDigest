@@ -82,3 +82,40 @@ class PaperStatusHistory(Base):
         UniqueConstraint("date", name="uq_paper_status_history_date"),
         Index("ix_paper_status_history_date", "date"),
     )
+
+
+class ArxivPaperRecord(Base):
+    """
+    SQLAlchemy model for arxiv_papers table.
+
+    Stores discovered arXiv papers with metadata, author credibility scores,
+    and optional Semantic Scholar enrichment data.
+    """
+    __tablename__ = "arxiv_papers"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    arxiv_id = Column(String(64), nullable=False)
+    version = Column(Integer, nullable=True)
+    title = Column(String(512), nullable=False)
+    abstract = Column(Text, nullable=True)
+    published_at = Column(DateTime, nullable=True)
+    primary_category = Column(String(32), nullable=True)
+    categories = Column(JSON, nullable=True)
+    authors = Column(JSON, nullable=True)
+    semantic_scholar_id = Column(String(64), nullable=True)
+    citation_count = Column(Integer, nullable=True)
+    influential_citation_count = Column(Integer, nullable=True)
+    embedding_model = Column(String(32), nullable=True)
+    embedding_vector = Column(JSON, nullable=True)
+    avg_author_h_index = Column(Float, nullable=True)
+    avg_author_citations_per_paper = Column(Float, nullable=True)
+    total_author_h_index = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("arxiv_id", name="uq_arxiv_papers_arxiv_id"),
+        Index("ix_arxiv_papers_published_at", "published_at"),
+        Index("ix_arxiv_papers_primary_category", "primary_category"),
+        Index("ix_arxiv_papers_avg_author_h_index", "avg_author_h_index"),
+    )

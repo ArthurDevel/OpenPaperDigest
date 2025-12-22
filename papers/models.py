@@ -59,6 +59,182 @@ class PaperSlug(BaseModel):
         from_attributes = True
 
 
+# ============================================================================
+# ARXIV DISCOVERY MODELS
+# ============================================================================
+
+class ArxivPaperAuthor(BaseModel):
+    """
+    Single author with optional Semantic Scholar ID.
+
+    Attributes:
+        name: Author's full name as it appears on the paper.
+        semantic_scholar_id: S2 author ID, or None if not found in S2.
+    """
+    name: str
+    semantic_scholar_id: Optional[str] = None
+
+
+class ArxivDiscoveredPaper(BaseModel):
+    """
+    Discovered arXiv paper DTO with metadata, authors, and credibility scores.
+
+    Automatically converts from SQLAlchemy ArxivPaperRecord using model_validate().
+    Use to_orm() to convert back to database model.
+
+    Required fields:
+        arxiv_id: ArXiv identifier without version (e.g., "2312.00752").
+        title: Paper title.
+
+    Optional fields (nullable in DB):
+        version: ArXiv version number (e.g., 1, 2, 3).
+        abstract: Paper abstract text.
+        published_at: Publication timestamp from arXiv.
+        primary_category: Primary arXiv category (e.g., "cs.LG").
+        categories: All arXiv categories the paper belongs to.
+        authors: List of authors with optional S2 IDs.
+        semantic_scholar_id: S2 paper ID (40-char hex string).
+        citation_count: Number of citations from S2.
+        influential_citation_count: Influential citations from S2.
+        embedding_model: Name of embedding model (e.g., "specter_v1").
+        embedding_vector: 768-dimensional embedding as float list.
+        avg_author_h_index: Average h-index across authors with S2 profiles (unknowns excluded).
+        avg_author_citations_per_paper: Average citations per paper across authors with S2 profiles.
+        total_author_h_index: Sum of h-indices for authors with S2 profiles.
+    """
+    arxiv_id: str
+    title: str
+    version: Optional[int] = None
+    abstract: Optional[str] = None
+    published_at: Optional[datetime] = None
+    primary_category: Optional[str] = None
+    categories: List[str] = Field(default_factory=list)
+    authors: List[ArxivPaperAuthor] = Field(default_factory=list)
+    semantic_scholar_id: Optional[str] = None
+    citation_count: Optional[int] = None
+    influential_citation_count: Optional[int] = None
+    embedding_model: Optional[str] = None
+    embedding_vector: Optional[List[float]] = None
+    avg_author_h_index: Optional[float] = None
+    avg_author_citations_per_paper: Optional[float] = None
+    total_author_h_index: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @field_validator('categories', mode='before')
+    @classmethod
+    def _deserialize_categories(cls, value: Union[str, List, None]) -> List[str]:
+        """Handle JSON string deserialization from database."""
+        if value is None:
+            return []
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                return []
+        return value or []
+
+    @field_validator('authors', mode='before')
+    @classmethod
+    def _deserialize_authors(cls, value: Union[str, List, None]) -> List[ArxivPaperAuthor]:
+        """Handle JSON string deserialization from database."""
+        if value is None:
+            return []
+        if isinstance(value, str):
+            try:
+                authors_data = json.loads(value)
+                return [ArxivPaperAuthor.model_validate(a) for a in authors_data]
+            except (json.JSONDecodeError, ValueError, TypeError):
+                return []
+        if isinstance(value, list):
+            return [
+                ArxivPaperAuthor.model_validate(a) if not isinstance(a, ArxivPaperAuthor) else a
+                for a in value
+            ]
+        return []
+
+    @field_validator('embedding_vector', mode='before')
+    @classmethod
+    def _deserialize_embedding_vector(cls, value: Union[str, List, None]) -> Optional[List[float]]:
+        """Handle JSON string deserialization from database."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                return None
+        return value
+
+    def to_orm(self):
+        """Convert ArxivDiscoveredPaper DTO to SQLAlchemy ArxivPaperRecord."""
+        from papers.db.models import ArxivPaperRecord
+
+        # Serialize authors to JSON
+        authors_json = None
+        if self.authors:
+            authors_json = json.dumps(
+                [author.model_dump() for author in self.authors],
+                default=str
+            )
+
+        # Serialize categories to JSON
+        categories_json = None
+        if self.categories:
+            categories_json = json.dumps(self.categories)
+
+        # Serialize embedding vector to JSON
+        embedding_json = None
+        if self.embedding_vector:
+            embedding_json = json.dumps(self.embedding_vector)
+
+        return ArxivPaperRecord(
+            arxiv_id=self.arxiv_id,
+            version=self.version,
+            title=self.title,
+            abstract=self.abstract,
+            published_at=self.published_at,
+            primary_category=self.primary_category,
+            categories=categories_json,
+            authors=authors_json,
+            semantic_scholar_id=self.semantic_scholar_id,
+            citation_count=self.citation_count,
+            influential_citation_count=self.influential_citation_count,
+            embedding_model=self.embedding_model,
+            embedding_vector=embedding_json,
+            avg_author_h_index=self.avg_author_h_index,
+            avg_author_citations_per_paper=self.avg_author_citations_per_paper,
+            total_author_h_index=self.total_author_h_index,
+            created_at=self.created_at or datetime.utcnow(),
+            updated_at=self.updated_at or datetime.utcnow(),
+        )
+
+    class Config:
+        from_attributes = True
+
+
+class ArxivPaperFilter(BaseModel):
+    """
+    Filter options for listing arXiv papers.
+
+    Attributes:
+        min_avg_h_index: Only return papers where avg_author_h_index >= this value.
+        primary_category: Only return papers with this primary category.
+        published_after: Only return papers published after this datetime.
+        limit: Maximum number of papers to return (default 100).
+        offset: Number of papers to skip for pagination (default 0).
+    """
+    min_avg_h_index: Optional[float] = None
+    primary_category: Optional[str] = None
+    published_after: Optional[datetime] = None
+    limit: int = 100
+    offset: int = 0
+
+
+# ============================================================================
+# PAPER PROCESSING MODELS
+# ============================================================================
+
 class Paper(BaseModel):
     """
     Complete Paper DTO containing both metadata and full processing results.
