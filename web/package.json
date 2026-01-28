@@ -10,9 +10,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
-    "test:e2e:api": "playwright test tests/e2e/api/",
-    "test:e2e:report": "playwright show-report",
+    "test:integration": "vitest run tests/integration/",
     "prisma:generate": "prisma generate",
     "prisma:pull": "prisma db pull"
   },
@@ -58,6 +56,7 @@
     "eslint": "^8",
     "eslint-config-next": "14.2.3",
     "jsdom": "^27.4.0",
+    "next-test-api-route-handler": "^5.0.3",
     "postcss": "^8.5.6",
     "prisma": "^6.0.0",
     "tailwindcss": "^3.4.17",
