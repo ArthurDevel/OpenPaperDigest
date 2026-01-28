@@ -10,6 +10,9 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:api": "playwright test tests/e2e/api/",
+    "test:e2e:report": "playwright show-report",
     "prisma:generate": "prisma generate",
     "prisma:pull": "prisma db pull"
   },
@@ -42,6 +45,7 @@
     "zod": "^4.1.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.0",
     "@tailwindcss/line-clamp": "^0.4.4",
     "@tailwindcss/typography": "^0.5.16",
     "@types/node": "^20",
