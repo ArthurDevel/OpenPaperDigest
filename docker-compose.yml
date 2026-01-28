@@ -1,51 +1,75 @@
 version: '3.8'
 
 #--------------------------------------------------------------------------
-# Common Airflow Configuration
-#
-# Basic configuration for the combined Airflow service (init + scheduler + webserver).
-# Mirrors Railway deployment architecture for consistency.
-#--------------------------------------------------------------------------
-x-airflow-common: &airflow-common
-  build:
-    context: .
-    dockerfile: ./airflow/Dockerfile
-  env_file:
-    - .env
-  depends_on:
-    airflow-postgres:
-      condition: service_healthy
-
-#--------------------------------------------------------------------------
 # Application Services
 #
 # This is the main section where all the running services for the
 # application are defined.
+#
+# Architecture:
+# - web: Next.js frontend and API routes (TypeScript)
+# - worker: Airflow-based background processing (Python)
+# - mysql: Main application database
+# - mysql_auth: Authentication database
+# - qdrant: Vector database for embeddings
+# - umami: Privacy-focused analytics
 #--------------------------------------------------------------------------
 services:
 
   #--------------------------------------------------------------------------
-  # Main Application Service (app)
+  # Web Service (Next.js)
   #
-  # This is the primary service that runs the Python backend (FastAPI) and
-  # serves the Next.js frontend. It's the main entrypoint for the application.
+  # The Next.js web application serving the frontend and API routes.
+  # Built using standalone output mode for efficient Docker deployment.
   #--------------------------------------------------------------------------
-  app:
+  web:
     build:
-      context: .
+      context: ./web
       dockerfile: Dockerfile
-      args:
-        - CONTAINERPORT_API=${CONTAINERPORT_API:-8000}
     env_file:
       - .env
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
     ports:
-      - "${HOSTPORT_FRONTEND:-3000}:${CONTAINERPORT_FRONTEND:-3000}"
+      - "${HOSTPORT_FRONTEND:-3000}:3000"
     volumes:
-      - ./data:/app/data
+      - ./data/paperjsons:/app/data/paperjsons
     depends_on:
       mysql:
         condition: service_healthy
       mysql_auth:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  #--------------------------------------------------------------------------
+  # Worker Service (Airflow)
+  #
+  # Python-based background worker running Airflow for paper processing.
+  # Handles DAGs, scheduled tasks, and paper ingestion pipelines.
+  #--------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: ./worker/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "${HOSTPORT_AIRFLOW:-8080}:8080"
+    volumes:
+      - ./worker/dags:/opt/airflow/dags
+      - ./worker/logs:/opt/airflow/logs
+      - ./data/paperjsons:/app/data/paperjsons
+    depends_on:
+      mysql:
+        condition: service_healthy
+      airflow-postgres:
         condition: service_healthy
       qdrant:
         condition: service_started
@@ -145,14 +169,11 @@ services:
 
 
   #--------------------------------------------------------------------------
-  # Airflow Services
+  # Airflow Postgres Database
   #
-  # Combined service approach mirrors Railway deployment due to Railway's limitation
-  # of not supporting shared volumes between separate services. This ensures
-  # consistent behavior between local development and production.
-  # You can access the UI at http://localhost:${HOSTPORT_AIRFLOW:-8080}
+  # Dedicated PostgreSQL instance for Airflow metadata storage.
+  # Used by the worker service for DAG state and task history.
   #--------------------------------------------------------------------------
-
   airflow-postgres:
     image: postgres:13
     container_name: papersummarizer-airflow-postgres
@@ -169,29 +190,6 @@ services:
       timeout: 5s
       retries: 5
 
-  airflow:
-    <<: *airflow-common
-    container_name: papersummarizer-airflow
-    restart: always
-    ports:
-      - "${HOSTPORT_AIRFLOW:-8080}:8080"
-    volumes:
-      - ./airflow/dags:/opt/airflow-data/dags
-      - ./airflow/logs:/opt/airflow-data/logs
-      - ./airflow/plugins:/opt/airflow-data/plugins
-    environment:
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL=10
-      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
-      - AIRFLOW__WEBSERVER__WEB_SERVER_PROTOCOL=http
-      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow-data/dags
-      - AIRFLOW__LOGGING__BASE_LOG_FOLDER=/opt/airflow-data/logs
-      - AIRFLOW__CORE__PLUGINS_FOLDER=/opt/airflow-data/plugins
-    depends_on:
-      airflow-postgres:
-        condition: service_healthy
-
 volumes:
-  qdrant: 
+  qdrant:
   airflow-postgres:
