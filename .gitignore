@@ -16,7 +16,11 @@ __pycache__/
 /data/qdrant/
 /data/keys/
 /data/mysql/
-.env
+
+#environment
+**/.env
+**/.env.*
+!**/.env.example
 
 # Node
 node_modules/

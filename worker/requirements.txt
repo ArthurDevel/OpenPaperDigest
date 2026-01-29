@@ -8,12 +8,11 @@
 # Airflow DAG dependencies
 requests
 beautifulsoup4
-mysqlclient
+psycopg2-binary
 sqlalchemy
 pydantic
 pydantic-settings
 python-dotenv
-pymysql
 pendulum
 selenium
 
@@ -29,7 +28,6 @@ aiofiles
 pdf2image
 
 # shared module dependencies
-qdrant-client
 httpx
 aiohttp
 email-validator

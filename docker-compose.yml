@@ -3,43 +3,30 @@ version: '3.8'
 #--------------------------------------------------------------------------
 # Application Services
 #
-# This is the main section where all the running services for the
-# application are defined.
-#
 # Architecture:
 # - web: Next.js frontend and API routes (TypeScript)
 # - worker: Airflow-based background processing (Python)
-# - mysql: Main application database
-# - mysql_auth: Authentication database
-# - qdrant: Vector database for embeddings
 # - umami: Privacy-focused analytics
+#
+# Database: PostgreSQL hosted on Supabase (external)
 #--------------------------------------------------------------------------
 services:
 
   #--------------------------------------------------------------------------
   # Web Service (Next.js)
-  #
-  # The Next.js web application serving the frontend and API routes.
-  # Built using standalone output mode for efficient Docker deployment.
   #--------------------------------------------------------------------------
   web:
     build:
       context: ./web
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - ./worker/.env
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
     ports:
-      - "${HOSTPORT_FRONTEND:-3000}:3000"
+      - "3000:3000"
     volumes:
       - ./data/paperjsons:/app/data/paperjsons
-    depends_on:
-      mysql:
-        condition: service_healthy
-      mysql_auth:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
@@ -50,103 +37,38 @@ services:
 
   #--------------------------------------------------------------------------
   # Worker Service (Airflow)
-  #
-  # Python-based background worker running Airflow for paper processing.
-  # Handles DAGs, scheduled tasks, and paper ingestion pipelines.
   #--------------------------------------------------------------------------
   worker:
     build:
       context: .
       dockerfile: ./worker/Dockerfile
     env_file:
-      - .env
+      - ./worker/.env
     ports:
-      - "${HOSTPORT_AIRFLOW:-8080}:8080"
+      - "8080:8080"
     volumes:
       - ./worker/dags:/opt/airflow/dags
       - ./worker/logs:/opt/airflow/logs
       - ./data/paperjsons:/app/data/paperjsons
     depends_on:
-      mysql:
-        condition: service_healthy
       airflow-postgres:
         condition: service_healthy
-      qdrant:
-        condition: service_started
     restart: unless-stopped
 
-
   #--------------------------------------------------------------------------
-  # Database Services
-  #
-  # These services provide the relational databases for the application.
-  # - `mysql`: The main database for application data (papers, etc.).
-  # - `mysql_auth`: A separate database dedicated to user authentication.
-  # - `qdrant`: The vector database for storing and searching high-dimensional vector embeddings.
-  #--------------------------------------------------------------------------
-  mysql:
-    image: mysql:8.0
-    command: --default-authentication-plugin=mysql_native_password
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    # no host port mapping; MySQL is only accessible on the internal network
-    volumes:
-      - ./data/mysql:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  mysql_auth:
-    image: mysql:8.0
-    command: --default-authentication-plugin=mysql_native_password
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: ${AUTH_MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${AUTH_MYSQL_DATABASE}
-      MYSQL_USER: ${AUTH_MYSQL_USER}
-      MYSQL_PASSWORD: ${AUTH_MYSQL_PASSWORD}
-    volumes:
-      - ./data/mysql_auth:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${AUTH_MYSQL_ROOT_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  qdrant:
-    image: qdrant/qdrant:latest
-    restart: always
-    ports:
-      - "${HOSTPORT_QDRANT:-6333}:${CONTAINERPORT_QDRANT:-6333}"
-      - "${HOSTPORT_QDRANT_GRPC:-6334}:${CONTAINERPORT_QDRANT_GRPC:-6334}"
-    volumes:
-      - ./data/qdrant:/qdrant/storage
-
-
-  #--------------------------------------------------------------------------
-  # Analytics Service
-  #
-  # Umami is a self-hosted, privacy-focused web analytics solution.
-  # Provides visitor insights, page views, and location data without cookies.
-  # You can access the UI at http://localhost:${HOSTPORT_UMAMI:-3001}
-  # Default login: admin / umami (change after first login)
+  # Analytics Service (Umami)
+  # Access at http://localhost:3001 | Default login: admin / umami
   #--------------------------------------------------------------------------
   umami:
     image: ghcr.io/umami-software/umami:postgresql-latest
     container_name: papersummarizer-umami
     restart: always
     ports:
-      - "${HOSTPORT_UMAMI:-3001}:3000"
+      - "3001:3000"
     environment:
-      DATABASE_URL: postgresql://${UMAMI_DB_USER:-umami}:${UMAMI_DB_PASSWORD:-umami}@umami-postgres:5432/${UMAMI_DB_NAME:-umami}
+      DATABASE_URL: postgresql://umami:umami@umami-postgres:5432/umami
       DATABASE_TYPE: postgresql
-      APP_SECRET: ${UMAMI_APP_SECRET:-replace-me-with-a-random-string}
+      APP_SECRET: change-me-in-production
     depends_on:
       umami-postgres:
         condition: service_healthy
@@ -156,32 +78,28 @@ services:
     container_name: papersummarizer-umami-postgres
     restart: always
     environment:
-      POSTGRES_DB: ${UMAMI_DB_NAME:-umami}
-      POSTGRES_USER: ${UMAMI_DB_USER:-umami}
-      POSTGRES_PASSWORD: ${UMAMI_DB_PASSWORD:-umami}
+      POSTGRES_DB: umami
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: umami
     volumes:
       - ./data/umami-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${UMAMI_DB_USER:-umami}"]
+      test: ["CMD-SHELL", "pg_isready -U umami"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-
   #--------------------------------------------------------------------------
   # Airflow Postgres Database
-  #
-  # Dedicated PostgreSQL instance for Airflow metadata storage.
-  # Used by the worker service for DAG state and task history.
   #--------------------------------------------------------------------------
   airflow-postgres:
     image: postgres:13
     container_name: papersummarizer-airflow-postgres
     restart: always
     environment:
-      - POSTGRES_USER=airflow
-      - POSTGRES_PASSWORD=airflow
-      - POSTGRES_DB=airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
     volumes:
       - ./data/airflow-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -191,5 +109,4 @@ services:
       retries: 5
 
 volumes:
-  qdrant:
   airflow-postgres:

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { authClient } from '../../../services/auth';
-import { readAndClearPostLoginCookie } from '../../../authentication/postLogin';
+import { readAndClearPostLoginCookie } from '@/lib/postLogin';
 
 export default function AuthCallbackPage() {
     const searchParams = useSearchParams();

@@ -7,14 +7,14 @@
 // Responsibilities:
 // - Define Paper, PaperSlug, PaperStatusHistory models
 // - Define User, UserList, UserRequest models
-// - Map TypeScript types to existing MySQL schema
+// - Map TypeScript types to existing PostgreSQL schema
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -41,9 +41,9 @@ model Paper {
   processingTimeSeconds   Float?    @map("processing_time_seconds")
   totalCost               Float?    @map("total_cost")
   avgCostPerPage          Float?    @map("avg_cost_per_page")
-  thumbnailDataUrl        String?   @map("thumbnail_data_url") @db.MediumText
+  thumbnailDataUrl        String?   @map("thumbnail_data_url") @db.Text
   externalPopularitySignals Json?   @map("external_popularity_signals")
-  processedContent        String?   @map("processed_content") @db.LongText
+  processedContent        String?   @map("processed_content") @db.Text
   contentHash             String?   @unique @map("content_hash") @db.VarChar(64)
   pdfUrl                  String?   @map("pdf_url") @db.VarChar(512)
 

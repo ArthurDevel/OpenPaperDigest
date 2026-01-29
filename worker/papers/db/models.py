@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text, UniqueConstraint, Float, Boolean, Index, JSON, Date
-from sqlalchemy.dialects.mysql import MEDIUMTEXT, LONGTEXT
 
 from shared.db import Base
 
@@ -33,11 +32,11 @@ class PaperRecord(Base):
     total_cost = Column(Float, nullable=True)
     avg_cost_per_page = Column(Float, nullable=True)
     # Base64 data URL of a 400x400 PNG thumbnail cropped from the top square of the first page
-    thumbnail_data_url = Column(MEDIUMTEXT, nullable=True)
+    thumbnail_data_url = Column(Text, nullable=True)
     # External popularity signals stored as JSON
     external_popularity_signals = Column(JSON, nullable=True)
     # Complete processed paper JSON (replaces file system storage)
-    processed_content = Column(Text().with_variant(LONGTEXT, 'mysql'), nullable=True)
+    processed_content = Column(Text, nullable=True)
     # PDF content hash for non-arXiv papers (SHA-256)
     content_hash = Column(String(64), nullable=True)
     # Direct PDF URL for non-arXiv papers

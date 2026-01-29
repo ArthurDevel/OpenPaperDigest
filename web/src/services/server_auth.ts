@@ -3,8 +3,8 @@ import { magicLink } from "better-auth/plugins";
 import { APIError } from "better-auth/api";
 import { Resend } from 'resend';
 import { render } from '@react-email/render';
-import { MagicLinkEmail } from '../authentication/emails/magic-link-email';
-import { AddToListMagicLinkEmail } from '../authentication/emails/add-to-list-magic-link-email';
+import { MagicLinkEmail } from '@/lib/emails/magic-link-email';
+import { AddToListMagicLinkEmail } from '@/lib/emails/add-to-list-magic-link-email';
 import React from 'react';
 
 // Single BetterAuth server instance shared across handlers

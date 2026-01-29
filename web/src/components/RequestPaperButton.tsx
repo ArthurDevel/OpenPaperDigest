@@ -4,8 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Loader, Lock } from 'lucide-react';
 import { authClient } from '../services/auth';
-import { sendRequestPaperMagicLink } from '../authentication/magicLink';
-import { setPostLoginCookie } from '../authentication/postLogin';
+import { sendRequestPaperMagicLink } from '@/lib/magicLink';
+import { setPostLoginCookie } from '@/lib/postLogin';
 import { addUserRequest, doesUserRequestExist, removeUserRequest } from '../services/requests';
 
 type RequestPaperButtonProps = {

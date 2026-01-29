@@ -5,8 +5,8 @@ import { usePathname } from 'next/navigation';
 import { Loader, Lock } from 'lucide-react';
 import { authClient } from '../services/auth';
 import { addPaperToUserList, isPaperInUserList, removePaperFromUserList } from '../services/users';
-import { setPostLoginCookie } from '../authentication/postLogin';
-import { sendAddToListMagicLink } from '../authentication/magicLink';
+import { setPostLoginCookie } from '@/lib/postLogin';
+import { sendAddToListMagicLink } from '@/lib/magicLink';
 
 type AddToListButtonProps = {
   paperId: string;
