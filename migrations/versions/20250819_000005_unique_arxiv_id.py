@@ -17,14 +17,12 @@ def upgrade() -> None:
     # Delete newer duplicates by arxiv_id, keeping min(id)
     conn.execute(sa.text(
         """
-        DELETE p
-        FROM papers p
-        JOIN (
-            SELECT arxiv_id, MIN(id) AS keep_id
+        DELETE FROM papers
+        WHERE id NOT IN (
+            SELECT MIN(id)
             FROM papers
             GROUP BY arxiv_id
-            HAVING COUNT(*) > 1
-        ) d ON d.arxiv_id = p.arxiv_id AND p.id <> d.keep_id
+        )
         """
     ))
     # Add unique constraint

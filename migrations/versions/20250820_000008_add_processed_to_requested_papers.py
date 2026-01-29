@@ -15,7 +15,7 @@ def upgrade() -> None:
     with op.batch_alter_table('requested_papers') as batch_op:
         batch_op.add_column(sa.Column('processed', sa.Boolean(), nullable=False, server_default=sa.false()))
         # Drop server_default after set
-    op.execute("UPDATE requested_papers SET processed = 0 WHERE processed IS NULL")
+    op.execute("UPDATE requested_papers SET processed = FALSE WHERE processed IS NULL")
     with op.batch_alter_table('requested_papers') as batch_op:
         batch_op.alter_column('processed', server_default=None)
 

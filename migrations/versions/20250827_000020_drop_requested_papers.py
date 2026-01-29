@@ -36,7 +36,7 @@ def downgrade() -> None:
         sa.Column('request_count', sa.Integer(), nullable=False, server_default=sa.text('1')),
         sa.Column('first_requested_at', sa.DateTime(), nullable=False),
         sa.Column('last_requested_at', sa.DateTime(), nullable=False),
-        sa.Column('processed', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        sa.Column('processed', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('title', sa.String(length=512), nullable=True),
         sa.Column('authors', sa.Text(), nullable=True),
         sa.Column('num_pages', sa.Integer(), nullable=True),

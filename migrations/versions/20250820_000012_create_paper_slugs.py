@@ -18,7 +18,7 @@ def upgrade() -> None:
         sa.Column('slug', sa.String(length=255), nullable=False, unique=True),
         sa.Column('paper_uuid', sa.String(length=36), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.Column('tombstone', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        sa.Column('tombstone', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('deleted_at', sa.DateTime(), nullable=True),
     )
 

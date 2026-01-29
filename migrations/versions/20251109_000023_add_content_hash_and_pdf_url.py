@@ -15,15 +15,15 @@ def upgrade() -> None:
     """
     Add support for non-arXiv papers.
     """
-    op.execute("ALTER TABLE papers MODIFY COLUMN arxiv_id VARCHAR(64) NULL")
-    op.execute("ALTER TABLE papers ADD COLUMN content_hash VARCHAR(64) NULL")
-    op.execute("ALTER TABLE papers ADD COLUMN pdf_url VARCHAR(512) NULL")
+    op.alter_column('papers', 'arxiv_id', nullable=True)
+    op.add_column('papers', sa.Column('content_hash', sa.String(64), nullable=True))
+    op.add_column('papers', sa.Column('pdf_url', sa.String(512), nullable=True))
 
 
 def downgrade() -> None:
     """
     Revert changes for non-arXiv paper support.
     """
-    op.execute("ALTER TABLE papers DROP COLUMN pdf_url")
-    op.execute("ALTER TABLE papers DROP COLUMN content_hash")
-    op.execute("ALTER TABLE papers MODIFY COLUMN arxiv_id VARCHAR(64) NOT NULL")
+    op.drop_column('papers', 'pdf_url')
+    op.drop_column('papers', 'content_hash')
+    op.alter_column('papers', 'arxiv_id', nullable=False)

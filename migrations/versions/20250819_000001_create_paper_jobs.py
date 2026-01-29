@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.mysql import BIGINT, VARCHAR
 
 
 # revision identifiers, used by Alembic.
@@ -15,7 +14,7 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         'papers',
-        sa.Column('id', BIGINT(unsigned=True), primary_key=True, autoincrement=True),
+        sa.Column('id', sa.BigInteger(), primary_key=True, autoincrement=True),
         sa.Column('paper_uuid', sa.String(length=36), nullable=False),
         sa.Column('arxiv_id', sa.String(length=64), nullable=False),
         sa.Column('arxiv_version', sa.String(length=10), nullable=True),
@@ -28,8 +27,6 @@ def upgrade() -> None:
         sa.Column('started_at', sa.DateTime(), nullable=True),
         sa.Column('finished_at', sa.DateTime(), nullable=True),
         sa.UniqueConstraint('paper_uuid', name='uq_papers_paper_uuid'),
-        mysql_charset='utf8mb4',
-        mysql_collate='utf8mb4_unicode_ci',
     )
     op.create_index('ix_papers_status_created', 'papers', ['status', 'created_at'])
 

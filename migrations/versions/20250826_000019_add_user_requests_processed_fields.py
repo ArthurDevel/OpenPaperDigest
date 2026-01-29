@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('user_requests', sa.Column('is_processed', sa.Boolean(), nullable=False, server_default=sa.text('0')))
+    op.add_column('user_requests', sa.Column('is_processed', sa.Boolean(), nullable=False, server_default=sa.false()))
     op.add_column('user_requests', sa.Column('processed_slug', sa.String(length=255), nullable=True))
     op.create_index('ix_user_requests_is_processed', 'user_requests', ['is_processed'])
     # Clean up server_default so future inserts rely on ORM default
