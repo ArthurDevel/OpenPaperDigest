@@ -56,20 +56,6 @@ RUN mkdir -p /prisma-client && \
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm run build
 
-# Copy better-auth and all dependencies for migration script
-RUN mkdir -p /migration-deps/@better-auth /migration-deps/@better-fetch /migration-deps/@noble /migration-deps/@standard-schema && \
-    cp -rL node_modules/better-auth /migration-deps/ 2>/dev/null || cp -rL node_modules/.pnpm/better-auth*/node_modules/better-auth /migration-deps/ && \
-    cp -rL node_modules/@better-auth/* /migration-deps/@better-auth/ 2>/dev/null || cp -rL node_modules/.pnpm/@better-auth*/node_modules/@better-auth/* /migration-deps/@better-auth/ && \
-    cp -rL node_modules/@better-fetch/* /migration-deps/@better-fetch/ 2>/dev/null || cp -rL node_modules/.pnpm/@better-fetch*/node_modules/@better-fetch/* /migration-deps/@better-fetch/ && \
-    cp -rL node_modules/@noble/* /migration-deps/@noble/ 2>/dev/null || cp -rL node_modules/.pnpm/@noble*/node_modules/@noble/* /migration-deps/@noble/ && \
-    cp -rL node_modules/@standard-schema/* /migration-deps/@standard-schema/ 2>/dev/null || cp -rL node_modules/.pnpm/@standard-schema*/node_modules/@standard-schema/* /migration-deps/@standard-schema/ && \
-    cp -rL node_modules/better-call /migration-deps/ 2>/dev/null || cp -rL node_modules/.pnpm/better-call*/node_modules/better-call /migration-deps/ && \
-    cp -rL node_modules/defu /migration-deps/ 2>/dev/null || cp -rL node_modules/.pnpm/defu*/node_modules/defu /migration-deps/ && \
-    cp -rL node_modules/jose /migration-deps/ 2>/dev/null || cp -rL node_modules/.pnpm/jose*/node_modules/jose /migration-deps/ && \
-    cp -rL node_modules/kysely /migration-deps/ 2>/dev/null || cp -rL node_modules/.pnpm/kysely*/node_modules/kysely /migration-deps/ && \
-    cp -rL node_modules/nanostores /migration-deps/ 2>/dev/null || cp -rL node_modules/.pnpm/nanostores*/node_modules/nanostores /migration-deps/ && \
-    cp -rL node_modules/zod /migration-deps/ 2>/dev/null || cp -rL node_modules/.pnpm/zod*/node_modules/zod /migration-deps/ && \
-    cp -rL node_modules/mysql2 /migration-deps/ 2>/dev/null || cp -rL node_modules/.pnpm/mysql2*/node_modules/mysql2 /migration-deps/
 
 # ==============================================================================
 # STAGE 3: PRODUCTION
@@ -97,19 +83,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /prisma-client/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma ./prisma
 
-# Copy migration dependencies
-COPY --from=builder /migration-deps/better-auth ./node_modules/better-auth
-COPY --from=builder /migration-deps/@better-auth ./node_modules/@better-auth
-COPY --from=builder /migration-deps/@better-fetch ./node_modules/@better-fetch
-COPY --from=builder /migration-deps/@noble ./node_modules/@noble
-COPY --from=builder /migration-deps/@standard-schema ./node_modules/@standard-schema
-COPY --from=builder /migration-deps/better-call ./node_modules/better-call
-COPY --from=builder /migration-deps/defu ./node_modules/defu
-COPY --from=builder /migration-deps/jose ./node_modules/jose
-COPY --from=builder /migration-deps/kysely ./node_modules/kysely
-COPY --from=builder /migration-deps/nanostores ./node_modules/nanostores
-COPY --from=builder /migration-deps/zod ./node_modules/zod
-COPY --from=builder /migration-deps/mysql2 ./node_modules/mysql2
+# Install migration dependencies
+RUN corepack enable && corepack prepare pnpm@latest --activate && \
+    pnpm add better-auth mysql2
 
 # Copy migration scripts
 COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
