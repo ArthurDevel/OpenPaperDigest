@@ -7,6 +7,7 @@
 
 # Airflow DAG dependencies
 requests
+pymysql
 beautifulsoup4
 psycopg2-binary
 sqlalchemy
