@@ -20,12 +20,15 @@ WORKDIR /app
 # Install dependencies required for native modules
 RUN apk add --no-cache libc6-compat
 
-# Copy package files
-COPY package.json package-lock.json* ./
+# Enable corepack for pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+# Copy package files and pnpm config
+COPY package.json pnpm-lock.yaml .npmrc ./
 COPY prisma ./prisma/
 
 # Install all dependencies (including devDependencies for build)
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 
 # ==============================================================================
 # STAGE 2: BUILD
@@ -34,16 +37,24 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Enable corepack for pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Generate Prisma client
-RUN npx prisma generate
+RUN pnpm exec prisma generate
+
+# Copy prisma client to a known location for the runner stage (handles pnpm symlink structure)
+RUN mkdir -p /prisma-client && \
+    cp -rL node_modules/.prisma /prisma-client/ 2>/dev/null || \
+    cp -rL node_modules/.pnpm/@prisma+client*/node_modules/.prisma /prisma-client/
 
 # Build the Next.js application
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+RUN pnpm run build
 
 # ==============================================================================
 # STAGE 3: PRODUCTION
@@ -67,9 +78,8 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy Prisma schema and generated client (required at runtime)
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+# Copy Prisma client from known location
+COPY --from=builder /prisma-client/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma ./prisma
 
 # Create data directory for paper JSONs

@@ -10,12 +10,11 @@ import { RequestPaperMagicLinkEmail } from './emails/request-paper-magic-link-em
 import React from 'react';
 
 // Single BetterAuth server instance shared across handlers
+if (!process.env.AUTH_MYSQL_URL) {
+  throw new Error('AUTH_MYSQL_URL environment variable is not set');
+}
 const authDbPool = createPool({
-  host: process.env.AUTH_MYSQL_HOST,
-  port: Number(process.env.AUTH_MYSQL_PORT),
-  user: process.env.AUTH_MYSQL_USER,
-  password: process.env.AUTH_MYSQL_PASSWORD,
-  database: process.env.AUTH_MYSQL_DATABASE,
+  uri: process.env.AUTH_MYSQL_URL,
   waitForConnections: true,
   connectionLimit: 10,
 });

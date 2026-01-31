@@ -54,7 +54,6 @@ COPY worker/dags /opt/airflow/dags
 COPY worker/shared /opt/airflow/shared
 COPY worker/papers /opt/airflow/papers
 COPY worker/users /opt/airflow/users
-COPY worker/search /opt/airflow/search
 COPY worker/paperprocessor /opt/airflow/paperprocessor
 
 # Create debugging output directory for paperprocessor (Railway deployment fix)
@@ -72,7 +71,7 @@ USER airflow
 ENV PATH="/home/airflow/.local/bin:$PATH"
 
 # Set PYTHONPATH to include all modules
-ENV PYTHONPATH="/opt/airflow/shared:/opt/airflow/papers:/opt/airflow/users:/opt/airflow/search:/opt/airflow/paperprocessor:$PYTHONPATH"
+ENV PYTHONPATH="/opt/airflow/shared:/opt/airflow/papers:/opt/airflow/users:/opt/airflow/paperprocessor:$PYTHONPATH"
 
 USER root
 
