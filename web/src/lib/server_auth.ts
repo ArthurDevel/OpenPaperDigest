@@ -8,6 +8,7 @@ import { MagicLinkEmail } from './emails/magic-link-email';
 import { AddToListMagicLinkEmail } from './emails/add-to-list-magic-link-email';
 import { RequestPaperMagicLinkEmail } from './emails/request-paper-magic-link-email';
 import React from 'react';
+import { syncNewUser } from '@/services/users.service';
 
 // Single BetterAuth server instance shared across handlers
 if (!process.env.AUTH_MYSQL_URL) {
@@ -69,22 +70,11 @@ export const auth = betterAuth({
     user: {
       create: {
         after: async (user) => {
-          const backendUrl = `http://127.0.0.1:${process.env.NEXT_PUBLIC_CONTAINERPORT_API}/users/sync`;
           try {
-            const response = await fetch(backendUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: user.id, email: user.email }),
-            });
-            if (!response.ok) {
-              const errorBody = await response.text();
-              throw new APIError("INTERNAL_SERVER_ERROR", {
-                message: `Sync failed: ${response.status} ${errorBody}`,
-              });
-            }
+            await syncNewUser({ id: user.id, email: user.email });
           } catch (error) {
             throw new APIError("INTERNAL_SERVER_ERROR", {
-              message: "A network error occurred while creating your account. Please try again later.",
+              message: "Failed to sync user to application database.",
             });
           }
         }
