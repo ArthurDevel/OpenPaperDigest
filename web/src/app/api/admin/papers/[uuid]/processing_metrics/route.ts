@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth';
+import { adminGuard } from '@/lib/admin-auth';
 import * as papersService from '@/services/papers.service';
 import type { ProcessingMetrics } from '@/types/paper';
 
@@ -38,12 +38,9 @@ export async function GET(
   request: NextRequest,
   context: RouteParams
 ): Promise<NextResponse<ProcessingMetrics | ErrorResponse>> {
-  // Verify admin authentication
-  try {
-    await requireAdmin(request);
-  } catch (response) {
-    return response as NextResponse<ErrorResponse>;
-  }
+  // Defense-in-depth: middleware handles auth, this is a fallback
+  const authError = adminGuard(request);
+  if (authError) return authError;
 
   try {
     const { uuid } = await context.params;

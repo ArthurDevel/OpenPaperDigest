@@ -21,7 +21,7 @@ vi.mock('@/lib/db', () => ({
 
 import { prisma } from '@/lib/db';
 
-const mockedPrisma = prisma as {
+const mockedPrisma = prisma as unknown as {
   paperSlug: {
     findUnique: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;

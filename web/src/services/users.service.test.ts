@@ -130,11 +130,11 @@ describe('addToList', () => {
       email: 'test@example.com',
       createdAt: new Date(),
     });
-    mockPaper.findUnique.mockResolvedValue({ id: 1 });
+    mockPaper.findUnique.mockResolvedValue({ id: BigInt(1) } as any);
     mockUserList.findUnique.mockResolvedValue({
       id: BigInt(1),
       userId: 'user-123',
-      paperId: 1,
+      paperId: BigInt(1),
       createdAt: new Date(),
     });
 
@@ -150,12 +150,12 @@ describe('addToList', () => {
       email: 'test@example.com',
       createdAt: new Date(),
     });
-    mockPaper.findUnique.mockResolvedValue({ id: 1 });
+    mockPaper.findUnique.mockResolvedValue({ id: BigInt(1) } as any);
     mockUserList.findUnique.mockResolvedValue(null);
     mockUserList.create.mockResolvedValue({
       id: BigInt(1),
       userId: 'user-123',
-      paperId: 1,
+      paperId: BigInt(1),
       createdAt: new Date(),
     });
 
@@ -183,7 +183,7 @@ describe('removeFromList', () => {
   });
 
   it('returns { deleted: true } when entry is deleted', async () => {
-    mockPaper.findUnique.mockResolvedValue({ id: 1 });
+    mockPaper.findUnique.mockResolvedValue({ id: BigInt(1) } as any);
     mockUserList.deleteMany.mockResolvedValue({ count: 1 });
 
     const result = await removeFromList('user-123', 'paper-uuid');
@@ -195,7 +195,7 @@ describe('removeFromList', () => {
   });
 
   it('returns { deleted: false } when no entry exists to delete', async () => {
-    mockPaper.findUnique.mockResolvedValue({ id: 1 });
+    mockPaper.findUnique.mockResolvedValue({ id: BigInt(1) } as any);
     mockUserList.deleteMany.mockResolvedValue({ count: 0 });
 
     const result = await removeFromList('user-123', 'paper-uuid');
@@ -218,11 +218,11 @@ describe('isInList', () => {
   });
 
   it('returns { exists: true } when entry exists', async () => {
-    mockPaper.findUnique.mockResolvedValue({ id: 1 });
+    mockPaper.findUnique.mockResolvedValue({ id: BigInt(1) } as any);
     mockUserList.findUnique.mockResolvedValue({
       id: BigInt(1),
       userId: 'user-123',
-      paperId: 1,
+      paperId: BigInt(1),
       createdAt: new Date(),
     });
 
@@ -232,7 +232,7 @@ describe('isInList', () => {
   });
 
   it('returns { exists: false } when entry does not exist', async () => {
-    mockPaper.findUnique.mockResolvedValue({ id: 1 });
+    mockPaper.findUnique.mockResolvedValue({ id: BigInt(1) } as any);
     mockUserList.findUnique.mockResolvedValue(null);
 
     const result = await isInList('user-123', 'paper-uuid');
@@ -647,7 +647,7 @@ describe('getProcessingMetrics', () => {
       finishedAt: new Date(),
       errorMessage: null,
       initiatedByUserId: 'different-user',
-    });
+    } as any);
 
     const result = await getProcessingMetrics('user-123', 'paper-uuid');
 
@@ -669,7 +669,7 @@ describe('getProcessingMetrics', () => {
       finishedAt,
       errorMessage: null,
       initiatedByUserId: 'user-123',
-    });
+    } as any);
 
     const result = await getProcessingMetrics('user-123', 'paper-uuid');
 
@@ -700,7 +700,7 @@ describe('getProcessingMetrics', () => {
       finishedAt: null,
       errorMessage: 'Processing failed due to timeout',
       initiatedByUserId: 'user-123',
-    });
+    } as any);
 
     const result = await getProcessingMetrics('user-123', 'paper-uuid');
 

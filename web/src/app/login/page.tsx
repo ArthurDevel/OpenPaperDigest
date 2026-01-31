@@ -27,7 +27,7 @@ export default function LoginPage() {
         setLoading(false);
 
         if (error) {
-            setError(error.message);
+            setError(error.message ?? 'An error occurred');
         } else {
             setMessage('Magic link sent! Please check your email to sign in.');
             setEmail('');

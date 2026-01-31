@@ -80,6 +80,7 @@ export async function listMinimalPapers(
     authors: paper.authors,
     thumbnailDataUrl: paper.thumbnailDataUrl,
     slug: paper.slugs[0]?.slug ?? null,
+    thumbnailUrl: `/api/papers/thumbnails/${paper.paperUuid}`,
   }));
 
   return {

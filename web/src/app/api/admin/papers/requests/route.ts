@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth';
+import { adminGuard } from '@/lib/admin-auth';
 import * as usersService from '@/services/users.service';
 import type { AdminRequestItem } from '@/types/user';
 
@@ -32,12 +32,9 @@ interface ErrorResponse {
 export async function GET(
   request: NextRequest
 ): Promise<NextResponse<AdminRequestItem[] | ErrorResponse>> {
-  // Verify admin authentication
-  try {
-    await requireAdmin(request);
-  } catch (response) {
-    return response as NextResponse<ErrorResponse>;
-  }
+  // Defense-in-depth: middleware handles auth, this is a fallback
+  const authError = adminGuard(request);
+  if (authError) return authError;
 
   try {
     const requests = await usersService.getAllRequests();

@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth';
+import { adminGuard } from '@/lib/admin-auth';
 import * as papersService from '@/services/papers.service';
 
 // ============================================================================
@@ -36,12 +36,9 @@ interface ErrorResponse {
 export async function POST(
   request: NextRequest
 ): Promise<NextResponse<ImportSuccessResponse | ErrorResponse>> {
-  // Verify admin authentication
-  try {
-    await requireAdmin(request);
-  } catch (response) {
-    return response as NextResponse<ErrorResponse>;
-  }
+  // Defense-in-depth: middleware handles auth, this is a fallback
+  const authError = adminGuard(request);
+  if (authError) return authError;
 
   try {
     // Parse request body

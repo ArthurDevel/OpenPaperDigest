@@ -52,7 +52,7 @@ import {
   restartPaper,
 } from './papers.service';
 
-const mockedPrisma = prisma as {
+const mockedPrisma = prisma as unknown as {
   paper: {
     findUnique: ReturnType<typeof vi.fn>;
     findMany: ReturnType<typeof vi.fn>;

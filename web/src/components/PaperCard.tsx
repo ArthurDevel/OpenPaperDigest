@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from 'react';
-import type { MinimalPaperItem, PaperSummary } from '../types/paper';
+import type { MinimalPaperItem } from '../types/paper';
+import type { PaperSummaryResponse } from '../services/api';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -20,7 +21,7 @@ interface PaperCardProps {
   paper: MinimalPaperItem;
   isExpanded: boolean;
   isLoadingSummary: boolean;
-  summary?: PaperSummary;
+  summary?: PaperSummaryResponse;
   onToggleExpand: (paperUuid: string) => void;
   onLoadSummary?: (paperUuid: string) => void;
 }

@@ -9,6 +9,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as papersService from '@/services/papers.service';
 import type { PaginatedMinimalPapers } from '@/types/paper';
 
+// Force dynamic rendering - this route uses searchParams
+export const dynamic = 'force-dynamic';
+
 // ============================================================================
 // CONSTANTS
 // ============================================================================

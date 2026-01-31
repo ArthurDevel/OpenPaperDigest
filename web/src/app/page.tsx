@@ -12,8 +12,8 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback, useLayoutEffect } from 'react';
-import type { MinimalPaperItem, PaperSummary } from '../types/paper';
-import { listMinimalPapersPaginated, fetchPaperSummary } from '../services/api';
+import type { MinimalPaperItem } from '../types/paper';
+import { listMinimalPapersPaginated, fetchPaperSummary, PaperSummaryResponse } from '../services/api';
 import PaperCard from '../components/PaperCard';
 import { usePaperImpression, trackPaperOpened } from '../hooks/useUmamiTracking';
 import NewPapersBanner from '../components/NewPapersBanner';
@@ -42,7 +42,7 @@ const PaperCardWithImpressionTracking = ({
   paper: MinimalPaperItem;
   isExpanded: boolean;
   isLoadingSummary: boolean;
-  summary?: PaperSummary;
+  summary?: PaperSummaryResponse;
   onToggleExpand: (paperUuid: string) => void;
   onLoadSummary?: (paperUuid: string) => void;
 }) => {
@@ -72,7 +72,7 @@ export default function ScrollingPapersPage() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [hasMore, setHasMore] = useState<boolean>(true);
   const [expandedPaperIds, setExpandedPaperIds] = useState<Set<string>>(new Set());
-  const [paperSummaries, setPaperSummaries] = useState<Map<string, PaperSummary>>(new Map());
+  const [paperSummaries, setPaperSummaries] = useState<Map<string, PaperSummaryResponse>>(new Map());
   const [loadingSummaries, setLoadingSummaries] = useState<Set<string>>(new Set());
   const [pendingScrollAdjustment, setPendingScrollAdjustment] = useState<{ elementId: string; offsetFromTop: number } | null>(null);
 

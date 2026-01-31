@@ -46,7 +46,7 @@ export async function GET(
 
     const { data, mediaType } = await papersService.getThumbnail(uuid);
 
-    return new NextResponse(data, {
+    return new NextResponse(new Uint8Array(data), {
       status: 200,
       headers: {
         'Content-Type': mediaType,

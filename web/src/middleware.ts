@@ -55,8 +55,7 @@ export function middleware(req: Request) {
 }
 
 export const config = {
-  // Limit UI popup strictly to the management page; backend still enforces API auth
-  matcher: ['/management'],
+  matcher: ['/management', '/api/admin/:path*'],
 }
 
 
