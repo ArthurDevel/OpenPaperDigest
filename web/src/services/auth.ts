@@ -14,6 +14,12 @@ import { createClient } from '@/lib/supabase/client';
 import type { User, AuthError, SupabaseClient } from '@supabase/supabase-js';
 
 // ============================================================================
+// CONSTANTS
+// ============================================================================
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || '';
+
+// ============================================================================
 // TYPES
 // ============================================================================
 
@@ -87,7 +93,7 @@ export async function signInWithMagicLink(
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: emailRedirectTo || `${window.location.origin}/auth/callback`,
+      emailRedirectTo: emailRedirectTo || `${SITE_URL}/auth/callback`,
     },
   });
   return { error };
