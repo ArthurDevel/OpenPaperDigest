@@ -425,6 +425,44 @@ describe('Users API - POST /api/users/me/list/[uuid]', () => {
       },
     });
   });
+
+  it('auto-creates user and adds paper when new Supabase user adds to list', async () => {
+    // User is authenticated with Supabase but does NOT exist in app's users table yet
+    // This is the "first action" scenario for a new user
+    mockSupabaseAuthenticated();
+
+    // Mock user NOT found in app's users table (first-time user)
+    prismaMock.user.findUnique.mockResolvedValue(null);
+    // Mock paper exists
+    prismaMock.paper.findUnique.mockResolvedValue({ id: 1, paperUuid: generateTestUuid() });
+    // Mock paper not already in list
+    prismaMock.userList.findUnique.mockResolvedValue(null);
+    // Mock successful user creation (if auto-created)
+    prismaMock.user.create = vi.fn().mockResolvedValue({ id: TEST_USER_ID, email: TEST_USER_EMAIL });
+    // Mock successful list item creation
+    prismaMock.userList.create.mockResolvedValue({
+      userId: TEST_USER_ID,
+      paperId: 1,
+    });
+
+    const appHandler = await import('@/app/api/users/me/list/[uuid]/route');
+    const uuid = generateTestUuid();
+
+    await testApiHandler({
+      appHandler,
+      params: { uuid },
+      test: async ({ fetch }) => {
+        const response = await fetch({ method: 'POST' });
+
+        // EXPECTED: Should succeed and auto-create the user
+        // CURRENT: Returns 404 "User not found" because user doesn't exist in app DB
+        expect(response.status).toBe(200);
+
+        const data = await response.json();
+        expect(data).toHaveProperty('created', true);
+      },
+    });
+  });
 });
 
 // ============================================================================
