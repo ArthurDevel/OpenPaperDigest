@@ -56,6 +56,15 @@ RUN mkdir -p /prisma-client && \
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm run build
 
+# Copy better-auth and mysql2 for migration script (handles pnpm symlink structure)
+RUN mkdir -p /migration-deps && \
+    cp -rL node_modules/better-auth /migration-deps/ 2>/dev/null || \
+    cp -rL node_modules/.pnpm/better-auth*/node_modules/better-auth /migration-deps/ && \
+    cp -rL node_modules/mysql2 /migration-deps/ 2>/dev/null || \
+    cp -rL node_modules/.pnpm/mysql2*/node_modules/mysql2 /migration-deps/ && \
+    cp -rL node_modules/kysely /migration-deps/ 2>/dev/null || \
+    cp -rL node_modules/.pnpm/kysely*/node_modules/kysely /migration-deps/
+
 # ==============================================================================
 # STAGE 3: PRODUCTION
 # ==============================================================================
@@ -82,6 +91,14 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /prisma-client/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma ./prisma
 
+# Copy migration dependencies
+COPY --from=builder /migration-deps/better-auth ./node_modules/better-auth
+COPY --from=builder /migration-deps/mysql2 ./node_modules/mysql2
+COPY --from=builder /migration-deps/kysely ./node_modules/kysely
+
+# Copy migration scripts
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
+
 # Create data directory for paper JSONs
 RUN mkdir -p /app/data/paperjsons && chown -R nextjs:nodejs /app/data
 
@@ -95,5 +112,5 @@ EXPOSE 3000
 ENV HOSTNAME="0.0.0.0"
 ENV PORT=3000
 
-# Start the server
-CMD ["node", "server.js"]
+# Start the server (runs migrations first, then starts Next.js)
+CMD ["sh", "scripts/start.sh"]
