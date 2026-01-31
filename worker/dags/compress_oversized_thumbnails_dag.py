@@ -181,7 +181,7 @@ def compress_thumbnail(image_bytes: bytes) -> Tuple[bytes, Dict[str, any]]:
 @dag(
     dag_id="compress_oversized_thumbnails",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
-    schedule=None,  # Manual trigger only
+    schedule="0 0 * * *",  # Daily at midnight UTC
     catchup=False,
     max_active_runs=1,
     tags=["papers", "maintenance", "optimization"],

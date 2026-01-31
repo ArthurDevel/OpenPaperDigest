@@ -185,7 +185,7 @@ def compress_figure(image_bytes: bytes) -> Tuple[bytes, Dict[str, Any]]:
 @dag(
     dag_id="compress_oversized_figures",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
-    schedule="0 0 * * *",  # Daily at midnight UTC
+    schedule="0 1 * * *",  # Daily at 1 AM UTC
     catchup=False,
     max_active_runs=1,
     tags=["papers", "maintenance", "optimization"],
@@ -201,7 +201,7 @@ def compress_figure(image_bytes: bytes) -> Tuple[bytes, Dict[str, Any]]:
 
     Finds and compresses large figure images embedded in processed_content JSON.
 
-    **Schedule:** Daily at midnight UTC
+    **Schedule:** Daily at 1 AM UTC
 
     **Parameters:**
     - `dry_run` (default: False): If True, runs analysis and compression but doesn't save to database.
