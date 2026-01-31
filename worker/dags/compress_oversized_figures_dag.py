@@ -30,8 +30,8 @@ except ImportError:
 ### CONSTANTS ###
 
 MAX_SIZE_KB = 100          # Only compress figures larger than 100 KB
-TARGET_WIDTH = 1200        # Resize to 1200px width (maintains aspect ratio)
-JPEG_QUALITY = 85          # Compression quality (85 is good balance)
+TARGET_WIDTH = 800         # Resize to 800px width (maintains aspect ratio)
+WEBP_QUALITY = 85          # Compression quality (85 is good balance)
 BATCH_SIZE = 20            # Process 20 papers per batch (fewer since more work per paper)
 
 
@@ -104,23 +104,23 @@ def decode_data_url(data_url: str) -> Tuple[bytes, str]:
     return base64.b64decode(base64_data), mime_type
 
 
-def encode_to_jpeg_data_url(image_bytes: bytes) -> str:
+def encode_to_webp_data_url(image_bytes: bytes) -> str:
     """
-    Encode image bytes to a JPEG data URL.
+    Encode image bytes to a WebP data URL.
 
     Args:
         image_bytes: Raw image bytes
 
     Returns:
-        str: Data URL string (e.g., "data:image/jpeg;base64,...")
+        str: Data URL string (e.g., "data:image/webp;base64,...")
     """
     base64_str = base64.b64encode(image_bytes).decode('utf-8')
-    return f"data:image/jpeg;base64,{base64_str}"
+    return f"data:image/webp;base64,{base64_str}"
 
 
 def compress_figure(image_bytes: bytes) -> Tuple[bytes, Dict[str, Any]]:
     """
-    Compress and resize a figure image.
+    Compress and resize a figure image to WebP format.
 
     Args:
         image_bytes: Original image bytes
@@ -152,19 +152,15 @@ def compress_figure(image_bytes: bytes) -> Tuple[bytes, Dict[str, Any]]:
         new_width, new_height = original_width, original_height
         resized_image = original_image
 
-    # Convert to RGB if necessary (JPEG doesn't support transparency)
-    if resized_image.mode in ('RGBA', 'LA', 'P'):
-        rgb_image = Image.new('RGB', resized_image.size, (255, 255, 255))
-        if resized_image.mode == 'P':
-            resized_image = resized_image.convert('RGBA')
-        rgb_image.paste(resized_image, mask=resized_image.split()[-1] if resized_image.mode in ('RGBA', 'LA') else None)
-        resized_image = rgb_image
-    elif resized_image.mode != 'RGB':
-        resized_image = resized_image.convert('RGB')
+    # WebP supports transparency, so just convert palette mode to RGBA
+    if resized_image.mode == 'P':
+        resized_image = resized_image.convert('RGBA')
+    elif resized_image.mode == 'LA':
+        resized_image = resized_image.convert('RGBA')
 
-    # Compress as JPEG
+    # Compress as WebP
     output_buffer = io.BytesIO()
-    resized_image.save(output_buffer, format='JPEG', quality=JPEG_QUALITY, optimize=True)
+    resized_image.save(output_buffer, format='WEBP', quality=WEBP_QUALITY, method=6)
     compressed_bytes = output_buffer.getvalue()
     new_size_kb = len(compressed_bytes) / 1024
 
@@ -189,13 +185,13 @@ def compress_figure(image_bytes: bytes) -> Tuple[bytes, Dict[str, Any]]:
 @dag(
     dag_id="compress_oversized_figures",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
-    schedule=None,  # Manual trigger only
+    schedule="0 0 * * *",  # Daily at midnight UTC
     catchup=False,
     max_active_runs=1,
     tags=["papers", "maintenance", "optimization"],
     params={
         "dry_run": Param(
-            default=True,
+            default=False,
             type="boolean",
             description="If True, analyze and compress figures but don't save changes to database"
         ),
@@ -205,34 +201,39 @@ def compress_figure(image_bytes: bytes) -> Tuple[bytes, Dict[str, Any]]:
 
     Finds and compresses large figure images embedded in processed_content JSON.
 
+    **Schedule:** Daily at midnight UTC
+
     **Parameters:**
-    - `dry_run` (default: True): If True, runs analysis and compression but doesn't save to database.
-      Set to False to actually persist the compressed figures.
+    - `dry_run` (default: False): If True, runs analysis and compression but doesn't save to database.
+      Set to True for testing without persisting changes.
 
     **Configuration (hardcoded constants):**
     - Max figure size threshold: 100 KB
-    - Target width: 1200px (maintains aspect ratio)
-    - JPEG quality: 85%
+    - Target width: 800px (maintains aspect ratio)
+    - WebP quality: 85%
     - Batch size: 20 papers per commit
 
     **What it does:**
     1. Scans all completed papers with processed_content
     2. Parses the JSON and identifies figures larger than 100 KB
-    3. Compresses them to JPEG at 1200px width and 85% quality
-    4. Updates the processed_content JSON in batches (unless dry_run=True)
-    5. Generates a summary report with compression statistics
+    3. Compresses them to WebP at 800px width and 85% quality
+    4. Only replaces if compressed version is smaller than original
+    5. Updates the processed_content JSON in batches (unless dry_run=True)
+    6. Generates a summary report with compression statistics
 
     **Expected results:**
-    - 60-80% reduction in figure sizes
+    - 30-60% reduction in figure sizes (WebP is efficient for diagrams)
     - Significantly smaller processed_content JSON
     - Faster API responses when loading paper data
+    - Preserves transparency for diagrams that need it
 
     **Safety:**
     - Only processes completed papers
+    - Only replaces if compression actually reduces size
     - Batch commits for atomicity
     - Auto-rollback on errors
     - Can be re-run safely (skips already-compressed figures under threshold)
-    - **dry_run=True by default** to prevent accidental data modification
+    - Use `dry_run=True` for testing without saving changes
     """,
 )
 def compress_oversized_figures_dag():
@@ -251,51 +252,78 @@ def compress_oversized_figures_dag():
         print(f"Scanning for figures larger than {MAX_SIZE_KB} KB...")
 
         papers_to_process = []
+        scan_batch_size = 50  # Process 50 papers at a time to avoid memory issues
+        offset = 0
+        total_scanned = 0
 
         with database_session() as session:
-            # Query all completed papers with processed_content
-            papers = session.query(PaperRecord).filter(
+            # Get total count first (without loading content)
+            total_count = session.query(PaperRecord).filter(
                 PaperRecord.status == 'completed',
                 PaperRecord.processed_content.isnot(None)
-            ).all()
+            ).count()
 
-            print(f"Found {len(papers)} completed papers with processed_content")
+            print(f"Found {total_count} completed papers to scan")
 
-            # Check each paper's figures
-            for paper in papers:
-                try:
-                    content = json.loads(paper.processed_content)
-                    figures = content.get("figures", [])
+            # Scan in batches to avoid loading all processed_content into memory
+            while offset < total_count:
+                papers = session.query(PaperRecord).filter(
+                    PaperRecord.status == 'completed',
+                    PaperRecord.processed_content.isnot(None)
+                ).order_by(PaperRecord.id).offset(offset).limit(scan_batch_size).all()
 
-                    if not figures:
-                        continue
+                if not papers:
+                    break
 
-                    oversized_count = 0
-                    total_oversized_kb = 0
+                batch_num = (offset // scan_batch_size) + 1
+                total_batches = (total_count + scan_batch_size - 1) // scan_batch_size
+                print(f"Scanning batch {batch_num}/{total_batches} ({len(papers)} papers)...")
 
-                    for figure in figures:
-                        image_data_url = figure.get("image_data_url", "")
-                        if not image_data_url or "base64," not in image_data_url:
+                # Check each paper's figures
+                for paper in papers:
+                    total_scanned += 1
+                    try:
+                        content = json.loads(paper.processed_content)
+                        figures = content.get("figures", [])
+
+                        if not figures:
                             continue
 
-                        base64_data = image_data_url.split("base64,", 1)[1]
-                        size_kb = calculate_base64_size_kb(base64_data)
+                        oversized_count = 0
+                        total_oversized_kb = 0
 
-                        if size_kb > MAX_SIZE_KB:
-                            oversized_count += 1
-                            total_oversized_kb += size_kb
+                        for figure in figures:
+                            image_data_url = figure.get("image_data_url", "")
+                            if not image_data_url or "base64," not in image_data_url:
+                                continue
 
-                    if oversized_count > 0:
-                        papers_to_process.append({
-                            'paper_uuid': paper.paper_uuid,
-                            'oversized_figure_count': oversized_count,
-                            'total_oversized_kb': round(total_oversized_kb, 2)
-                        })
+                            # Skip already-compressed WebP images
+                            if image_data_url.startswith("data:image/webp"):
+                                continue
 
-                except Exception as e:
-                    print(f"Error checking figures for {paper.paper_uuid}: {e}")
-                    continue
+                            base64_data = image_data_url.split("base64,", 1)[1]
+                            size_kb = calculate_base64_size_kb(base64_data)
 
+                            if size_kb > MAX_SIZE_KB:
+                                oversized_count += 1
+                                total_oversized_kb += size_kb
+
+                        if oversized_count > 0:
+                            papers_to_process.append({
+                                'paper_uuid': paper.paper_uuid,
+                                'oversized_figure_count': oversized_count,
+                                'total_oversized_kb': round(total_oversized_kb, 2)
+                            })
+
+                    except Exception as e:
+                        print(f"Error checking figures for {paper.paper_uuid}: {e}")
+                        continue
+
+                # Clear session to free memory after each batch
+                session.expire_all()
+                offset += scan_batch_size
+
+        print(f"\nScanned {total_scanned} papers")
         print(f"Found {len(papers_to_process)} papers with oversized figures")
 
         if papers_to_process:
@@ -334,7 +362,7 @@ def compress_oversized_figures_dag():
 
         mode_str = "DRY RUN" if dry_run else "LIVE"
         print(f"\n[{mode_str}] Starting compression of figures in {len(papers_to_process)} papers...")
-        print(f"Configuration: {TARGET_WIDTH}px width, {JPEG_QUALITY}% quality, batches of {BATCH_SIZE}")
+        print(f"Configuration: {TARGET_WIDTH}px width, WebP {WEBP_QUALITY}% quality, batches of {BATCH_SIZE}")
 
         if dry_run:
             print("⚠️  DRY RUN MODE: Changes will NOT be saved to database")
@@ -386,6 +414,10 @@ def compress_oversized_figures_dag():
                             if not image_data_url or "base64," not in image_data_url:
                                 continue
 
+                            # Skip already-compressed WebP images
+                            if image_data_url.startswith("data:image/webp"):
+                                continue
+
                             base64_data = image_data_url.split("base64,", 1)[1]
                             size_kb = calculate_base64_size_kb(base64_data)
 
@@ -396,15 +428,21 @@ def compress_oversized_figures_dag():
                                 # Decode, compress, and re-encode
                                 image_bytes, _ = decode_data_url(image_data_url)
                                 compressed_bytes, stats = compress_figure(image_bytes)
-                                new_data_url = encode_to_jpeg_data_url(compressed_bytes)
 
-                                # Update figure in content
-                                figures[i]["image_data_url"] = new_data_url
+                                # Only use compressed version if it's actually smaller
+                                if stats['new_size_kb'] < stats['original_size_kb']:
+                                    new_data_url = encode_to_webp_data_url(compressed_bytes)
 
-                                # Update stats
-                                paper_stats['figures_compressed'] += 1
-                                paper_stats['original_total_kb'] += stats['original_size_kb']
-                                paper_stats['compressed_total_kb'] += stats['new_size_kb']
+                                    # Update figure in content
+                                    figures[i]["image_data_url"] = new_data_url
+
+                                    # Update stats
+                                    paper_stats['figures_compressed'] += 1
+                                    paper_stats['original_total_kb'] += stats['original_size_kb']
+                                    paper_stats['compressed_total_kb'] += stats['new_size_kb']
+                                else:
+                                    # Skip - compression made it larger
+                                    paper_stats['figures_skipped'] = paper_stats.get('figures_skipped', 0) + 1
 
                             except Exception as e:
                                 print(f"    ⚠️  Figure {i} in {paper_uuid}: Error - {e}")
