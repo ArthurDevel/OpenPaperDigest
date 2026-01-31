@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import mysql
 
 
 # revision identifiers, used by Alembic.
@@ -13,12 +12,13 @@ depends_on = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table('papers') as batch_op:
-        batch_op.alter_column('thumbnail_data_url', type_=mysql.MEDIUMTEXT())
+    # PostgreSQL TEXT has no size limit, so this is a no-op on PostgreSQL
+    # Keeping for migration history consistency
+    pass
 
 
 def downgrade() -> None:
-    with op.batch_alter_table('papers') as batch_op:
-        batch_op.alter_column('thumbnail_data_url', type_=sa.Text())
+    # No-op on PostgreSQL
+    pass
 
 

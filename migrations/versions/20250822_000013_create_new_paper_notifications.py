@@ -18,7 +18,7 @@ def upgrade() -> None:
         sa.Column('email', sa.String(length=255), nullable=False),
         sa.Column('arxiv_id', sa.String(length=255), nullable=False),
         sa.Column('requested_at', sa.DateTime(), nullable=False),
-        sa.Column('notified', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        sa.Column('notified', sa.Boolean(), nullable=False, server_default=sa.false()),
     )
 
 

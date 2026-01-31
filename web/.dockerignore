@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+.next/
+.turbo/
+
+# Environment files (use build args or runtime env)
+.env
+.env.local
+.env.production
+
+# Development
+*.log
+.DS_Store
+
+# Tests
+tests/
+coverage/

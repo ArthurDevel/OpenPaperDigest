@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.mysql import LONGTEXT
 
 
 # revision identifiers, used by Alembic.
@@ -21,7 +20,7 @@ def upgrade() -> None:
         batch_op.add_column(
             sa.Column(
                 'processed_content',
-                sa.Text().with_variant(LONGTEXT, 'mysql'),
+                sa.Text(),
                 nullable=True
             )
         )

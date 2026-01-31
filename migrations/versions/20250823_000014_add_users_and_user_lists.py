@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import mysql
 
 
 # revision identifiers, used by Alembic.
@@ -26,8 +25,7 @@ def upgrade() -> None:
         'user_lists',
         sa.Column('id', sa.BigInteger(), primary_key=True, autoincrement=True),
         sa.Column('user_id', sa.String(length=128), nullable=False),
-        # Match papers.id which was created as UNSIGNED BIGINT in earlier migration
-        sa.Column('paper_id', sa.BigInteger().with_variant(mysql.BIGINT(unsigned=True), 'mysql'), nullable=False),
+        sa.Column('paper_id', sa.BigInteger(), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], name='fk_user_lists_user', ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['paper_id'], ['papers.id'], name='fk_user_lists_paper', ondelete='CASCADE'),

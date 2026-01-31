@@ -1,0 +1,37 @@
+# ==============================================================================
+# Worker Service Dependencies
+# ==============================================================================
+# This file contains Python dependencies for the Airflow worker service.
+# Note: FastAPI/uvicorn are NOT included here - API is now served by Next.js
+# ==============================================================================
+
+# Airflow DAG dependencies
+requests
+pymysql
+beautifulsoup4
+psycopg2-binary
+sqlalchemy
+pydantic
+pydantic-settings
+python-dotenv
+pendulum
+selenium
+
+# paperprocessor dependencies
+pillow
+numpy
+PyMuPDF
+scipy
+rapidfuzz
+openai
+mistralai
+aiofiles
+pdf2image
+
+# shared module dependencies
+httpx
+aiohttp
+email-validator
+
+# Fix protobuf version conflicts
+protobuf==3.20.3

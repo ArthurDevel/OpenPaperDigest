@@ -13,9 +13,9 @@ venv/
 
 # Node / Next.js artifacts
 node_modules/
-frontend/node_modules/
-frontend/.next/
-frontend/.turbo/
+web/node_modules/
+web/.next/
+web/.turbo/
 
 # OS / Editor
 .DS_Store
@@ -31,4 +31,4 @@ testscripts/
 
 # Logs
 logs/
-airflow/logs/
+worker/logs/
