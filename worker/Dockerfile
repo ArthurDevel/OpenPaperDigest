@@ -38,8 +38,8 @@ RUN apt-get update && \
 
 USER airflow
 
-# Copy requirements file from worker directory
-COPY worker/requirements.txt .
+# Copy requirements file
+COPY requirements.txt .
 
 # Run pip installs as airflow user with --user flag
 RUN pip install --user --no-cache-dir -r requirements.txt
@@ -49,12 +49,12 @@ RUN pip install --user --no-cache-dir requests
 # APPLICATION CODE
 # ==============================================================================
 
-# Copy all Python modules from worker directory
-COPY worker/dags /opt/airflow/dags
-COPY worker/shared /opt/airflow/shared
-COPY worker/papers /opt/airflow/papers
-COPY worker/users /opt/airflow/users
-COPY worker/paperprocessor /opt/airflow/paperprocessor
+# Copy all Python modules
+COPY dags /opt/airflow/dags
+COPY shared /opt/airflow/shared
+COPY papers /opt/airflow/papers
+COPY users /opt/airflow/users
+COPY paperprocessor /opt/airflow/paperprocessor
 
 # Create debugging output directory for paperprocessor (Railway deployment fix)
 USER root
@@ -76,13 +76,13 @@ ENV PYTHONPATH="/opt/airflow/shared:/opt/airflow/papers:/opt/airflow/users:/opt/
 USER root
 
 # Copy supervisord configuration
-COPY worker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Allow airflow user to use sudo without password for directory setup
 RUN echo "airflow ALL=(ALL) NOPASSWD: /bin/mkdir, /bin/chown" >> /etc/sudoers
 
 # Create entrypoint script
-COPY worker/entrypoint.sh /entrypoint.sh
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # ==============================================================================
