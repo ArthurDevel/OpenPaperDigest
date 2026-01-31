@@ -65,7 +65,9 @@ RUN mkdir -p /migration-deps && \
     cp -rL node_modules/mysql2 /migration-deps/ 2>/dev/null || \
     cp -rL node_modules/.pnpm/mysql2*/node_modules/mysql2 /migration-deps/ && \
     cp -rL node_modules/kysely /migration-deps/ 2>/dev/null || \
-    cp -rL node_modules/.pnpm/kysely*/node_modules/kysely /migration-deps/
+    cp -rL node_modules/.pnpm/kysely*/node_modules/kysely /migration-deps/ && \
+    cp -rL node_modules/zod /migration-deps/ 2>/dev/null || \
+    cp -rL node_modules/.pnpm/zod*/node_modules/zod /migration-deps/
 
 # ==============================================================================
 # STAGE 3: PRODUCTION
@@ -98,6 +100,7 @@ COPY --from=builder /migration-deps/better-auth ./node_modules/better-auth
 COPY --from=builder /migration-deps/@better-auth ./node_modules/@better-auth
 COPY --from=builder /migration-deps/mysql2 ./node_modules/mysql2
 COPY --from=builder /migration-deps/kysely ./node_modules/kysely
+COPY --from=builder /migration-deps/zod ./node_modules/zod
 
 # Copy migration scripts
 COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
