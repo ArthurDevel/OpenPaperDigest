@@ -56,10 +56,12 @@ RUN mkdir -p /prisma-client && \
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm run build
 
-# Copy better-auth and mysql2 for migration script (handles pnpm symlink structure)
+# Copy better-auth and dependencies for migration script (handles pnpm symlink structure)
 RUN mkdir -p /migration-deps && \
     cp -rL node_modules/better-auth /migration-deps/ 2>/dev/null || \
     cp -rL node_modules/.pnpm/better-auth*/node_modules/better-auth /migration-deps/ && \
+    cp -rL node_modules/@better-auth /migration-deps/ 2>/dev/null || \
+    cp -rL node_modules/.pnpm/@better-auth*/node_modules/@better-auth /migration-deps/ && \
     cp -rL node_modules/mysql2 /migration-deps/ 2>/dev/null || \
     cp -rL node_modules/.pnpm/mysql2*/node_modules/mysql2 /migration-deps/ && \
     cp -rL node_modules/kysely /migration-deps/ 2>/dev/null || \
@@ -93,6 +95,7 @@ COPY --from=builder /app/prisma ./prisma
 
 # Copy migration dependencies
 COPY --from=builder /migration-deps/better-auth ./node_modules/better-auth
+COPY --from=builder /migration-deps/@better-auth ./node_modules/@better-auth
 COPY --from=builder /migration-deps/mysql2 ./node_modules/mysql2
 COPY --from=builder /migration-deps/kysely ./node_modules/kysely
 
