@@ -5,8 +5,8 @@
  * - GET: Fetch processing metrics (cost, timing, status) for a user's paper
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 import * as usersService from '@/services/users.service';
 import type { ProcessingMetrics } from '@/types/paper';
 
@@ -25,18 +25,19 @@ interface ErrorResponse {
 /**
  * GET handler for fetching processing metrics for a user's paper.
  * Requires authentication. User must have initiated the paper.
- * @param request - The incoming Next.js request
+ * @param _request - The incoming Next.js request (unused)
  * @param params - Route params containing the paper UUID
  * @returns JSON response with processing metrics
  */
 export async function GET(
-  request: NextRequest,
+  _request: Request,
   { params }: { params: Promise<{ uuid: string }> }
 ): Promise<NextResponse<ProcessingMetrics | ErrorResponse>> {
   try {
     // Verify authentication
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session) {
+    const supabase = await createClient();
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -45,7 +46,7 @@ export async function GET(
       return NextResponse.json({ error: 'Missing UUID parameter' }, { status: 400 });
     }
 
-    const userId = session.user.id;
+    const userId = user.id;
     const metrics = await usersService.getProcessingMetrics(userId, uuid);
 
     if (!metrics) {

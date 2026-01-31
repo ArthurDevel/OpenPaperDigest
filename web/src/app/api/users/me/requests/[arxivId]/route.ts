@@ -7,8 +7,8 @@
  * - DELETE: Remove a request for an arXiv paper
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 import * as usersService from '@/services/users.service';
 import type { ExistsResponse, CreatedResponse, DeletedResponse } from '@/types/user';
 
@@ -32,18 +32,19 @@ interface AddRequestBody {
 /**
  * GET handler to check if a request exists for an arXiv paper.
  * Requires authentication.
- * @param request - The incoming Next.js request
+ * @param _request - The incoming Next.js request (unused)
  * @param params - Route params containing the arXiv ID
  * @returns JSON response indicating whether request exists
  */
 export async function GET(
-  request: NextRequest,
+  _request: Request,
   { params }: { params: Promise<{ arxivId: string }> }
 ): Promise<NextResponse<ExistsResponse | ErrorResponse>> {
   try {
     // Verify authentication
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session) {
+    const supabase = await createClient();
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -52,7 +53,7 @@ export async function GET(
       return NextResponse.json({ error: 'Missing arXiv ID parameter' }, { status: 400 });
     }
 
-    const userId = session.user.id;
+    const userId = user.id;
     const result = await usersService.doesRequestExist(userId, arxivId);
     return NextResponse.json(result);
   } catch (error) {
@@ -69,13 +70,14 @@ export async function GET(
  * @returns JSON response indicating whether request was created
  */
 export async function POST(
-  request: NextRequest,
+  request: Request,
   { params }: { params: Promise<{ arxivId: string }> }
 ): Promise<NextResponse<CreatedResponse | ErrorResponse>> {
   try {
     // Verify authentication
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session) {
+    const supabase = await createClient();
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -89,7 +91,7 @@ export async function POST(
     const title = body.title ?? null;
     const authors = body.authors ?? null;
 
-    const userId = session.user.id;
+    const userId = user.id;
     const result = await usersService.addRequest(userId, arxivId, title, authors);
     return NextResponse.json(result);
   } catch (error) {
@@ -106,18 +108,19 @@ export async function POST(
 /**
  * DELETE handler to remove a paper request.
  * Requires authentication.
- * @param request - The incoming Next.js request
+ * @param _request - The incoming Next.js request (unused)
  * @param params - Route params containing the arXiv ID
  * @returns JSON response indicating whether request was removed
  */
 export async function DELETE(
-  request: NextRequest,
+  _request: Request,
   { params }: { params: Promise<{ arxivId: string }> }
 ): Promise<NextResponse<DeletedResponse | ErrorResponse>> {
   try {
     // Verify authentication
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session) {
+    const supabase = await createClient();
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -126,7 +129,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Missing arXiv ID parameter' }, { status: 400 });
     }
 
-    const userId = session.user.id;
+    const userId = user.id;
     const result = await usersService.removeRequest(userId, arxivId);
     return NextResponse.json(result);
   } catch (error) {

@@ -1,50 +1,61 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { authClient } from '../../../services/auth';
-import { getMyUserList, type UserListItem, removePaperFromUserList } from '../../../services/users';
+import { useSession } from '@/services/auth';
+import { getMyUserList, type UserListItem, removePaperFromUserList } from '@/services/users';
 import { Loader } from 'lucide-react';
 
+/**
+ * User's paper list page showing saved papers.
+ * @returns Page component displaying user's saved papers in a table
+ */
 export default function UserListPage() {
-  const { data: session } = authClient.useSession();
+  const { user } = useSession();
   const [items, setItems] = useState<UserListItem[] | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
   const [removing, setRemoving] = useState<string | null>(null);
 
+  // Fetch user's paper list
   useEffect(() => {
     const run = async () => {
-      if (!session?.user?.id) {
+      if (!user?.id) {
         setLoading(false);
         return;
       }
       try {
         setLoading(true);
-        const list = await getMyUserList(session.user.id);
+        const list = await getMyUserList();
         setItems(list);
-      } catch (e: any) {
-        setError(e?.message || 'Failed to load your list');
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : 'Failed to load your list';
+        setError(message);
       } finally {
         setLoading(false);
       }
     };
     run();
-  }, [session?.user?.id]);
+  }, [user?.id]);
 
-  const handleRemove = async (paperUuid: string) => {
-    if (!session?.user?.id) return;
+  /**
+   * Handles removing a paper from the list
+   * @param paperUuid - UUID of the paper to remove
+   */
+  const handleRemove = async (paperUuid: string): Promise<void> => {
+    if (!user?.id) return;
     try {
       setRemoving(paperUuid);
-      await removePaperFromUserList(paperUuid, session.user.id);
+      await removePaperFromUserList(paperUuid);
       setItems((prev) => (prev || []).filter((it) => it.paperUuid !== paperUuid));
-    } catch (e: any) {
-      alert(e?.message || 'Failed to remove');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to remove';
+      alert(message);
     } finally {
       setRemoving(null);
     }
   };
 
-  if (!session?.user?.id) {
+  if (!user?.id) {
     return (
       <div className="p-6 h-full flex flex-col min-h-0">
         <h1 className="text-xl font-semibold mb-2">My list</h1>
@@ -64,7 +75,7 @@ export default function UserListPage() {
       <div className="flex-1 min-h-0">
         {loading ? (
           <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
-            <Loader className="animate-spin w-4 h-4 mr-2" /> Loading…
+            <Loader className="animate-spin w-4 h-4 mr-2" /> Loading...
           </div>
         ) : (
           <div className="h-full overflow-auto">
@@ -108,7 +119,7 @@ export default function UserListPage() {
                             disabled={removing === it.paperUuid}
                             className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
                           >
-                            {removing === it.paperUuid ? 'Removing…' : 'Remove'}
+                            {removing === it.paperUuid ? 'Removing...' : 'Remove'}
                           </button>
                         </div>
                       </td>
@@ -128,5 +139,3 @@ export default function UserListPage() {
     </div>
   );
 }
-
-

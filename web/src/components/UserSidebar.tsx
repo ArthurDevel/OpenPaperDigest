@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { authClient } from '../services/auth';
+import { signOut } from '@/services/auth';
 
 type SidebarItem = {
   href: string;
@@ -15,15 +15,26 @@ const ITEMS: SidebarItem[] = [
   // Future: { href: '/user/settings', label: 'Settings' },
 ];
 
+/**
+ * User sidebar component for navigation within user section.
+ * @returns Sidebar with navigation links and logout button
+ */
 export default function UserSidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const handleLogout = async () => {
+
+  /**
+   * Handles user logout by signing out and redirecting to home
+   */
+  const handleLogout = async (): Promise<void> => {
     try {
-      await authClient.signOut();
-    } catch {}
+      await signOut();
+    } catch {
+      // Ignore sign out errors, redirect anyway
+    }
     router.replace('/');
   };
+
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
@@ -61,5 +72,3 @@ export default function UserSidebar() {
     </div>
   );
 }
-
-

@@ -1,127 +1,78 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { usePathname } from 'next/navigation';
-import { Loader, Lock } from 'lucide-react';
-import { authClient } from '../services/auth';
-import { sendRequestPaperMagicLink } from '@/lib/magicLink';
+import { useRouter } from 'next/navigation';
+import { Loader } from 'lucide-react';
+import { useSession } from '@/services/auth';
 import { setPostLoginCookie } from '@/lib/postLogin';
-import { addUserRequest, doesUserRequestExist, removeUserRequest } from '../services/requests';
+import { addUserRequest, doesUserRequestExist, removeUserRequest } from '@/services/requests';
 
 type RequestPaperButtonProps = {
   arxivId: string;
 };
 
+/**
+ * Button to request processing for an arXiv paper.
+ * Unauthenticated users are redirected to login with a post-login action set.
+ * @param arxivId - arXiv ID of the paper to request
+ * @returns Request paper button component
+ */
 export default function RequestPaperButton({ arxivId }: RequestPaperButtonProps) {
-  const { data: session } = authClient.useSession();
-  const pathname = usePathname();
+  const { user } = useSession();
+  const router = useRouter();
 
   const [pending, setPending] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [showEmailForm, setShowEmailForm] = useState<boolean>(false);
-  const [email, setEmail] = useState<string>('');
-  const [emailSent, setEmailSent] = useState<boolean>(false);
   const [isRequested, setIsRequested] = useState<boolean>(false);
 
+  // Check if user has already requested this paper
   useEffect(() => {
     const run = async () => {
-      if (!session?.user?.id || !arxivId) return;
+      if (!user?.id || !arxivId) return;
       try {
-        const exists = await doesUserRequestExist(arxivId, session.user.id);
+        const exists = await doesUserRequestExist(arxivId);
         setIsRequested(Boolean(exists));
       } catch {
-        // ignore
+        // Ignore errors when checking request status
       }
     };
     run();
-  }, [session?.user?.id, arxivId]);
+  }, [user?.id, arxivId]);
 
-  const handleClick = async () => {
+  /**
+   * Handles button click - adds/removes request or redirects to login
+   */
+  const handleClick = async (): Promise<void> => {
     setError(null);
-    if (!session?.user?.id) {
-      setShowEmailForm(true);
+
+    // If not logged in, set post-login action and redirect to login
+    if (!user?.id) {
+      setPostLoginCookie({
+        method: 'POST',
+        url: `/api/users/me/requests/${encodeURIComponent(arxivId)}`,
+        redirect: window.location.pathname,
+      });
+      router.push('/login');
       return;
     }
+
+    // Toggle request
     try {
       setPending(true);
       if (isRequested) {
-        await removeUserRequest(arxivId, session.user.id);
+        await removeUserRequest(arxivId);
         setIsRequested(false);
       } else {
-        await addUserRequest(arxivId, session.user.id);
+        await addUserRequest(arxivId);
         setIsRequested(true);
       }
-    } catch (e: any) {
-      setError(e?.message || 'Failed to request');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to request';
+      setError(message);
     } finally {
       setPending(false);
     }
   };
-
-  const handleSendMagicLink = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    try {
-      // Set HTTP post-login cookie so callback can perform the request after login
-      setPostLoginCookie({
-        method: 'POST',
-        url: `/api/users/me/requests/${encodeURIComponent(arxivId)}`,
-        redirect: pathname || '/donate',
-      });
-      await sendRequestPaperMagicLink(email, `https://arxiv.org/abs/${encodeURIComponent(arxivId)}`);
-      setShowEmailForm(false);
-      setEmailSent(true);
-    } catch (e: any) {
-      setError(e?.message || 'Failed to send magic link');
-    }
-  };
-
-  // Unauthenticated flow: show form
-  if (!session?.user?.id && showEmailForm) {
-    return (
-      <div className="w-full max-w-md bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-md p-4 flex flex-col gap-3">
-        <div className="text-sm text-gray-700 dark:text-gray-200">
-          Log in and get notified when this paper becomes available
-        </div>
-        <form onSubmit={handleSendMagicLink} className="flex items-center gap-2">
-          <input
-            type="email"
-            required
-            placeholder="your@email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="appearance-none block w-56 px-3 py-1.5 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm"
-          />
-          <button
-            type="submit"
-            className="px-3 py-1.5 text-sm rounded-md border bg-indigo-600 text-white hover:bg-indigo-700 border-transparent"
-          >
-            Get Notified
-          </button>
-        </form>
-        {error && (
-          <div className="p-2 bg-red-100 border border-red-300 text-red-700 rounded text-xs">{error}</div>
-        )}
-        <div className="pt-2 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-          <Lock className="w-3.5 h-3.5" /> MagicLink securely handled by BetterAuth
-        </div>
-      </div>
-    );
-  }
-
-  // Unauthenticated: after email sent, show success with security note
-  if (!session?.user?.id && emailSent) {
-    return (
-      <div className="w-full max-w-md bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-md p-4 flex flex-col gap-3">
-        <div className="text-sm text-gray-700 dark:text-gray-200">
-          Click the link in your inbox to confirm your notification
-        </div>
-        <div className="pt-2 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-          <Lock className="w-3.5 h-3.5" /> MagicLink securely handled by BetterAuth
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex items-center gap-3">
@@ -132,7 +83,7 @@ export default function RequestPaperButton({ arxivId }: RequestPaperButtonProps)
         title={isRequested ? 'Click to remove your request' : 'Request processing for this paper'}
       >
         {pending ? (
-          <span className="inline-flex items-center gap-2"><Loader className="animate-spin w-4 h-4" /> Processing…</span>
+          <span className="inline-flex items-center gap-2"><Loader className="animate-spin w-4 h-4" /> Processing...</span>
         ) : isRequested ? 'Requested' : 'Request Processing'}
       </button>
       {error && (
@@ -141,5 +92,3 @@ export default function RequestPaperButton({ arxivId }: RequestPaperButtonProps)
     </div>
   );
 }
-
-

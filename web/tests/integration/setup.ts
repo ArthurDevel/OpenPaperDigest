@@ -3,12 +3,13 @@
  *
  * Provides common mocks and helpers for API route integration tests.
  * - Mocks Prisma client for database operations
- * - Mocks BetterAuth session for user authentication
+ * - Mocks Supabase client for user authentication
  * - Mocks admin auth helper for admin endpoints
  * - Provides test data factories
  */
 
 import { vi } from 'vitest';
+import { NextResponse } from 'next/server';
 
 // ============================================================================
 // PRISMA MOCK
@@ -69,7 +70,7 @@ vi.mock('@/lib/db', () => ({
 }));
 
 // ============================================================================
-// AUTH MOCK
+// SUPABASE AUTH MOCK
 // ============================================================================
 
 /**
@@ -93,16 +94,16 @@ export const defaultMockSession: MockSession = {
 };
 
 /**
- * Mocked auth object with getSession method
+ * Mocked Supabase client with auth.getUser method
  */
-export const authMock = {
-  api: {
-    getSession: vi.fn(),
+export const mockSupabaseClient = {
+  auth: {
+    getUser: vi.fn(),
   },
 };
 
-vi.mock('@/lib/auth', () => ({
-  auth: authMock,
+vi.mock('@/lib/supabase/server', () => ({
+  createClient: vi.fn(() => Promise.resolve(mockSupabaseClient)),
 }));
 
 // ============================================================================
@@ -110,12 +111,13 @@ vi.mock('@/lib/auth', () => ({
 // ============================================================================
 
 /**
- * Mocked requireAdmin function
+ * Mocked adminGuard function.
+ * Returns null to allow access, or a NextResponse to deny access.
  */
-export const requireAdminMock = vi.fn();
+export const adminGuardMock = vi.fn();
 
 vi.mock('@/lib/admin-auth', () => ({
-  requireAdmin: requireAdminMock,
+  adminGuard: adminGuardMock,
 }));
 
 // ============================================================================
@@ -222,26 +224,38 @@ export function getInvalidAdminAuthHeader(): string {
 export function resetAllMocks(): void {
   vi.clearAllMocks();
 
-  // Reset auth mock to return null (unauthenticated) by default
-  authMock.api.getSession.mockResolvedValue(null);
+  // Reset Supabase auth mock to return unauthenticated by default
+  mockSupabaseClient.auth.getUser.mockResolvedValue({
+    data: { user: null },
+    error: new Error('Not authenticated'),
+  });
 
-  // Reset admin auth mock to reject by default
-  requireAdminMock.mockRejectedValue(
-    new Response('Unauthorized', { status: 401 })
+  // Reset admin auth mock to return 401 by default (unauthorized)
+  adminGuardMock.mockReturnValue(
+    NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   );
 }
 
 /**
- * Sets up auth mock to return a session.
+ * Sets up Supabase auth mock to return an authenticated user.
  * @param session - Session object to return (uses default if not provided)
  */
 export function mockAuthenticatedSession(session: MockSession = defaultMockSession): void {
-  authMock.api.getSession.mockResolvedValue(session);
+  mockSupabaseClient.auth.getUser.mockResolvedValue({
+    data: {
+      user: {
+        id: session.user.id,
+        email: session.user.email,
+      },
+    },
+    error: null,
+  });
 }
 
 /**
  * Sets up admin auth mock to allow access.
+ * Returns null to indicate no error (admin is authenticated).
  */
 export function mockAdminAuthenticated(): void {
-  requireAdminMock.mockResolvedValue(undefined);
+  adminGuardMock.mockReturnValue(null);
 }
