@@ -40,8 +40,8 @@ services:
   #--------------------------------------------------------------------------
   worker:
     build:
-      context: .
-      dockerfile: ./worker/Dockerfile
+      context: ./worker
+      dockerfile: Dockerfile
     env_file:
       - ./worker/.env
     ports:
