@@ -5,7 +5,7 @@
 // Executed before the Next.js server starts.
 // ==============================================================================
 
-import { getMigrations } from "better-auth/db/migration";
+import { getMigrations } from "better-auth/db";
 import { createPool } from 'mysql2/promise';
 
 const AUTH_MYSQL_URL = process.env.AUTH_MYSQL_URL;
