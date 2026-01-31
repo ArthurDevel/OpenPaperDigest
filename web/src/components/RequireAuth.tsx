@@ -2,20 +2,23 @@
 
 import React, { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { authClient } from '../services/auth';
+import { useSession } from '@/services/auth';
 
+/**
+ * RequireAuth component that redirects unauthenticated users to login.
+ * @param children - Child components to render when authenticated
+ * @returns Children if authenticated, or redirects to /login
+ */
 export default function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { data: session, isPending } = authClient.useSession();
+  const { user, isLoading } = useSession();
   const router = useRouter();
 
   useEffect(() => {
-    if (isPending) return;
-    if (!session?.user?.id) {
+    if (isLoading) return;
+    if (!user?.id) {
       router.replace('/login');
     }
-  }, [session?.user?.id, isPending, router]);
+  }, [user?.id, isLoading, router]);
 
   return <>{children}</>;
 }
-
-

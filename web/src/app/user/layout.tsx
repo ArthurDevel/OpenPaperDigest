@@ -2,9 +2,9 @@
 
 import React from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { authClient } from '../../services/auth';
-import UserSidebar from '../../components/UserSidebar';
-import RequireAuth from '../../components/RequireAuth';
+import { signOut } from '@/services/auth';
+import UserSidebar from '@/components/UserSidebar';
+import RequireAuth from '@/components/RequireAuth';
 
 type TabItem = {
   href: string;
@@ -26,12 +26,14 @@ export default function UserLayout({ children }: { children: React.ReactNode }) 
   const router = useRouter();
 
   /**
-   * Handles user logout
+   * Handles user logout by signing out and redirecting to home
    */
   const handleLogout = async (): Promise<void> => {
     try {
-      await authClient.signOut();
-    } catch {}
+      await signOut();
+    } catch {
+      // Ignore sign out errors, redirect anyway
+    }
     router.replace('/');
   };
 
@@ -88,5 +90,3 @@ export default function UserLayout({ children }: { children: React.ReactNode }) 
     </RequireAuth>
   );
 }
-
-

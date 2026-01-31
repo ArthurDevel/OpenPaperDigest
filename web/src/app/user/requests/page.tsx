@@ -1,50 +1,61 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { authClient } from '../../../services/auth';
-import { listMyRequests, type UserRequestItem, removeUserRequest } from '../../../services/requests';
+import { useSession } from '@/services/auth';
+import { listMyRequests, type UserRequestItem, removeUserRequest } from '@/services/requests';
 import { Loader } from 'lucide-react';
 
+/**
+ * User's paper requests page showing requested papers.
+ * @returns Page component displaying user's paper processing requests
+ */
 export default function UserRequestsPage() {
-  const { data: session } = authClient.useSession();
+  const { user } = useSession();
   const [items, setItems] = useState<UserRequestItem[] | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
   const [removing, setRemoving] = useState<string | null>(null);
 
+  // Fetch user's paper requests
   useEffect(() => {
     const run = async () => {
-      if (!session?.user?.id) {
+      if (!user?.id) {
         setLoading(false);
         return;
       }
       try {
         setLoading(true);
-        const list = await listMyRequests(session.user.id);
+        const list = await listMyRequests();
         setItems(list);
-      } catch (e: any) {
-        setError(e?.message || 'Failed to load your requests');
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : 'Failed to load your requests';
+        setError(message);
       } finally {
         setLoading(false);
       }
     };
     run();
-  }, [session?.user?.id]);
+  }, [user?.id]);
 
-  const handleRemove = async (arxivId: string) => {
-    if (!session?.user?.id) return;
+  /**
+   * Handles removing a paper request
+   * @param arxivId - arXiv ID of the paper to remove
+   */
+  const handleRemove = async (arxivId: string): Promise<void> => {
+    if (!user?.id) return;
     try {
       setRemoving(arxivId);
-      await removeUserRequest(arxivId, session.user.id);
+      await removeUserRequest(arxivId);
       setItems((prev) => (prev || []).filter((it) => it.arxivId !== arxivId));
-    } catch (e: any) {
-      alert(e?.message || 'Failed to remove request');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to remove request';
+      alert(message);
     } finally {
       setRemoving(null);
     }
   };
 
-  if (!session?.user?.id) {
+  if (!user?.id) {
     return (
       <div className="p-6 h-full flex flex-col min-h-0">
         <h1 className="text-xl font-semibold mb-2">My requests</h1>
@@ -64,7 +75,7 @@ export default function UserRequestsPage() {
       <div className="flex-1 min-h-0">
         {loading ? (
           <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
-            <Loader className="animate-spin w-4 h-4 mr-2" /> Loading…
+            <Loader className="animate-spin w-4 h-4 mr-2" /> Loading...
           </div>
         ) : (
           <div className="h-full overflow-auto">
@@ -122,7 +133,7 @@ export default function UserRequestsPage() {
                             disabled={removing === it.arxivId}
                             className="text-xs px-2 py-1 rounded border bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
                           >
-                            {removing === it.arxivId ? 'Removing…' : 'Remove'}
+                            {removing === it.arxivId ? 'Removing...' : 'Remove'}
                           </button>
                         </div>
                       </td>
@@ -142,5 +153,3 @@ export default function UserRequestsPage() {
     </div>
   );
 }
-
-

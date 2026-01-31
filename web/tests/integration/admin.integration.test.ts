@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { testApiHandler } from 'next-test-api-route-handler';
 import {
   prismaMock,
-  requireAdminMock,
+  adminGuardMock,
   resetAllMocks,
   mockAdminAuthenticated,
   generateTestUuid,

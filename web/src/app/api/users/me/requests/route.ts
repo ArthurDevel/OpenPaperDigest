@@ -5,8 +5,8 @@
  * - GET: Retrieve all paper requests made by the user
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 import * as usersService from '@/services/users.service';
 import type { UserRequestItem } from '@/types/user';
 
@@ -25,20 +25,18 @@ interface ErrorResponse {
 /**
  * GET handler for fetching user's paper requests.
  * Requires authentication.
- * @param request - The incoming Next.js request
  * @returns JSON response with array of user's paper requests
  */
-export async function GET(
-  request: NextRequest
-): Promise<NextResponse<UserRequestItem[] | ErrorResponse>> {
+export async function GET(): Promise<NextResponse<UserRequestItem[] | ErrorResponse>> {
   try {
     // Verify authentication
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session) {
+    const supabase = await createClient();
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = user.id;
     const requests = await usersService.listRequests(userId);
     return NextResponse.json(requests);
   } catch (error) {

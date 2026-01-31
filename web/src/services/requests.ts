@@ -33,38 +33,18 @@ export type UserRequestItem = {
 const API_BASE = '/api';
 
 // ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-/**
- * Builds headers with auth provider ID for authenticated requests.
- * @param authProviderId - The auth provider ID from the session
- * @param extra - Optional additional headers
- * @returns Headers object with X-Auth-Provider-Id set
- */
-function buildAuthHeaders(authProviderId: string, extra?: HeadersInit): Headers {
-  const headers = new Headers(extra);
-  headers.set('X-Auth-Provider-Id', authProviderId);
-  return headers;
-}
-
-// ============================================================================
 // API FUNCTIONS
 // ============================================================================
 
 /**
  * Add a paper processing request for an arXiv paper.
  * @param arxivId - arXiv ID to request
- * @param authProviderId - User's auth provider ID
  * @returns Response indicating if the request was created
  */
-export async function addUserRequest(
-  arxivId: string,
-  authProviderId: string
-): Promise<CreatedResponse> {
+export async function addUserRequest(arxivId: string): Promise<CreatedResponse> {
   const resp = await fetch(`${API_BASE}/users/me/requests/${encodeURIComponent(arxivId)}`, {
     method: 'POST',
-    headers: buildAuthHeaders(authProviderId),
+    credentials: 'include',
   });
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '');
@@ -76,15 +56,11 @@ export async function addUserRequest(
 /**
  * Check if a paper request exists for the user.
  * @param arxivId - arXiv ID to check
- * @param authProviderId - User's auth provider ID
  * @returns True if request exists
  */
-export async function doesUserRequestExist(
-  arxivId: string,
-  authProviderId: string
-): Promise<boolean> {
+export async function doesUserRequestExist(arxivId: string): Promise<boolean> {
   const resp = await fetch(`${API_BASE}/users/me/requests/${encodeURIComponent(arxivId)}`, {
-    headers: buildAuthHeaders(authProviderId),
+    credentials: 'include',
     cache: 'no-store' as RequestCache,
   });
   if (!resp.ok) return false;
@@ -94,12 +70,11 @@ export async function doesUserRequestExist(
 
 /**
  * List all paper requests for the user.
- * @param authProviderId - User's auth provider ID
  * @returns Array of user's paper requests
  */
-export async function listMyRequests(authProviderId: string): Promise<UserRequestItem[]> {
+export async function listMyRequests(): Promise<UserRequestItem[]> {
   const resp = await fetch(`${API_BASE}/users/me/requests`, {
-    headers: buildAuthHeaders(authProviderId),
+    credentials: 'include',
     cache: 'no-store' as RequestCache,
   });
   if (!resp.ok) {
@@ -112,16 +87,12 @@ export async function listMyRequests(authProviderId: string): Promise<UserReques
 /**
  * Remove a paper request for the user.
  * @param arxivId - arXiv ID to remove
- * @param authProviderId - User's auth provider ID
  * @returns Response indicating if the request was deleted
  */
-export async function removeUserRequest(
-  arxivId: string,
-  authProviderId: string
-): Promise<{ deleted: boolean }> {
+export async function removeUserRequest(arxivId: string): Promise<{ deleted: boolean }> {
   const resp = await fetch(`${API_BASE}/users/me/requests/${encodeURIComponent(arxivId)}`, {
     method: 'DELETE',
-    headers: buildAuthHeaders(authProviderId),
+    credentials: 'include',
   });
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '');

@@ -33,38 +33,18 @@ export type UserListItem = {
 const API_BASE = '/api';
 
 // ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-/**
- * Builds headers with auth provider ID for authenticated requests.
- * @param authProviderId - The auth provider ID from the session
- * @param extra - Optional additional headers
- * @returns Headers object with X-Auth-Provider-Id set
- */
-function buildAuthHeaders(authProviderId: string, extra?: HeadersInit): Headers {
-  const headers = new Headers(extra);
-  headers.set('X-Auth-Provider-Id', authProviderId);
-  return headers;
-}
-
-// ============================================================================
 // API FUNCTIONS
 // ============================================================================
 
 /**
  * Add a paper to the user's reading list.
  * @param paperUuid - UUID of the paper to add
- * @param authProviderId - User's auth provider ID
  * @returns Response indicating if the paper was created
  */
-export async function addPaperToUserList(
-  paperUuid: string,
-  authProviderId: string
-): Promise<CreatedResponse> {
+export async function addPaperToUserList(paperUuid: string): Promise<CreatedResponse> {
   const resp = await fetch(`${API_BASE}/users/me/list/${encodeURIComponent(paperUuid)}`, {
     method: 'POST',
-    headers: buildAuthHeaders(authProviderId),
+    credentials: 'include',
   });
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '');
@@ -76,15 +56,11 @@ export async function addPaperToUserList(
 /**
  * Check if a paper is in the user's reading list.
  * @param paperUuid - UUID of the paper to check
- * @param authProviderId - User's auth provider ID
  * @returns True if paper is in user's list
  */
-export async function isPaperInUserList(
-  paperUuid: string,
-  authProviderId: string
-): Promise<boolean> {
+export async function isPaperInUserList(paperUuid: string): Promise<boolean> {
   const resp = await fetch(`${API_BASE}/users/me/list/${encodeURIComponent(paperUuid)}`, {
-    headers: buildAuthHeaders(authProviderId),
+    credentials: 'include',
     cache: 'no-store' as RequestCache,
   });
   if (!resp.ok) return false;
@@ -95,16 +71,12 @@ export async function isPaperInUserList(
 /**
  * Remove a paper from the user's reading list.
  * @param paperUuid - UUID of the paper to remove
- * @param authProviderId - User's auth provider ID
  * @returns Response indicating if the paper was deleted
  */
-export async function removePaperFromUserList(
-  paperUuid: string,
-  authProviderId: string
-): Promise<{ deleted: boolean }> {
+export async function removePaperFromUserList(paperUuid: string): Promise<{ deleted: boolean }> {
   const resp = await fetch(`${API_BASE}/users/me/list/${encodeURIComponent(paperUuid)}`, {
     method: 'DELETE',
-    headers: buildAuthHeaders(authProviderId),
+    credentials: 'include',
   });
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '');
@@ -115,12 +87,11 @@ export async function removePaperFromUserList(
 
 /**
  * Get the user's complete paper reading list.
- * @param authProviderId - User's auth provider ID
  * @returns Array of papers in user's list
  */
-export async function getMyUserList(authProviderId: string): Promise<UserListItem[]> {
+export async function getMyUserList(): Promise<UserListItem[]> {
   const resp = await fetch(`${API_BASE}/users/me/list`, {
-    headers: buildAuthHeaders(authProviderId),
+    credentials: 'include',
     cache: 'no-store' as RequestCache,
   });
   if (!resp.ok) {

@@ -226,7 +226,7 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
                   {/* Action buttons - bottom right corner */}
                   <div className="mt-4 flex items-center justify-end gap-2">
                     <CopyMarkdownButton paperUuid={initialPaperData.paperId} fiveMinuteSummary={initialPaperData.fiveMinuteSummary} />
-                    <AddToListButtonMobile paperId={initialPaperData.paperId} paperTitle={initialPaperData.title || undefined} />
+                    <AddToListButtonMobile paperId={initialPaperData.paperId} />
                     <button
                       onClick={handleShare}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-blue-500 dark:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors text-blue-600 dark:text-blue-400 text-xs"

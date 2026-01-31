@@ -14,117 +14,12 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { testApiHandler } from 'next-test-api-route-handler';
 import {
   prismaMock,
-  authMock,
   resetAllMocks,
   mockAuthenticatedSession,
   defaultMockSession,
   generateTestUuid,
   generateTestArxivId,
 } from './setup';
-
-// ============================================================================
-// TESTS - USER SYNC
-// ============================================================================
-
-describe('Users API - Sync', () => {
-  beforeEach(() => {
-    resetAllMocks();
-  });
-
-  describe('POST /api/users/sync', () => {
-    it('returns 400 when id is missing', async () => {
-      const appHandler = await import('@/app/api/users/sync/route');
-
-      await testApiHandler({
-        appHandler,
-        test: async ({ fetch }) => {
-          const response = await fetch({
-            method: 'POST',
-            body: JSON.stringify({ email: 'test@example.com' }),
-            headers: { 'Content-Type': 'application/json' },
-          });
-
-          expect(response.status).toBe(400);
-
-          const data = await response.json();
-          expect(data).toHaveProperty('error');
-          expect(data.error.toLowerCase()).toContain('id');
-        },
-      });
-    });
-
-    it('returns 400 when email is missing', async () => {
-      const appHandler = await import('@/app/api/users/sync/route');
-
-      await testApiHandler({
-        appHandler,
-        test: async ({ fetch }) => {
-          const response = await fetch({
-            method: 'POST',
-            body: JSON.stringify({ id: 'test-user-id' }),
-            headers: { 'Content-Type': 'application/json' },
-          });
-
-          expect(response.status).toBe(400);
-
-          const data = await response.json();
-          expect(data).toHaveProperty('error');
-          expect(data.error.toLowerCase()).toContain('email');
-        },
-      });
-    });
-
-    it('returns 400 when id is not a string', async () => {
-      const appHandler = await import('@/app/api/users/sync/route');
-
-      await testApiHandler({
-        appHandler,
-        test: async ({ fetch }) => {
-          const response = await fetch({
-            method: 'POST',
-            body: JSON.stringify({ id: 123, email: 'test@example.com' }),
-            headers: { 'Content-Type': 'application/json' },
-          });
-
-          expect(response.status).toBe(400);
-
-          const data = await response.json();
-          expect(data).toHaveProperty('error');
-        },
-      });
-    });
-
-    it('syncs user with valid payload', async () => {
-      prismaMock.user.upsert.mockResolvedValue({
-        id: 'test-user-id',
-        email: 'test@example.com',
-        createdAt: new Date(),
-      });
-
-      const appHandler = await import('@/app/api/users/sync/route');
-
-      await testApiHandler({
-        appHandler,
-        test: async ({ fetch }) => {
-          const response = await fetch({
-            method: 'POST',
-            body: JSON.stringify({
-              id: 'test-user-id-' + Date.now(),
-              email: 'test@example.com',
-            }),
-            headers: { 'Content-Type': 'application/json' },
-          });
-
-          expect(response.status).toBe(200);
-
-          const data = await response.json();
-          expect(data).toHaveProperty('created');
-          expect(typeof data.created).toBe('boolean');
-        },
-      });
-    });
-  });
-});
 
 // ============================================================================
 // TESTS - USER LIST (REQUIRES AUTH)

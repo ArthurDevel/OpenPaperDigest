@@ -4,7 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import React, { useState } from 'react';
 import { Github, User as UserIcon, X, Menu } from 'lucide-react';
-import { authClient } from '../services/auth';
+import { useSession } from '@/services/auth';
 import ThemeToggle from './ThemeToggle';
 
 type NavBarProps = {
@@ -17,8 +17,8 @@ type NavBarProps = {
  * @returns Navigation bar with hamburger menu for mobile
  */
 export default function NavBar({ className = '' }: NavBarProps) {
-  const { data: session } = authClient.useSession();
-  const isLoggedIn = Boolean(session?.user?.id);
+  const { user } = useSession();
+  const isLoggedIn = Boolean(user?.id);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
 
   /**
@@ -174,5 +174,3 @@ export default function NavBar({ className = '' }: NavBarProps) {
     </nav>
   );
 }
-
-
