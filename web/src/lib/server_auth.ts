@@ -20,6 +20,7 @@ const authDbPool = createPool({
 });
 
 export const auth = betterAuth({
+  baseURL: process.env.NEXT_PUBLIC_SITE_URL,
   database: authDbPool as any,
   plugins: [
     magicLink({
