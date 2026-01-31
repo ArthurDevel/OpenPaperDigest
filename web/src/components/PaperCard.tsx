@@ -142,7 +142,7 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
             {/* Action buttons - bottom right corner when expanded */}
             <div className="mt-4 flex items-center justify-end gap-2">
               <CopyMarkdownButton paperUuid={paper.paperUuid} fiveMinuteSummary={summary?.fiveMinuteSummary} />
-              <AddToListButtonMobile paperId={paper.paperUuid} paperTitle={paper.title || undefined} />
+              <AddToListButtonMobile paperId={paper.paperUuid} />
 
               {paper.slug && (
                 <button

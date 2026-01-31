@@ -11,6 +11,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextRequest, NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { CookieOptions } from '@supabase/ssr';
 
 // ============================================================================
 // CONSTANTS
@@ -22,6 +23,12 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 // ============================================================================
 // TYPES
 // ============================================================================
+
+interface CookieToSet {
+  name: string;
+  value: string;
+  options?: CookieOptions;
+}
 
 interface MiddlewareClientResult {
   supabase: SupabaseClient;
@@ -45,7 +52,7 @@ export function createClient(request: NextRequest): MiddlewareClientResult {
       getAll() {
         return request.cookies.getAll();
       },
-      setAll(cookiesToSet) {
+      setAll(cookiesToSet: CookieToSet[]) {
         // Update cookies on the request for downstream handlers
         cookiesToSet.forEach(({ name, value }) => {
           request.cookies.set(name, value);
