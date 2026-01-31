@@ -1,0 +1,6 @@
+# Ignore everything in .conductor
+*
+
+# Except the setup script and this gitignore
+!.gitignore
+!conductor-setup.sh
