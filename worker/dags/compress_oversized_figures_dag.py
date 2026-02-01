@@ -211,16 +211,15 @@ def compress_figure(image_bytes: bytes) -> Tuple[bytes, Dict[str, Any]]:
     - Max figure size threshold: 100 KB
     - Target width: 800px (maintains aspect ratio)
     - WebP quality: 85%
-    - Batch size: 50 papers per task
+    - Batch size: 20 papers per batch (serial processing)
 
     **Architecture:**
-    1. `calculate_batches`: Counts papers, returns list of offsets for parallel processing
-    2. `process_batch` (parallel): Each task scans and compresses its batch of papers
-    3. `generate_summary`: Aggregates results from all batch tasks
+    1. `process_all_batches`: Serially processes papers in batches to avoid memory issues
+    2. `generate_summary`: Reports the final statistics
 
     **What it does:**
-    1. Calculates batch offsets based on total completed papers
-    2. Each batch task scans its range of papers for oversized figures (>100 KB)
+    1. Iterates through papers in small batches (serially, one at a time)
+    2. Each batch scans its papers for oversized figures (>100 KB)
     3. Compresses them to WebP at 800px width and 85% quality
     4. Only replaces if compressed version is smaller than original
     5. Updates the processed_content JSON (unless dry_run=True)
@@ -235,7 +234,7 @@ def compress_figure(image_bytes: bytes) -> Tuple[bytes, Dict[str, Any]]:
     **Safety:**
     - Only processes completed papers
     - Only replaces if compression actually reduces size
-    - Each batch is a separate task (debuggable in UI)
+    - Serial processing avoids memory issues
     - Auto-rollback on errors within each batch
     - Can be re-run safely (skips already-compressed figures under threshold)
     - Use `dry_run=True` for testing without saving changes
@@ -244,13 +243,38 @@ def compress_figure(image_bytes: bytes) -> Tuple[bytes, Dict[str, Any]]:
 def compress_oversized_figures_dag():
 
     @task
-    def calculate_batches() -> List[int]:
+    def process_all_batches(**context) -> Dict[str, Any]:
         """
-        Count completed papers and return list of batch offsets.
+        Process all papers serially in batches to avoid memory issues.
+
+        Scans batch -> processes batch -> commits -> moves to next batch.
+        This ensures only one batch of images is in memory at a time.
+
+        Args:
+            context: Airflow context containing params
 
         Returns:
-            List[int]: List of offsets for parallel batch processing
+            Dict: Aggregated statistics from all batches
         """
+        dry_run = context.get("params", {}).get("dry_run", False)
+        mode_str = "DRY RUN" if dry_run else "LIVE"
+
+        print(f"[{mode_str}] Starting serial batch processing")
+        print(f"Configuration: {TARGET_WIDTH}px width, WebP {WEBP_QUALITY}% quality, threshold {MAX_SIZE_KB}KB")
+        print(f"Batch size: {BATCH_SIZE} papers per batch")
+
+        # Aggregate stats across all batches
+        total_stats = {
+            'total_batches': 0,
+            'papers_scanned': 0,
+            'papers_with_oversized': 0,
+            'figures_compressed': 0,
+            'figures_skipped': 0,
+            'original_total_kb': 0,
+            'compressed_total_kb': 0,
+        }
+
+        # Get total count first
         with database_session() as session:
             total_count = session.query(PaperRecord).filter(
                 PaperRecord.status == 'completed',
@@ -260,151 +284,145 @@ def compress_oversized_figures_dag():
         print(f"Found {total_count} completed papers to process")
 
         if total_count == 0:
-            return []
+            return total_stats
 
-        # Generate list of offsets
-        offsets = list(range(0, total_count, BATCH_SIZE))
-        print(f"Created {len(offsets)} batches of up to {BATCH_SIZE} papers each")
+        num_batches = (total_count + BATCH_SIZE - 1) // BATCH_SIZE
+        print(f"Will process in {num_batches} batches of up to {BATCH_SIZE} papers each\n")
 
-        return offsets
+        # Process each batch serially
+        offset = 0
+        batch_num = 0
 
-    @task
-    def process_batch(offset: int, **context) -> Dict[str, Any]:
-        """
-        Scan and compress oversized figures for a batch of papers.
+        while offset < total_count:
+            batch_num += 1
+            print(f"\n{'='*50}")
+            print(f"[{mode_str}] Processing batch {batch_num}/{num_batches} (offset {offset})")
+            print(f"{'='*50}")
 
-        Args:
-            offset: Starting offset for this batch
-            context: Airflow context containing params
+            # Process one batch in its own session to control memory
+            with database_session() as session:
+                papers = session.query(PaperRecord).filter(
+                    PaperRecord.status == 'completed',
+                    PaperRecord.processed_content.isnot(None)
+                ).order_by(PaperRecord.id).offset(offset).limit(BATCH_SIZE).all()
 
-        Returns:
-            Dict: Batch statistics
-        """
-        dry_run = context.get("params", {}).get("dry_run", False)
-        mode_str = "DRY RUN" if dry_run else "LIVE"
+                if not papers:
+                    print(f"No papers found at offset {offset}")
+                    break
 
-        print(f"[{mode_str}] Processing batch at offset {offset} (up to {BATCH_SIZE} papers)")
-        print(f"Configuration: {TARGET_WIDTH}px width, WebP {WEBP_QUALITY}% quality, threshold {MAX_SIZE_KB}KB")
+                print(f"Scanning {len(papers)} papers...")
 
-        batch_stats = {
-            'offset': offset,
-            'papers_scanned': 0,
-            'papers_with_oversized': 0,
-            'figures_compressed': 0,
-            'figures_skipped': 0,
-            'original_total_kb': 0,
-            'compressed_total_kb': 0,
-        }
+                batch_compressed = 0
+                batch_skipped = 0
 
-        with database_session() as session:
-            papers = session.query(PaperRecord).filter(
-                PaperRecord.status == 'completed',
-                PaperRecord.processed_content.isnot(None)
-            ).order_by(PaperRecord.id).offset(offset).limit(BATCH_SIZE).all()
+                for paper in papers:
+                    total_stats['papers_scanned'] += 1
 
-            if not papers:
-                print(f"No papers found at offset {offset}")
-                return batch_stats
+                    try:
+                        content = json.loads(paper.processed_content)
+                        figures = content.get("figures", [])
 
-            print(f"Scanning {len(papers)} papers...")
+                        if not figures:
+                            continue
 
-            for paper in papers:
-                batch_stats['papers_scanned'] += 1
+                        paper_had_oversized = False
+                        paper_modified = False
 
-                try:
-                    content = json.loads(paper.processed_content)
-                    figures = content.get("figures", [])
+                        for i, figure in enumerate(figures):
+                            image_data_url = figure.get("image_data_url", "")
+                            if not image_data_url or "base64," not in image_data_url:
+                                continue
 
-                    if not figures:
+                            # Skip already-compressed WebP images
+                            if image_data_url.startswith("data:image/webp"):
+                                continue
+
+                            base64_data = image_data_url.split("base64,", 1)[1]
+                            size_kb = calculate_base64_size_kb(base64_data)
+
+                            if size_kb <= MAX_SIZE_KB:
+                                continue
+
+                            paper_had_oversized = True
+
+                            try:
+                                # Decode, compress, and re-encode
+                                image_bytes, _ = decode_data_url(image_data_url)
+                                compressed_bytes, stats = compress_figure(image_bytes)
+
+                                # Only use compressed version if it's actually smaller
+                                if stats['new_size_kb'] < stats['original_size_kb']:
+                                    new_data_url = encode_to_webp_data_url(compressed_bytes)
+                                    figures[i]["image_data_url"] = new_data_url
+                                    paper_modified = True
+
+                                    total_stats['figures_compressed'] += 1
+                                    total_stats['original_total_kb'] += stats['original_size_kb']
+                                    total_stats['compressed_total_kb'] += stats['new_size_kb']
+                                    batch_compressed += 1
+
+                                    print(f"  [x] {paper.paper_uuid} fig[{i}]: "
+                                          f"{stats['original_size_kb']:.1f}KB -> {stats['new_size_kb']:.1f}KB "
+                                          f"({stats['reduction_percent']:.1f}% reduction)")
+                                else:
+                                    total_stats['figures_skipped'] += 1
+                                    batch_skipped += 1
+                                    print(f"  [-] {paper.paper_uuid} fig[{i}]: skipped (compression increased size)")
+
+                            except Exception as e:
+                                print(f"  [!] {paper.paper_uuid} fig[{i}]: Error - {e}")
+                                continue
+
+                        if paper_had_oversized:
+                            total_stats['papers_with_oversized'] += 1
+
+                        # Update content if modified and not dry run
+                        if paper_modified and not dry_run:
+                            content["figures"] = figures
+                            paper.processed_content = json.dumps(content, ensure_ascii=False)
+
+                    except Exception as e:
+                        print(f"  [X] {paper.paper_uuid}: Error - {e}")
                         continue
 
-                    paper_had_oversized = False
-                    paper_modified = False
+                # Commit or rollback this batch
+                if dry_run:
+                    print(f"\n[DRY RUN] Rolling back batch {batch_num}")
+                    session.rollback()
+                else:
+                    print(f"\nCommitting batch {batch_num}...")
 
-                    for i, figure in enumerate(figures):
-                        image_data_url = figure.get("image_data_url", "")
-                        if not image_data_url or "base64," not in image_data_url:
-                            continue
+            # Batch complete - memory is freed when session closes
+            total_stats['total_batches'] += 1
+            print(f"Batch {batch_num} complete: {batch_compressed} compressed, {batch_skipped} skipped")
 
-                        # Skip already-compressed WebP images
-                        if image_data_url.startswith("data:image/webp"):
-                            continue
+            # Move to next batch
+            offset += BATCH_SIZE
 
-                        base64_data = image_data_url.split("base64,", 1)[1]
-                        size_kb = calculate_base64_size_kb(base64_data)
-
-                        if size_kb <= MAX_SIZE_KB:
-                            continue
-
-                        paper_had_oversized = True
-
-                        try:
-                            # Decode, compress, and re-encode
-                            image_bytes, _ = decode_data_url(image_data_url)
-                            compressed_bytes, stats = compress_figure(image_bytes)
-
-                            # Only use compressed version if it's actually smaller
-                            if stats['new_size_kb'] < stats['original_size_kb']:
-                                new_data_url = encode_to_webp_data_url(compressed_bytes)
-                                figures[i]["image_data_url"] = new_data_url
-                                paper_modified = True
-
-                                batch_stats['figures_compressed'] += 1
-                                batch_stats['original_total_kb'] += stats['original_size_kb']
-                                batch_stats['compressed_total_kb'] += stats['new_size_kb']
-
-                                print(f"  ✓ {paper.paper_uuid} fig[{i}]: "
-                                      f"{stats['original_size_kb']:.1f}KB → {stats['new_size_kb']:.1f}KB "
-                                      f"({stats['reduction_percent']:.1f}% reduction)")
-                            else:
-                                batch_stats['figures_skipped'] += 1
-                                print(f"  ⊘ {paper.paper_uuid} fig[{i}]: skipped (compression increased size)")
-
-                        except Exception as e:
-                            print(f"  ⚠️ {paper.paper_uuid} fig[{i}]: Error - {e}")
-                            continue
-
-                    if paper_had_oversized:
-                        batch_stats['papers_with_oversized'] += 1
-
-                    # Update content if modified and not dry run
-                    if paper_modified and not dry_run:
-                        content["figures"] = figures
-                        paper.processed_content = json.dumps(content, ensure_ascii=False)
-
-                except Exception as e:
-                    print(f"  ✗ {paper.paper_uuid}: Error - {e}")
-                    continue
-
-            # Commit or rollback
-            if dry_run:
-                print(f"[DRY RUN] Rolling back changes for batch at offset {offset}")
-                session.rollback()
-            else:
-                print(f"Committing changes for batch at offset {offset}")
-
-        # Calculate reduction percentage
-        if batch_stats['original_total_kb'] > 0:
-            reduction = ((batch_stats['original_total_kb'] - batch_stats['compressed_total_kb'])
-                        / batch_stats['original_total_kb']) * 100
-            batch_stats['reduction_percent'] = round(reduction, 2)
+        # Calculate overall reduction percentage
+        if total_stats['original_total_kb'] > 0:
+            reduction = ((total_stats['original_total_kb'] - total_stats['compressed_total_kb'])
+                        / total_stats['original_total_kb']) * 100
+            total_stats['reduction_percent'] = round(reduction, 2)
         else:
-            batch_stats['reduction_percent'] = 0
+            total_stats['reduction_percent'] = 0
 
-        print(f"\nBatch summary: {batch_stats['papers_scanned']} scanned, "
-              f"{batch_stats['papers_with_oversized']} with oversized, "
-              f"{batch_stats['figures_compressed']} compressed, "
-              f"{batch_stats['figures_skipped']} skipped")
+        print(f"\n{'='*50}")
+        print(f"All batches complete!")
+        print(f"Total: {total_stats['papers_scanned']} scanned, "
+              f"{total_stats['papers_with_oversized']} with oversized, "
+              f"{total_stats['figures_compressed']} compressed")
+        print(f"{'='*50}")
 
-        return batch_stats
+        return total_stats
 
     @task
-    def generate_summary(batch_results: List[Dict[str, Any]], **context) -> Dict[str, Any]:
+    def generate_summary(stats: Dict[str, Any], **context) -> Dict[str, Any]:
         """
-        Generate a summary report from all batch results.
+        Generate a summary report from processing stats.
 
         Args:
-            batch_results: List of batch statistics from process_batch tasks
+            stats: Statistics from process_all_batches
             context: Airflow context containing params
 
         Returns:
@@ -412,10 +430,7 @@ def compress_oversized_figures_dag():
         """
         dry_run = context.get("params", {}).get("dry_run", False)
 
-        # Filter out empty results
-        results = [r for r in batch_results if r.get('papers_scanned', 0) > 0]
-
-        if not results:
+        if stats.get('papers_scanned', 0) == 0:
             print("\nNo papers were processed")
             return {
                 'dry_run': dry_run,
@@ -429,21 +444,21 @@ def compress_oversized_figures_dag():
                 'avg_reduction_percent': 0
             }
 
-        # Aggregate statistics
-        total_batches = len(results)
-        total_papers_scanned = sum(r['papers_scanned'] for r in results)
-        total_papers_with_oversized = sum(r['papers_with_oversized'] for r in results)
-        total_figures_compressed = sum(r['figures_compressed'] for r in results)
-        total_figures_skipped = sum(r.get('figures_skipped', 0) for r in results)
-        total_original_kb = sum(r['original_total_kb'] for r in results)
-        total_compressed_kb = sum(r['compressed_total_kb'] for r in results)
+        # Extract statistics
+        total_batches = stats.get('total_batches', 0)
+        total_papers_scanned = stats.get('papers_scanned', 0)
+        total_papers_with_oversized = stats.get('papers_with_oversized', 0)
+        total_figures_compressed = stats.get('figures_compressed', 0)
+        total_figures_skipped = stats.get('figures_skipped', 0)
+        total_original_kb = stats.get('original_total_kb', 0)
+        total_compressed_kb = stats.get('compressed_total_kb', 0)
         total_saved_kb = total_original_kb - total_compressed_kb
 
         total_original_mb = total_original_kb / 1024
         total_compressed_mb = total_compressed_kb / 1024
         total_saved_mb = total_saved_kb / 1024
 
-        avg_reduction_percent = (total_saved_kb / total_original_kb) * 100 if total_original_kb > 0 else 0
+        avg_reduction_percent = stats.get('reduction_percent', 0)
 
         # Print summary report
         mode_str = "[DRY RUN] " if dry_run else ""
@@ -463,7 +478,7 @@ def compress_oversized_figures_dag():
         print("=" * 60)
 
         if dry_run:
-            print("\n💡 To apply these changes, run again with dry_run=False")
+            print("\n[i] To apply these changes, run again with dry_run=False")
 
         return {
             'dry_run': dry_run,
@@ -479,10 +494,9 @@ def compress_oversized_figures_dag():
         }
 
 
-    # Define task dependencies with dynamic task mapping
-    offsets = calculate_batches()
-    batch_results = process_batch.expand(offset=offsets)
-    summary = generate_summary(batch_results)
+    # Define task dependencies - serial processing
+    stats = process_all_batches()
+    summary = generate_summary(stats)
 
 
 # Instantiate the DAG
