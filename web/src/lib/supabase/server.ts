@@ -2,10 +2,11 @@
  * Supabase Server Client
  *
  * Creates a Supabase client for use in Server Components and Route Handlers.
- * Uses the service role key to bypass RLS for server-side operations.
+ * Uses cookies to maintain user sessions and anon key with RLS.
  */
 
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 import type { Database } from '@/lib/types/database.types';
 
 // ============================================================================
@@ -13,7 +14,7 @@ import type { Database } from '@/lib/types/database.types';
 // ============================================================================
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 // ============================================================================
 // MAIN EXPORT
@@ -21,8 +22,27 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 /**
  * Creates a Supabase client for server-side usage (Server Components, Route Handlers).
- * Uses service role key to bypass RLS - no cookie/session management needed.
+ * Reads cookies to access the authenticated user's session.
+ * @returns Supabase client with user session from cookies
  */
 export async function createClient() {
-  return createSupabaseClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const cookieStore = await cookies();
+
+  return createServerClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // setAll can fail in Server Components (read-only context)
+          // Session refresh will be handled by middleware instead
+        }
+      },
+    },
+  });
 }

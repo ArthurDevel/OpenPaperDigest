@@ -86,13 +86,8 @@ export async function POST(
     return NextResponse.json(result);
   } catch (error) {
     // Check for specific error messages from service
-    if (error instanceof Error) {
-      if (error.message.includes('User not found')) {
-        return NextResponse.json({ error: 'User not found' }, { status: 404 });
-      }
-      if (error.message.includes('Paper not found')) {
-        return NextResponse.json({ error: 'Paper not found' }, { status: 404 });
-      }
+    if (error instanceof Error && error.message.includes('Paper not found')) {
+      return NextResponse.json({ error: 'Paper not found' }, { status: 404 });
     }
 
     console.error('Error adding to list:', error);

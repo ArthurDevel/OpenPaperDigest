@@ -2,7 +2,6 @@
  * Unit tests for the User Service
  *
  * Tests the business logic for:
- * - User sync from auth provider
  * - User list management (add, remove, check papers)
  * - User request management (paper processing requests)
  * - Aggregated request retrieval for admin
@@ -111,7 +110,6 @@ vi.mock('@/lib/supabase/server', () => ({
 }));
 
 import {
-  syncNewUser,
   addToList,
   removeFromList,
   isInList,
@@ -131,69 +129,13 @@ beforeEach(() => {
 });
 
 // ============================================================================
-// syncNewUser TESTS
-// ============================================================================
-
-describe('syncNewUser', () => {
-  it('returns { created: false } when user already exists', async () => {
-    mockMaybeSingle.mockResolvedValue({
-      data: {
-        id: 'user-123',
-        email: 'test@example.com',
-        created_at: new Date().toISOString(),
-      },
-      error: null,
-    });
-
-    const result = await syncNewUser({ id: 'user-123', email: 'test@example.com' });
-
-    expect(result).toEqual({ created: false });
-    expect(mockFrom).toHaveBeenCalledWith('users');
-    expect(mockEq).toHaveBeenCalledWith('id', 'user-123');
-    expect(mockInsert).not.toHaveBeenCalled();
-  });
-
-  it('creates user and returns { created: true } when user does not exist', async () => {
-    mockMaybeSingle.mockResolvedValue({ data: null, error: null });
-
-    const result = await syncNewUser({ id: 'user-123', email: 'test@example.com' });
-
-    expect(result).toEqual({ created: true });
-    expect(mockInsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'user-123',
-        email: 'test@example.com',
-      })
-    );
-  });
-});
-
-// ============================================================================
 // addToList TESTS
 // ============================================================================
 
 describe('addToList', () => {
-  it('throws "User not found: {id}" when user does not exist', async () => {
-    mockMaybeSingle.mockResolvedValue({ data: null, error: null });
-
-    await expect(addToList('user-123', 'paper-uuid')).rejects.toThrow(
-      'User not found: user-123'
-    );
-  });
-
   it('throws "Paper not found: {uuid}" when paper does not exist', async () => {
-    mockMaybeSingle
-      // First call: user exists
-      .mockResolvedValueOnce({
-        data: {
-          id: 'user-123',
-          email: 'test@example.com',
-          created_at: new Date().toISOString(),
-        },
-        error: null,
-      })
-      // Second call: paper not found
-      .mockResolvedValueOnce({ data: null, error: null });
+    // Paper not found
+    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
 
     await expect(addToList('user-123', 'paper-uuid')).rejects.toThrow(
       'Paper not found: paper-uuid'
@@ -202,21 +144,12 @@ describe('addToList', () => {
 
   it('returns { created: false } when paper is already in list', async () => {
     mockMaybeSingle
-      // First call: user exists
-      .mockResolvedValueOnce({
-        data: {
-          id: 'user-123',
-          email: 'test@example.com',
-          created_at: new Date().toISOString(),
-        },
-        error: null,
-      })
-      // Second call: paper exists
+      // First call: paper exists
       .mockResolvedValueOnce({
         data: { id: 1 },
         error: null,
       })
-      // Third call: list entry exists
+      // Second call: list entry exists
       .mockResolvedValueOnce({
         data: {
           id: 1,
@@ -235,21 +168,12 @@ describe('addToList', () => {
 
   it('creates entry and returns { created: true } when paper is not in list', async () => {
     mockMaybeSingle
-      // First call: user exists
-      .mockResolvedValueOnce({
-        data: {
-          id: 'user-123',
-          email: 'test@example.com',
-          created_at: new Date().toISOString(),
-        },
-        error: null,
-      })
-      // Second call: paper exists
+      // First call: paper exists
       .mockResolvedValueOnce({
         data: { id: 1 },
         error: null,
       })
-      // Third call: list entry does not exist
+      // Second call: list entry does not exist
       .mockResolvedValueOnce({ data: null, error: null });
 
     const result = await addToList('user-123', 'paper-uuid');
@@ -370,39 +294,21 @@ describe('isInList', () => {
 // ============================================================================
 
 describe('addRequest', () => {
-  it('throws "User not found: {id}" when user does not exist', async () => {
-    mockMaybeSingle.mockResolvedValue({ data: null, error: null });
-
-    await expect(addRequest('user-123', 'arxiv-123', 'Title', 'Authors')).rejects.toThrow(
-      'User not found: user-123'
-    );
-  });
-
   it('returns { created: false } when request already exists', async () => {
-    mockMaybeSingle
-      // First call: user exists
-      .mockResolvedValueOnce({
-        data: {
-          id: 'user-123',
-          email: 'test@example.com',
-          created_at: new Date().toISOString(),
-        },
-        error: null,
-      })
-      // Second call: request already exists
-      .mockResolvedValueOnce({
-        data: {
-          id: 1,
-          user_id: 'user-123',
-          arxiv_id: 'arxiv-123',
-          title: 'Title',
-          authors: 'Authors',
-          created_at: new Date().toISOString(),
-          is_processed: false,
-          processed_slug: null,
-        },
-        error: null,
-      });
+    // Request already exists
+    mockMaybeSingle.mockResolvedValueOnce({
+      data: {
+        id: 1,
+        user_id: 'user-123',
+        arxiv_id: 'arxiv-123',
+        title: 'Title',
+        authors: 'Authors',
+        created_at: new Date().toISOString(),
+        is_processed: false,
+        processed_slug: null,
+      },
+      error: null,
+    });
 
     const result = await addRequest('user-123', 'arxiv-123', 'Title', 'Authors');
 
@@ -411,18 +317,8 @@ describe('addRequest', () => {
   });
 
   it('creates request and returns { created: true } when request does not exist', async () => {
-    mockMaybeSingle
-      // First call: user exists
-      .mockResolvedValueOnce({
-        data: {
-          id: 'user-123',
-          email: 'test@example.com',
-          created_at: new Date().toISOString(),
-        },
-        error: null,
-      })
-      // Second call: request does not exist
-      .mockResolvedValueOnce({ data: null, error: null });
+    // Request does not exist
+    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
 
     const result = await addRequest('user-123', 'arxiv-123', 'Title', 'Authors');
 
@@ -439,18 +335,8 @@ describe('addRequest', () => {
   });
 
   it('handles null title and authors', async () => {
-    mockMaybeSingle
-      // First call: user exists
-      .mockResolvedValueOnce({
-        data: {
-          id: 'user-123',
-          email: 'test@example.com',
-          created_at: new Date().toISOString(),
-        },
-        error: null,
-      })
-      // Second call: request does not exist
-      .mockResolvedValueOnce({ data: null, error: null });
+    // Request does not exist
+    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
 
     const result = await addRequest('user-123', 'arxiv-123', null, null);
 

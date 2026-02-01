@@ -191,13 +191,6 @@ export type Database = {
             referencedRelation: "papers"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "fk_user_lists_user"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
         ]
       }
       user_requests: {
@@ -230,32 +223,6 @@ export type Database = {
           processed_slug?: string | null
           title?: string | null
           user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "fk_user_requests_user"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      users: {
-        Row: {
-          created_at: string
-          email: string
-          id: string
-        }
-        Insert: {
-          created_at: string
-          email: string
-          id: string
-        }
-        Update: {
-          created_at?: string
-          email?: string
-          id?: string
         }
         Relationships: []
       }

@@ -2,15 +2,12 @@
  * User Service
  *
  * Provides business logic for user-related operations.
- * - User sync from BetterAuth authentication hooks
  * - User list management (add, remove, check papers)
  * - User request management (paper processing requests)
  */
 
 import { createClient } from '@/lib/supabase/server';
 import type {
-  User,
-  SyncUserPayload,
   CreatedResponse,
   DeletedResponse,
   ExistsResponse,
@@ -22,78 +19,6 @@ import type {
 } from '@/types/user';
 import type { ProcessingMetrics, PaperStatus } from '@/types/paper';
 import type { Tables, TablesInsert } from '@/lib/types/database.types';
-
-// ============================================================================
-// MAIN HANDLERS - User Management
-// ============================================================================
-
-/**
- * Create or update a user record from BetterAuth hook data.
- * This is called when a user signs up or logs in for the first time.
- * @param payload - User data from BetterAuth
- * @returns Object indicating whether a new user was created
- */
-export async function syncNewUser(payload: SyncUserPayload): Promise<{ created: boolean }> {
-  const supabase = await createClient();
-
-  const { data: existingData, error: findError } = await supabase
-    .from('users')
-    .select()
-    .eq('id', payload.id)
-    .maybeSingle();
-
-  if (findError) throw new Error(findError.message);
-
-  const existing = existingData as Tables<'users'> | null;
-
-  if (existing) {
-    return { created: false };
-  }
-
-  const insertData: TablesInsert<'users'> = {
-    id: payload.id,
-    email: payload.email,
-    created_at: new Date().toISOString(),
-  };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: createError } = await (supabase
-    .from('users') as any)
-    .insert(insertData);
-
-  if (createError) throw new Error(createError.message);
-
-  return { created: true };
-}
-
-/**
- * Get a user record by their auth provider ID.
- * @param authProviderId - The user's ID from BetterAuth
- * @returns User record or null if not found
- */
-export async function getUserByAuthProviderId(authProviderId: string): Promise<User | null> {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from('users')
-    .select()
-    .eq('id', authProviderId)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-
-  const user = data as Tables<'users'> | null;
-
-  if (!user) {
-    return null;
-  }
-
-  return {
-    id: user.id,
-    email: user.email,
-    createdAt: new Date(user.created_at),
-  };
-}
 
 // ============================================================================
 // MAIN HANDLERS - User List Management
@@ -110,21 +35,6 @@ export async function addToList(
   paperUuid: string
 ): Promise<CreatedResponse> {
   const supabase = await createClient();
-
-  // Verify user exists
-  const { data: userData, error: userError } = await supabase
-    .from('users')
-    .select()
-    .eq('id', authProviderId)
-    .maybeSingle();
-
-  if (userError) throw new Error(userError.message);
-
-  const user = userData as Tables<'users'> | null;
-
-  if (!user) {
-    throw new Error(`User not found: ${authProviderId}`);
-  }
 
   // Verify paper exists and get its internal ID
   const { data: paperData, error: paperError } = await supabase
@@ -354,21 +264,6 @@ export async function addRequest(
 ): Promise<CreatedResponse> {
   const supabase = await createClient();
 
-  // Verify user exists
-  const { data: userData, error: userError } = await supabase
-    .from('users')
-    .select()
-    .eq('id', authProviderId)
-    .maybeSingle();
-
-  if (userError) throw new Error(userError.message);
-
-  const user = userData as Tables<'users'> | null;
-
-  if (!user) {
-    throw new Error(`User not found: ${authProviderId}`);
-  }
-
   // Check if request already exists (compound unique lookup)
   const { data: existingData, error: existingError } = await supabase
     .from('user_requests')
@@ -499,8 +394,7 @@ export async function doesRequestExist(
 
 /**
  * Get all paper requests from all users (admin only).
- * Returns requests with user email for admin display.
- * @returns Array of all paper requests with user email
+ * @returns Array of all paper requests
  */
 export async function getAllRequests(): Promise<AdminRequestItem[]> {
   const supabase = await createClient();
@@ -515,16 +409,12 @@ export async function getAllRequests(): Promise<AdminRequestItem[]> {
       authors,
       created_at,
       is_processed,
-      processed_slug,
-      users (
-        email
-      )
+      processed_slug
     `)
     .order('created_at', { ascending: false });
 
   if (error) throw new Error(error.message);
 
-  // Type the join result explicitly (Supabase doesn't infer nested selects well)
   const requests = (data ?? []) as Array<{
     id: number;
     user_id: string;
@@ -534,13 +424,11 @@ export async function getAllRequests(): Promise<AdminRequestItem[]> {
     created_at: string;
     is_processed: boolean;
     processed_slug: string | null;
-    users: { email: string } | null;
   }>;
 
   return requests.map((request) => ({
     id: request.id,
     userId: request.user_id,
-    userEmail: request.users?.email ?? '',
     arxivId: request.arxiv_id,
     title: request.title,
     authors: request.authors,

@@ -152,8 +152,6 @@ describe('Users API - My List', () => {
 
     it('adds paper to list when authenticated', async () => {
       mockAuthenticatedSession();
-      // Mock user lookup
-      mockQueryReturns({ id: defaultMockSession.user.id });
       // Mock paper lookup
       mockQueryReturns({ id: 1, paper_uuid: generateTestUuid() });
       // Mock existing list check (not found)
