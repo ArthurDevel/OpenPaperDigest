@@ -7,8 +7,9 @@
  * - Creates and retrieves slugs for papers (idempotent)
  */
 
-import { prisma } from '@/lib/db';
+import { createClient } from '@/lib/supabase/server';
 import type { ResolveSlugResponse } from '@/types/paper';
+import type { Tables, TablesInsert } from '@/lib/types/database.types';
 
 // ============================================================================
 // CONSTANTS
@@ -27,14 +28,19 @@ const SLUG_SEPARATOR = '-';
  * @returns Response with paper UUID, slug, and tombstone status
  */
 export async function resolveSlug(slug: string): Promise<ResolveSlugResponse> {
-  const paperSlug = await prisma.paperSlug.findUnique({
-    where: { slug },
-    select: {
-      slug: true,
-      paperUuid: true,
-      tombstone: true,
-    },
-  });
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('paper_slugs')
+    .select('slug, paper_uuid, tombstone')
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const paperSlug = data as Tables<'paper_slugs'> | null;
 
   if (!paperSlug) {
     return {
@@ -45,7 +51,7 @@ export async function resolveSlug(slug: string): Promise<ResolveSlugResponse> {
   }
 
   return {
-    paperUuid: paperSlug.paperUuid,
+    paperUuid: paperSlug.paper_uuid,
     slug: paperSlug.slug,
     tombstone: paperSlug.tombstone,
   };
@@ -57,18 +63,22 @@ export async function resolveSlug(slug: string): Promise<ResolveSlugResponse> {
  * @returns Response with slug info, or null paperUuid if no active slug exists
  */
 export async function getSlugForPaper(paperUuid: string): Promise<ResolveSlugResponse> {
-  const paperSlug = await prisma.paperSlug.findFirst({
-    where: {
-      paperUuid,
-      tombstone: false,
-    },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      slug: true,
-      paperUuid: true,
-      tombstone: true,
-    },
-  });
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('paper_slugs')
+    .select('slug, paper_uuid, tombstone')
+    .eq('paper_uuid', paperUuid)
+    .eq('tombstone', false)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const paperSlug = data as Tables<'paper_slugs'> | null;
 
   if (!paperSlug) {
     return {
@@ -79,7 +89,7 @@ export async function getSlugForPaper(paperUuid: string): Promise<ResolveSlugRes
   }
 
   return {
-    paperUuid: paperSlug.paperUuid,
+    paperUuid: paperSlug.paper_uuid,
     slug: paperSlug.slug,
     tombstone: paperSlug.tombstone,
   };
@@ -92,6 +102,8 @@ export async function getSlugForPaper(paperUuid: string): Promise<ResolveSlugRes
  * @returns Response with the created or existing slug
  */
 export async function createSlug(paperUuid: string): Promise<ResolveSlugResponse> {
+  const supabase = await createClient();
+
   // Check if a non-tombstone slug already exists
   const existing = await getSlugForPaper(paperUuid);
   if (existing.paperUuid && existing.slug) {
@@ -99,10 +111,17 @@ export async function createSlug(paperUuid: string): Promise<ResolveSlugResponse
   }
 
   // Fetch paper to get title and authors
-  const paper = await prisma.paper.findUnique({
-    where: { paperUuid },
-    select: { title: true, authors: true },
-  });
+  const { data: paperData, error: paperError } = await supabase
+    .from('papers')
+    .select('title, authors')
+    .eq('paper_uuid', paperUuid)
+    .maybeSingle();
+
+  if (paperError) {
+    throw new Error(paperError.message);
+  }
+
+  const paper = paperData as Tables<'papers'> | null;
 
   if (!paper) {
     throw new Error(`Paper not found: ${paperUuid}`);
@@ -112,15 +131,23 @@ export async function createSlug(paperUuid: string): Promise<ResolveSlugResponse
   const slug = buildPaperSlug(paper.title, paper.authors);
 
   // Check if the slug already exists (might be tombstoned or belong to another paper)
-  const existingSlug = await prisma.paperSlug.findUnique({
-    where: { slug },
-  });
+  const { data: existingSlugData, error: existingSlugError } = await supabase
+    .from('paper_slugs')
+    .select('slug, paper_uuid, tombstone')
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (existingSlugError) {
+    throw new Error(existingSlugError.message);
+  }
+
+  const existingSlug = existingSlugData as Tables<'paper_slugs'> | null;
 
   if (existingSlug) {
     // If it's for this paper and active, return it
-    if (existingSlug.paperUuid === paperUuid && !existingSlug.tombstone) {
+    if (existingSlug.paper_uuid === paperUuid && !existingSlug.tombstone) {
       return {
-        paperUuid: existingSlug.paperUuid,
+        paperUuid: existingSlug.paper_uuid,
         slug: existingSlug.slug,
         tombstone: existingSlug.tombstone,
       };
@@ -128,32 +155,56 @@ export async function createSlug(paperUuid: string): Promise<ResolveSlugResponse
 
     // Slug belongs to another paper or is tombstoned - append UUID suffix
     const uniqueSlug = `${slug}${SLUG_SEPARATOR}${paperUuid.slice(0, 8)}`;
-    const created = await prisma.paperSlug.create({
-      data: {
-        slug: uniqueSlug,
-        paperUuid,
-        tombstone: false,
-      },
-    });
+    const insertData: TablesInsert<'paper_slugs'> = {
+      slug: uniqueSlug,
+      paper_uuid: paperUuid,
+      tombstone: false,
+      created_at: new Date().toISOString(),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: createdData, error: createError } = await (supabase
+      .from('paper_slugs') as any)
+      .insert(insertData)
+      .select('slug, paper_uuid, tombstone')
+      .single();
+
+    if (createError) {
+      throw new Error(createError.message);
+    }
+
+    const created = createdData as Tables<'paper_slugs'>;
 
     return {
-      paperUuid: created.paperUuid,
+      paperUuid: created.paper_uuid,
       slug: created.slug,
       tombstone: created.tombstone,
     };
   }
 
   // Create the new slug
-  const created = await prisma.paperSlug.create({
-    data: {
-      slug,
-      paperUuid,
-      tombstone: false,
-    },
-  });
+  const newSlugData: TablesInsert<'paper_slugs'> = {
+    slug,
+    paper_uuid: paperUuid,
+    tombstone: false,
+    created_at: new Date().toISOString(),
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: createdData, error: createError } = await (supabase
+    .from('paper_slugs') as any)
+    .insert(newSlugData)
+    .select('slug, paper_uuid, tombstone')
+    .single();
+
+  if (createError) {
+    throw new Error(createError.message);
+  }
+
+  const created = createdData as Tables<'paper_slugs'>;
 
   return {
-    paperUuid: created.paperUuid,
+    paperUuid: created.paper_uuid,
     slug: created.slug,
     tombstone: created.tombstone,
   };

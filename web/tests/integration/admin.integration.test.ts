@@ -13,16 +13,19 @@
  * - POST /api/admin/requested_papers/[id]/start_processing - start processing
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { testApiHandler } from 'next-test-api-route-handler';
 import {
-  prismaMock,
-  adminGuardMock,
   resetAllMocks,
   mockAdminAuthenticated,
   generateTestUuid,
   generateTestArxivId,
   createTestPaperPayload,
+  mockQueryReturns,
+  mockQueryReturnsSingle,
+  mockCountReturns,
+  mockLimitReturns,
+  mockOrderReturns,
 } from './setup';
 
 // ============================================================================
@@ -50,13 +53,14 @@ describe('Admin API - Papers List', () => {
 
     it('returns papers list with valid admin auth', async () => {
       mockAdminAuthenticated();
-      prismaMock.paper.findMany.mockResolvedValue([
+      // listAllPapers uses .from().select().order().limit() pattern
+      mockLimitReturns([
         {
-          paperUuid: generateTestUuid(),
+          paper_uuid: generateTestUuid(),
           status: 'completed',
           title: 'Test Paper',
           authors: 'Test Author',
-          createdAt: new Date(),
+          created_at: new Date().toISOString(),
         },
       ]);
 
@@ -77,7 +81,8 @@ describe('Admin API - Papers List', () => {
 
     it('accepts status filter parameter', async () => {
       mockAdminAuthenticated();
-      prismaMock.paper.findMany.mockResolvedValue([]);
+      // With status filter, query ends with .in() after .limit()
+      mockLimitReturns([]);
 
       const appHandler = await import('@/app/api/admin/papers/route');
 
@@ -97,7 +102,7 @@ describe('Admin API - Papers List', () => {
 
     it('accepts limit parameter', async () => {
       mockAdminAuthenticated();
-      prismaMock.paper.findMany.mockResolvedValue([]);
+      mockLimitReturns([]);
 
       const appHandler = await import('@/app/api/admin/papers/route');
 
@@ -181,7 +186,7 @@ describe('Admin API - Cumulative Daily Stats', () => {
 
     it('returns daily stats with valid admin auth', async () => {
       mockAdminAuthenticated();
-      prismaMock.paper.count.mockResolvedValue(0);
+      mockCountReturns(0);
 
       const appHandler = await import('@/app/api/admin/papers/cumulative_daily/route');
 
@@ -298,7 +303,7 @@ describe('Admin API - Paper Delete', () => {
 
     it('returns 404 for non-existent paper', async () => {
       mockAdminAuthenticated();
-      prismaMock.paper.findUnique.mockResolvedValue(null);
+      mockQueryReturns(null);
 
       const appHandler = await import('@/app/api/admin/papers/[uuid]/route');
       const uuid = generateTestUuid();
@@ -321,12 +326,10 @@ describe('Admin API - Paper Delete', () => {
     it('deletes paper with valid admin auth', async () => {
       mockAdminAuthenticated();
       const uuid = generateTestUuid();
-      prismaMock.paper.findUnique.mockResolvedValue({
+      mockQueryReturns({
         id: 1,
-        paperUuid: uuid,
+        paper_uuid: uuid,
       });
-      prismaMock.paperSlug.deleteMany.mockResolvedValue({ count: 1 });
-      prismaMock.paper.delete.mockResolvedValue({ id: 1 });
 
       const appHandler = await import('@/app/api/admin/papers/[uuid]/route');
 
@@ -375,7 +378,7 @@ describe('Admin API - Paper Restart', () => {
 
     it('returns 404 for non-existent paper', async () => {
       mockAdminAuthenticated();
-      prismaMock.paper.findUnique.mockResolvedValue(null);
+      mockQueryReturns(null);
 
       const appHandler = await import('@/app/api/admin/papers/[uuid]/restart/route');
       const uuid = generateTestUuid();
@@ -396,18 +399,20 @@ describe('Admin API - Paper Restart', () => {
 
     it('restarts paper processing with valid admin auth', async () => {
       mockAdminAuthenticated();
-      prismaMock.paper.findUnique.mockResolvedValue({
+      // First query: find paper
+      mockQueryReturns({
         id: 1,
         status: 'failed',
       });
-      prismaMock.paper.update.mockResolvedValue({
-        paperUuid: generateTestUuid(),
+      // Second query: update returns the paper
+      mockQueryReturnsSingle({
+        paper_uuid: generateTestUuid(),
         status: 'not_started',
-        errorMessage: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        startedAt: null,
-        finishedAt: null,
+        error_message: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        started_at: null,
+        finished_at: null,
       });
 
       const appHandler = await import('@/app/api/admin/papers/[uuid]/restart/route');
@@ -458,7 +463,7 @@ describe('Admin API - Processing Metrics', () => {
 
     it('returns 404 for non-existent paper', async () => {
       mockAdminAuthenticated();
-      prismaMock.paper.findUnique.mockResolvedValue(null);
+      mockQueryReturns(null);
 
       const appHandler = await import(
         '@/app/api/admin/papers/[uuid]/processing_metrics/route'
@@ -481,16 +486,16 @@ describe('Admin API - Processing Metrics', () => {
 
     it('returns metrics with valid admin auth', async () => {
       mockAdminAuthenticated();
-      prismaMock.paper.findUnique.mockResolvedValue({
-        paperUuid: generateTestUuid(),
+      mockQueryReturns({
+        paper_uuid: generateTestUuid(),
         status: 'completed',
-        numPages: 10,
-        processingTimeSeconds: 120,
-        totalCost: 0.05,
-        avgCostPerPage: 0.005,
-        startedAt: new Date(),
-        finishedAt: new Date(),
-        errorMessage: null,
+        num_pages: 10,
+        processing_time_seconds: 120,
+        total_cost: 0.05,
+        avg_cost_per_page: 0.005,
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+        error_message: null,
       });
 
       const appHandler = await import(
@@ -540,7 +545,7 @@ describe('Admin API - Requested Papers List', () => {
 
     it('returns requested papers with valid admin auth', async () => {
       mockAdminAuthenticated();
-      prismaMock.userRequest.findMany.mockResolvedValue([]);
+      mockOrderReturns([]);
 
       const appHandler = await import('@/app/api/admin/requested_papers/route');
 
@@ -605,7 +610,8 @@ describe('Admin API - Delete Requested Paper', () => {
 
     it('deletes requested paper with valid admin auth', async () => {
       mockAdminAuthenticated();
-      prismaMock.userRequest.deleteMany.mockResolvedValue({ count: 1 });
+      // Mock count of existing requests
+      mockOrderReturns([{ id: 1 }]);
 
       const appHandler = await import('@/app/api/admin/requested_papers/[id]/route');
       const arxivId = generateTestArxivId();
@@ -676,10 +682,12 @@ describe('Admin API - Start Processing', () => {
 
     it('starts processing with valid arXiv ID', async () => {
       mockAdminAuthenticated();
-      prismaMock.paper.findUnique.mockResolvedValue(null);
-      prismaMock.paper.create.mockResolvedValue({
+      // First query: check if paper exists
+      mockQueryReturns(null);
+      // Second query: insert returns the new paper
+      mockQueryReturnsSingle({
         id: 1,
-        paperUuid: generateTestUuid(),
+        paper_uuid: generateTestUuid(),
         status: 'not_started',
       });
 

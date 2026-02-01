@@ -2,33 +2,18 @@
  * Supabase Server Client
  *
  * Creates a Supabase client for use in Server Components and Route Handlers.
- *
- * Responsibilities:
- * - Provide a server-safe Supabase client that can read/write cookies
- * - Handle cookie-based session management for server-side auth
+ * Uses the service role key to bypass RLS for server-side operations.
  */
 
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import type { CookieOptions } from '@supabase/ssr';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/lib/types/database.types';
 
 // ============================================================================
 // CONSTANTS
 // ============================================================================
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
-interface CookieToSet {
-  name: string;
-  value: string;
-  options?: CookieOptions;
-}
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 // ============================================================================
 // MAIN EXPORT
@@ -36,26 +21,8 @@ interface CookieToSet {
 
 /**
  * Creates a Supabase client for server-side usage (Server Components, Route Handlers).
- * @returns Promise resolving to a Supabase client configured with cookie access
+ * Uses service role key to bypass RLS - no cookie/session management needed.
  */
-export async function createClient(): Promise<SupabaseClient> {
-  const cookieStore = await cookies();
-
-  return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet: CookieToSet[]) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
-        } catch {
-          // setAll is called from a Server Component where cookies cannot be set.
-          // This is expected behavior when refreshing sessions in RSC.
-        }
-      },
-    },
-  });
+export async function createClient() {
+  return createSupabaseClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }

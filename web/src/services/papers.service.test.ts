@@ -4,17 +4,126 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock the db module
-vi.mock('@/lib/db', () => ({
-  prisma: {
-    paper: {
-      findUnique: vi.fn(),
-      findMany: vi.fn(),
-      count: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
-    },
-  },
+// ============================================================================
+// MOCK SETUP
+// ============================================================================
+
+// Use vi.hoisted to ensure mock functions are available when vi.mock runs
+const {
+  mockMaybeSingle,
+  mockSingle,
+  mockSelect,
+  mockInsert,
+  mockUpdate,
+  mockDelete,
+  mockEq,
+  mockIn,
+  mockOrder,
+  mockLimit,
+  mockRange,
+  mockFrom,
+} = vi.hoisted(() => {
+  const mockMaybeSingle = vi.fn();
+  const mockSingle = vi.fn();
+  const mockLimit = vi.fn();
+  const mockRange = vi.fn();
+  const mockOrder = vi.fn();
+  const mockIn = vi.fn();
+  const mockEq = vi.fn();
+  const mockSelect = vi.fn();
+  const mockInsert = vi.fn();
+  const mockUpdate = vi.fn();
+  const mockDelete = vi.fn();
+  const mockFrom = vi.fn();
+
+  // Set up the chainable returns
+  mockLimit.mockImplementation(() => ({
+    maybeSingle: mockMaybeSingle,
+  }));
+
+  mockRange.mockImplementation(() => ({
+    maybeSingle: mockMaybeSingle,
+  }));
+
+  mockOrder.mockImplementation(() => ({
+    limit: mockLimit,
+    range: mockRange,
+    maybeSingle: mockMaybeSingle,
+  }));
+
+  mockIn.mockImplementation(() => ({
+    eq: mockEq,
+    order: mockOrder,
+    limit: mockLimit,
+    range: mockRange,
+    maybeSingle: mockMaybeSingle,
+    single: mockSingle,
+  }));
+
+  mockEq.mockImplementation(() => ({
+    eq: mockEq,
+    order: mockOrder,
+    limit: mockLimit,
+    range: mockRange,
+    maybeSingle: mockMaybeSingle,
+    single: mockSingle,
+    select: mockSelect,
+    in: mockIn,
+  }));
+
+  mockSelect.mockImplementation(() => ({
+    eq: mockEq,
+    order: mockOrder,
+    limit: mockLimit,
+    range: mockRange,
+    maybeSingle: mockMaybeSingle,
+    single: mockSingle,
+    in: mockIn,
+  }));
+
+  mockInsert.mockImplementation(() => ({
+    select: mockSelect,
+    single: mockSingle,
+  }));
+
+  mockUpdate.mockImplementation(() => ({
+    eq: mockEq,
+    select: mockSelect,
+    single: mockSingle,
+  }));
+
+  mockDelete.mockImplementation(() => ({
+    eq: mockEq,
+  }));
+
+  mockFrom.mockImplementation(() => ({
+    select: mockSelect,
+    insert: mockInsert,
+    update: mockUpdate,
+    delete: mockDelete,
+    eq: mockEq,
+  }));
+
+  return {
+    mockMaybeSingle,
+    mockSingle,
+    mockSelect,
+    mockInsert,
+    mockUpdate,
+    mockDelete,
+    mockEq,
+    mockIn,
+    mockOrder,
+    mockLimit,
+    mockRange,
+    mockFrom,
+  };
+});
+
+vi.mock('@/lib/supabase/server', () => ({
+  createClient: vi.fn().mockResolvedValue({
+    from: mockFrom,
+  }),
 }));
 
 // Mock the arxiv module
@@ -41,7 +150,6 @@ vi.mock('crypto', () => ({
   randomUUID: vi.fn(() => 'mock-uuid-1234'),
 }));
 
-import { prisma } from '@/lib/db';
 import {
   getThumbnail,
   getPaperSummary,
@@ -52,16 +160,6 @@ import {
   restartPaper,
 } from './papers.service';
 
-const mockedPrisma = prisma as unknown as {
-  paper: {
-    findUnique: ReturnType<typeof vi.fn>;
-    findMany: ReturnType<typeof vi.fn>;
-    count: ReturnType<typeof vi.fn>;
-    create: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
-  };
-};
-
 // ============================================================================
 // TESTS
 // ============================================================================
@@ -69,6 +167,13 @@ const mockedPrisma = prisma as unknown as {
 describe('papers.service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset mockRange and mockOrder to handle chaining
+    mockRange.mockResolvedValue({ data: [], error: null });
+    mockOrder.mockReturnValue({
+      limit: mockLimit,
+      range: mockRange,
+      maybeSingle: mockMaybeSingle,
+    });
   });
 
   // --------------------------------------------------------------------------
@@ -77,8 +182,11 @@ describe('papers.service', () => {
   describe('getThumbnail', () => {
     it('parses valid PNG data URL and returns buffer and mediaType', async () => {
       const pngBase64 = 'iVBORw0KGgo='; // minimal valid base64
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        thumbnailDataUrl: `data:image/png;base64,${pngBase64}`,
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          thumbnail_data_url: `data:image/png;base64,${pngBase64}`,
+        },
+        error: null,
       });
 
       const result = await getThumbnail('test-uuid');
@@ -90,8 +198,11 @@ describe('papers.service', () => {
 
     it('parses valid JPEG data URL and returns correct mediaType', async () => {
       const jpegBase64 = '/9j/4AAQ';
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        thumbnailDataUrl: `data:image/jpeg;base64,${jpegBase64}`,
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          thumbnail_data_url: `data:image/jpeg;base64,${jpegBase64}`,
+        },
+        error: null,
       });
 
       const result = await getThumbnail('test-uuid');
@@ -100,7 +211,7 @@ describe('papers.service', () => {
     });
 
     it('throws when paper not found', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue(null);
+      mockMaybeSingle.mockResolvedValue({ data: null, error: null });
 
       await expect(getThumbnail('nonexistent')).rejects.toThrow(
         'Paper not found: nonexistent'
@@ -108,8 +219,11 @@ describe('papers.service', () => {
     });
 
     it('throws when paper has no thumbnail', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        thumbnailDataUrl: null,
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          thumbnail_data_url: null,
+        },
+        error: null,
       });
 
       await expect(getThumbnail('test-uuid')).rejects.toThrow(
@@ -118,8 +232,11 @@ describe('papers.service', () => {
     });
 
     it('throws when data URL format is invalid (missing data: prefix)', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        thumbnailDataUrl: 'image/png;base64,abc123',
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          thumbnail_data_url: 'image/png;base64,abc123',
+        },
+        error: null,
       });
 
       await expect(getThumbnail('test-uuid')).rejects.toThrow(
@@ -128,8 +245,11 @@ describe('papers.service', () => {
     });
 
     it('throws when data URL format is invalid (missing base64)', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        thumbnailDataUrl: 'data:image/png,abc123',
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          thumbnail_data_url: 'data:image/png,abc123',
+        },
+        error: null,
       });
 
       await expect(getThumbnail('test-uuid')).rejects.toThrow(
@@ -143,15 +263,18 @@ describe('papers.service', () => {
   // --------------------------------------------------------------------------
   describe('getPaperSummary', () => {
     it('extracts five_minute_summary from processedContent', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        paperUuid: 'test-uuid',
-        title: 'Test Paper',
-        authors: 'John Doe',
-        arxivUrl: 'https://arxiv.org/abs/2301.12345',
-        processedContent: JSON.stringify({
-          five_minute_summary: 'This is a summary.',
-        }),
-        numPages: 10,
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          paper_uuid: 'test-uuid',
+          title: 'Test Paper',
+          authors: 'John Doe',
+          arxiv_url: 'https://arxiv.org/abs/2301.12345',
+          processed_content: JSON.stringify({
+            five_minute_summary: 'This is a summary.',
+          }),
+          num_pages: 10,
+        },
+        error: null,
       });
 
       const result = await getPaperSummary('test-uuid');
@@ -164,13 +287,16 @@ describe('papers.service', () => {
     });
 
     it('returns null fiveMinuteSummary when processedContent is null', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        paperUuid: 'test-uuid',
-        title: 'Test Paper',
-        authors: null,
-        arxivUrl: null,
-        processedContent: null,
-        numPages: null,
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          paper_uuid: 'test-uuid',
+          title: 'Test Paper',
+          authors: null,
+          arxiv_url: null,
+          processed_content: null,
+          num_pages: null,
+        },
+        error: null,
       });
 
       const result = await getPaperSummary('test-uuid');
@@ -180,13 +306,16 @@ describe('papers.service', () => {
     });
 
     it('returns null fiveMinuteSummary when processedContent has invalid JSON', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        paperUuid: 'test-uuid',
-        title: 'Test Paper',
-        authors: null,
-        arxivUrl: null,
-        processedContent: 'not valid json {{{',
-        numPages: 5,
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          paper_uuid: 'test-uuid',
+          title: 'Test Paper',
+          authors: null,
+          arxiv_url: null,
+          processed_content: 'not valid json {{{',
+          num_pages: 5,
+        },
+        error: null,
       });
 
       const result = await getPaperSummary('test-uuid');
@@ -195,13 +324,16 @@ describe('papers.service', () => {
     });
 
     it('returns null fiveMinuteSummary when five_minute_summary field is missing', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        paperUuid: 'test-uuid',
-        title: 'Test Paper',
-        authors: null,
-        arxivUrl: null,
-        processedContent: JSON.stringify({ other_field: 'value' }),
-        numPages: 5,
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          paper_uuid: 'test-uuid',
+          title: 'Test Paper',
+          authors: null,
+          arxiv_url: null,
+          processed_content: JSON.stringify({ other_field: 'value' }),
+          num_pages: 5,
+        },
+        error: null,
       });
 
       const result = await getPaperSummary('test-uuid');
@@ -210,7 +342,7 @@ describe('papers.service', () => {
     });
 
     it('throws when paper not found', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue(null);
+      mockMaybeSingle.mockResolvedValue({ data: null, error: null });
 
       await expect(getPaperSummary('nonexistent')).rejects.toThrow(
         'Paper not found: nonexistent'
@@ -223,10 +355,13 @@ describe('papers.service', () => {
   // --------------------------------------------------------------------------
   describe('getPaperMarkdown', () => {
     it('returns final_markdown from valid processedContent', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        processedContent: JSON.stringify({
-          final_markdown: '# Paper Title\n\nContent here.',
-        }),
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          processed_content: JSON.stringify({
+            final_markdown: '# Paper Title\n\nContent here.',
+          }),
+        },
+        error: null,
       });
 
       const result = await getPaperMarkdown('test-uuid');
@@ -235,8 +370,11 @@ describe('papers.service', () => {
     });
 
     it('returns empty string when final_markdown is not present', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        processedContent: JSON.stringify({ other_field: 'value' }),
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          processed_content: JSON.stringify({ other_field: 'value' }),
+        },
+        error: null,
       });
 
       const result = await getPaperMarkdown('test-uuid');
@@ -245,7 +383,7 @@ describe('papers.service', () => {
     });
 
     it('throws when paper not found', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue(null);
+      mockMaybeSingle.mockResolvedValue({ data: null, error: null });
 
       await expect(getPaperMarkdown('nonexistent')).rejects.toThrow(
         'Paper not found: nonexistent'
@@ -253,8 +391,11 @@ describe('papers.service', () => {
     });
 
     it('throws when paper has no processedContent', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        processedContent: null,
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          processed_content: null,
+        },
+        error: null,
       });
 
       await expect(getPaperMarkdown('test-uuid')).rejects.toThrow(
@@ -263,8 +404,11 @@ describe('papers.service', () => {
     });
 
     it('throws when processedContent has invalid JSON', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        processedContent: 'not valid json {{{',
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          processed_content: 'not valid json {{{',
+        },
+        error: null,
       });
 
       await expect(getPaperMarkdown('test-uuid')).rejects.toThrow(
@@ -278,10 +422,15 @@ describe('papers.service', () => {
   // --------------------------------------------------------------------------
   describe('checkArxivExists', () => {
     it('returns exists: true with slug-based viewerUrl when paper completed with slug', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        paperUuid: 'test-uuid',
-        status: 'completed',
-        slugs: [{ slug: 'test-paper-slug' }],
+      // First call: papers query
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: { paper_uuid: 'test-uuid', status: 'completed' },
+        error: null,
+      });
+      // Second call: paper_slugs query
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: { slug: 'test-paper-slug' },
+        error: null,
       });
 
       const result = await checkArxivExists('2301.12345');
@@ -291,10 +440,15 @@ describe('papers.service', () => {
     });
 
     it('returns exists: true with uuid-based viewerUrl when paper completed without slug', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        paperUuid: 'test-uuid',
-        status: 'completed',
-        slugs: [],
+      // First call: papers query
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: { paper_uuid: 'test-uuid', status: 'completed' },
+        error: null,
+      });
+      // Second call: paper_slugs query - no slug found
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
       });
 
       const result = await checkArxivExists('2301.12345');
@@ -304,10 +458,13 @@ describe('papers.service', () => {
     });
 
     it('returns exists: false when paper is not completed', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        paperUuid: 'test-uuid',
-        status: 'processing',
-        slugs: [],
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          paper_uuid: 'test-uuid',
+          status: 'processing',
+          paper_slugs: [],
+        },
+        error: null,
       });
 
       const result = await checkArxivExists('2301.12345');
@@ -317,7 +474,7 @@ describe('papers.service', () => {
     });
 
     it('returns exists: false when paper not found', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue(null);
+      mockMaybeSingle.mockResolvedValue({ data: null, error: null });
 
       const result = await checkArxivExists('2301.12345');
 
@@ -331,10 +488,13 @@ describe('papers.service', () => {
   // --------------------------------------------------------------------------
   describe('enqueueArxiv', () => {
     it('returns existing paper info when paper already exists', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        id: BigInt(42),
-        paperUuid: 'existing-uuid',
-        status: 'completed',
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          id: 42,
+          paper_uuid: 'existing-uuid',
+          status: 'completed',
+        },
+        error: null,
       });
 
       const result = await enqueueArxiv('https://arxiv.org/abs/2301.12345');
@@ -344,15 +504,18 @@ describe('papers.service', () => {
         paperUuid: 'existing-uuid',
         status: 'completed',
       });
-      expect(mockedPrisma.paper.create).not.toHaveBeenCalled();
+      expect(mockInsert).not.toHaveBeenCalled();
     });
 
     it('creates new paper record when paper does not exist', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue(null);
-      mockedPrisma.paper.create.mockResolvedValue({
-        id: BigInt(99),
-        paperUuid: 'mock-uuid-1234',
-        status: 'not_started',
+      mockMaybeSingle.mockResolvedValue({ data: null, error: null });
+      mockSingle.mockResolvedValue({
+        data: {
+          id: 99,
+          paper_uuid: 'mock-uuid-1234',
+          status: 'not_started',
+        },
+        error: null,
       });
 
       const result = await enqueueArxiv('https://arxiv.org/abs/2301.12345');
@@ -362,96 +525,100 @@ describe('papers.service', () => {
         paperUuid: 'mock-uuid-1234',
         status: 'not_started',
       });
-      expect(mockedPrisma.paper.create).toHaveBeenCalledWith({
-        data: {
-          paperUuid: 'mock-uuid-1234',
-          arxivId: '2301.12345',
-          arxivVersion: null,
-          arxivUrl: 'https://arxiv.org/abs/2301.12345',
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          paper_uuid: 'mock-uuid-1234',
+          arxiv_id: '2301.12345',
+          arxiv_version: null,
+          arxiv_url: 'https://arxiv.org/abs/2301.12345',
           status: 'not_started',
-        },
-      });
+        })
+      );
     });
 
     it('includes version in arxivUrl when version is present', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue(null);
-      mockedPrisma.paper.create.mockResolvedValue({
-        id: BigInt(99),
-        paperUuid: 'mock-uuid-1234',
-        status: 'not_started',
+      mockMaybeSingle.mockResolvedValue({ data: null, error: null });
+      mockSingle.mockResolvedValue({
+        data: {
+          id: 99,
+          paper_uuid: 'mock-uuid-1234',
+          status: 'not_started',
+        },
+        error: null,
       });
 
       await enqueueArxiv('https://arxiv.org/abs/2302.99999v2');
 
-      expect(mockedPrisma.paper.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          arxivId: '2302.99999',
-          arxivVersion: 'v2',
-          arxivUrl: 'https://arxiv.org/abs/2302.99999v2',
-        }),
-      });
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          arxiv_id: '2302.99999',
+          arxiv_version: 'v2',
+          arxiv_url: 'https://arxiv.org/abs/2302.99999v2',
+        })
+      );
     });
   });
 
   // --------------------------------------------------------------------------
-  // listMinimalPapers - Paginated paper list
+  // listMinimalPapers - Paginated paper list (no count query, uses hasMore detection)
   // --------------------------------------------------------------------------
   describe('listMinimalPapers', () => {
-    it('returns paginated list with hasMore correctly calculated', async () => {
-      mockedPrisma.paper.findMany.mockResolvedValue([
-        {
-          paperUuid: 'uuid-1',
-          title: 'Paper 1',
-          authors: 'Author 1',
-          thumbnailDataUrl: null,
-          slugs: [{ slug: 'paper-1-slug' }],
-        },
-        {
-          paperUuid: 'uuid-2',
-          title: 'Paper 2',
-          authors: 'Author 2',
-          thumbnailDataUrl: 'data:image/png;base64,abc',
-          slugs: [],
-        },
-      ]);
-      mockedPrisma.paper.count.mockResolvedValue(5);
+    it('returns paginated list with hasMore true when more items exist', async () => {
+      // Mock for papers query - returns limit+1 items to indicate hasMore
+      mockOrder.mockImplementationOnce(() => ({
+        range: () => Promise.resolve({
+          data: [
+            { paper_uuid: 'uuid-1', title: 'Paper 1', authors: 'Author 1', thumbnail_data_url: null },
+            { paper_uuid: 'uuid-2', title: 'Paper 2', authors: 'Author 2', thumbnail_data_url: 'data:image/png;base64,abc' },
+            { paper_uuid: 'uuid-3', title: 'Paper 3', authors: 'Author 3', thumbnail_data_url: null }, // extra item
+          ],
+          error: null,
+        }),
+      }));
+
+      // Mock for slugs query
+      mockOrder.mockResolvedValueOnce({
+        data: [{ paper_uuid: 'uuid-1', slug: 'paper-1-slug' }],
+        error: null,
+      });
 
       const result = await listMinimalPapers(1, 2);
 
-      expect(result.items).toHaveLength(2);
-      expect(result.total).toBe(5);
+      expect(result.items).toHaveLength(2); // Only returns limit items
       expect(result.page).toBe(1);
       expect(result.limit).toBe(2);
       expect(result.hasMore).toBe(true);
     });
 
     it('defaults to page 1 and limit 20', async () => {
-      mockedPrisma.paper.findMany.mockResolvedValue([]);
-      mockedPrisma.paper.count.mockResolvedValue(0);
+      // Mock for papers query - empty result
+      mockOrder.mockImplementationOnce(() => ({
+        range: () => Promise.resolve({ data: [], error: null }),
+      }));
+
+      // Mock for slugs query
+      mockOrder.mockResolvedValueOnce({ data: [], error: null });
 
       const result = await listMinimalPapers();
 
       expect(result.page).toBe(1);
       expect(result.limit).toBe(20);
-      expect(mockedPrisma.paper.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          skip: 0,
-          take: 20,
-        })
-      );
     });
 
-    it('maps slug correctly from nested relation', async () => {
-      mockedPrisma.paper.findMany.mockResolvedValue([
-        {
-          paperUuid: 'uuid-1',
-          title: 'Paper 1',
-          authors: null,
-          thumbnailDataUrl: null,
-          slugs: [{ slug: 'my-paper-slug' }],
-        },
-      ]);
-      mockedPrisma.paper.count.mockResolvedValue(1);
+    it('maps slug correctly from separate slugs query', async () => {
+      // Mock for papers query
+      mockOrder.mockImplementationOnce(() => ({
+        range: () => Promise.resolve({
+          data: [{ paper_uuid: 'uuid-1', title: 'Paper 1', authors: null, thumbnail_data_url: null }],
+          error: null,
+        }),
+      }));
+
+      // Mock for slugs query
+      mockOrder.mockResolvedValueOnce({
+        data: [{ paper_uuid: 'uuid-1', slug: 'my-paper-slug' }],
+        error: null,
+      });
 
       const result = await listMinimalPapers(1, 10);
 
@@ -459,37 +626,36 @@ describe('papers.service', () => {
     });
 
     it('sets slug to null when no slugs exist', async () => {
-      mockedPrisma.paper.findMany.mockResolvedValue([
-        {
-          paperUuid: 'uuid-1',
-          title: 'Paper 1',
-          authors: null,
-          thumbnailDataUrl: null,
-          slugs: [],
-        },
-      ]);
-      mockedPrisma.paper.count.mockResolvedValue(1);
+      // Mock for papers query
+      mockOrder.mockImplementationOnce(() => ({
+        range: () => Promise.resolve({
+          data: [{ paper_uuid: 'uuid-1', title: 'Paper 1', authors: null, thumbnail_data_url: null }],
+          error: null,
+        }),
+      }));
+
+      // Mock for slugs query - empty result
+      mockOrder.mockResolvedValueOnce({ data: [], error: null });
 
       const result = await listMinimalPapers(1, 10);
 
       expect(result.items[0].slug).toBeNull();
     });
 
-    it('calculates hasMore as false when on last page', async () => {
-      mockedPrisma.paper.findMany.mockResolvedValue([
-        {
-          paperUuid: 'uuid-1',
-          title: 'Paper',
-          authors: null,
-          thumbnailDataUrl: null,
-          slugs: [],
-        },
-      ]);
-      mockedPrisma.paper.count.mockResolvedValue(3);
+    it('calculates hasMore as false when fewer items than limit+1', async () => {
+      // Mock for papers query - only 1 item returned (less than limit+1)
+      mockOrder.mockImplementationOnce(() => ({
+        range: () => Promise.resolve({
+          data: [{ paper_uuid: 'uuid-1', title: 'Paper', authors: null, thumbnail_data_url: null }],
+          error: null,
+        }),
+      }));
+
+      // Mock for slugs query
+      mockOrder.mockResolvedValueOnce({ data: [], error: null });
 
       const result = await listMinimalPapers(2, 2);
 
-      // skip = (2-1) * 2 = 2, returned 1 item, 2 + 1 = 3 which equals total
       expect(result.hasMore).toBe(false);
     });
   });
@@ -500,48 +666,52 @@ describe('papers.service', () => {
   describe('restartPaper', () => {
     it('resets paper status to not_started when paper found and not processing', async () => {
       const now = new Date();
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        id: BigInt(1),
-        status: 'failed',
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          id: 1,
+          status: 'failed',
+        },
+        error: null,
       });
-      mockedPrisma.paper.update.mockResolvedValue({
-        paperUuid: 'test-uuid',
-        status: 'not_started',
-        errorMessage: null,
-        createdAt: now,
-        updatedAt: now,
-        startedAt: null,
-        finishedAt: null,
-        arxivId: '2301.12345',
-        arxivVersion: null,
-        arxivUrl: 'https://arxiv.org/abs/2301.12345',
-        title: 'Test Paper',
-        authors: 'Author',
-        numPages: 10,
-        thumbnailDataUrl: null,
-        processingTimeSeconds: null,
-        totalCost: null,
-        avgCostPerPage: null,
+      mockSingle.mockResolvedValue({
+        data: {
+          paper_uuid: 'test-uuid',
+          status: 'not_started',
+          error_message: null,
+          created_at: now.toISOString(),
+          updated_at: now.toISOString(),
+          started_at: null,
+          finished_at: null,
+          arxiv_id: '2301.12345',
+          arxiv_version: null,
+          arxiv_url: 'https://arxiv.org/abs/2301.12345',
+          title: 'Test Paper',
+          authors: 'Author',
+          num_pages: 10,
+          thumbnail_data_url: null,
+          processing_time_seconds: null,
+          total_cost: null,
+          avg_cost_per_page: null,
+        },
+        error: null,
       });
 
       const result = await restartPaper('test-uuid');
 
       expect(result.status).toBe('not_started');
       expect(result.errorMessage).toBeNull();
-      expect(mockedPrisma.paper.update).toHaveBeenCalledWith({
-        where: { paperUuid: 'test-uuid' },
-        data: expect.objectContaining({
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
           status: 'not_started',
-          errorMessage: null,
-          startedAt: null,
-          finishedAt: null,
-        }),
-        select: expect.any(Object),
-      });
+          error_message: null,
+          started_at: null,
+          finished_at: null,
+        })
+      );
     });
 
     it('throws when paper not found', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue(null);
+      mockMaybeSingle.mockResolvedValue({ data: null, error: null });
 
       await expect(restartPaper('nonexistent')).rejects.toThrow(
         'Paper not found: nonexistent'
@@ -549,9 +719,12 @@ describe('papers.service', () => {
     });
 
     it('throws when paper is already processing', async () => {
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        id: BigInt(1),
-        status: 'processing',
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          id: 1,
+          status: 'processing',
+        },
+        error: null,
       });
 
       await expect(restartPaper('test-uuid')).rejects.toThrow(
@@ -561,28 +734,34 @@ describe('papers.service', () => {
 
     it('allows restart when paper status is completed', async () => {
       const now = new Date();
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        id: BigInt(1),
-        status: 'completed',
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          id: 1,
+          status: 'completed',
+        },
+        error: null,
       });
-      mockedPrisma.paper.update.mockResolvedValue({
-        paperUuid: 'test-uuid',
-        status: 'not_started',
-        errorMessage: null,
-        createdAt: now,
-        updatedAt: now,
-        startedAt: null,
-        finishedAt: null,
-        arxivId: '2301.12345',
-        arxivVersion: null,
-        arxivUrl: 'https://arxiv.org/abs/2301.12345',
-        title: 'Test Paper',
-        authors: 'Author',
-        numPages: 10,
-        thumbnailDataUrl: null,
-        processingTimeSeconds: null,
-        totalCost: null,
-        avgCostPerPage: null,
+      mockSingle.mockResolvedValue({
+        data: {
+          paper_uuid: 'test-uuid',
+          status: 'not_started',
+          error_message: null,
+          created_at: now.toISOString(),
+          updated_at: now.toISOString(),
+          started_at: null,
+          finished_at: null,
+          arxiv_id: '2301.12345',
+          arxiv_version: null,
+          arxiv_url: 'https://arxiv.org/abs/2301.12345',
+          title: 'Test Paper',
+          authors: 'Author',
+          num_pages: 10,
+          thumbnail_data_url: null,
+          processing_time_seconds: null,
+          total_cost: null,
+          avg_cost_per_page: null,
+        },
+        error: null,
       });
 
       const result = await restartPaper('test-uuid');
@@ -592,28 +771,34 @@ describe('papers.service', () => {
 
     it('allows restart when paper status is not_started', async () => {
       const now = new Date();
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        id: BigInt(1),
-        status: 'not_started',
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          id: 1,
+          status: 'not_started',
+        },
+        error: null,
       });
-      mockedPrisma.paper.update.mockResolvedValue({
-        paperUuid: 'test-uuid',
-        status: 'not_started',
-        errorMessage: null,
-        createdAt: now,
-        updatedAt: now,
-        startedAt: null,
-        finishedAt: null,
-        arxivId: null,
-        arxivVersion: null,
-        arxivUrl: null,
-        title: null,
-        authors: null,
-        numPages: null,
-        thumbnailDataUrl: null,
-        processingTimeSeconds: null,
-        totalCost: null,
-        avgCostPerPage: null,
+      mockSingle.mockResolvedValue({
+        data: {
+          paper_uuid: 'test-uuid',
+          status: 'not_started',
+          error_message: null,
+          created_at: now.toISOString(),
+          updated_at: now.toISOString(),
+          started_at: null,
+          finished_at: null,
+          arxiv_id: null,
+          arxiv_version: null,
+          arxiv_url: null,
+          title: null,
+          authors: null,
+          num_pages: null,
+          thumbnail_data_url: null,
+          processing_time_seconds: null,
+          total_cost: null,
+          avg_cost_per_page: null,
+        },
+        error: null,
       });
 
       const result = await restartPaper('test-uuid');

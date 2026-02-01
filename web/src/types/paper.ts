@@ -276,8 +276,6 @@ export interface ProcessedPaperContent {
 export interface PaginatedMinimalPapers {
   /** List of papers for current page */
   items: MinimalPaper[];
-  /** Total number of papers */
-  total: number;
   /** Current page number (1-indexed) */
   page: number;
   /** Items per page */
