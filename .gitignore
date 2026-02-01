@@ -83,3 +83,6 @@ testscripts/2025.10.07-test-hume-tts/output
 # IDE
 .claude/settings.local.json
 CLAUDE.md
+
+# Supabase CLI temp files
+**/supabase/.temp/
