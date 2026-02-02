@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { X, Bell } from 'lucide-react';
-import { countPapersSince, listMinimalPapersPaginated } from '../services/api';
+import { countPapersSince } from '../services/api';
 import { getLastVisitTimestamp, setLastVisitTimestamp } from '../utils/lastVisitStorage';
 
 // DAG runs at 2:00 AM UTC and 2:00 PM UTC
@@ -79,7 +79,6 @@ const formatTimeRemaining = (milliseconds: number): string => {
  */
 export default function NewPapersBanner() {
   const [newCount, setNewCount] = useState<number | null>(null);
-  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [isVisible, setIsVisible] = useState<boolean>(false);
   const [isDismissed, setIsDismissed] = useState<boolean>(false);
   const [timeRemaining, setTimeRemaining] = useState<string | null>(null);
@@ -94,10 +93,6 @@ export default function NewPapersBanner() {
       }
 
       try {
-        // Fetch total count of papers
-        const totalResult = await listMinimalPapersPaginated(1, 1);
-        setTotalCount(totalResult.total);
-
         // Check for new papers since last visit
         if (lastVisit) {
           const result = await countPapersSince(lastVisit);
@@ -183,7 +178,7 @@ export default function NewPapersBanner() {
     setLastVisitTimestamp();
   };
 
-  if (!isVisible || isDismissed || totalCount === null) {
+  if (!isVisible || isDismissed) {
     return null;
   }
 

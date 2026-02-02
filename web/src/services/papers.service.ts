@@ -53,20 +53,19 @@ export async function listMinimalPapers(
   const supabase = await createClient();
   const offset = (page - 1) * limit;
 
-  // Only select minimal fields needed (rows are ~2MB each due to processed_content blob)
-  const minimalFields = 'paper_uuid, title, authors, thumbnail_data_url';
-
   // Fetch limit+1 to detect hasMore without expensive count query
+  // Only select minimal fields needed (rows are ~2MB each due to processed_content blob)
   const { data: papersData, error: papersError } = await supabase
     .from('papers')
-    .select(minimalFields)
+    .select('paper_uuid, title, authors, thumbnail_data_url')
     .eq('status', 'completed')
     .order('finished_at', { ascending: false })
     .range(offset, offset + limit);
 
   if (papersError) throw new Error(papersError.message);
 
-  const allPapers = papersData ?? [];
+  type MinimalPaperRow = Pick<Tables<'papers'>, 'paper_uuid' | 'title' | 'authors' | 'thumbnail_data_url'>;
+  const allPapers = (papersData ?? []) as MinimalPaperRow[];
   const hasMore = allPapers.length > limit;
   const papers = hasMore ? allPapers.slice(0, limit) : allPapers;
 
@@ -83,7 +82,8 @@ export async function listMinimalPapers(
 
   if (slugsError) throw new Error(slugsError.message);
 
-  const slugs = slugsData ?? [];
+  type SlugRow = Pick<Tables<'paper_slugs'>, 'paper_uuid' | 'slug'>;
+  const slugs = (slugsData ?? []) as SlugRow[];
 
   // Build a map of paper_uuid -> most recent slug
   const slugMap = new Map<string, string>();
