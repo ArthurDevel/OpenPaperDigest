@@ -2,16 +2,12 @@
  * Supabase Server Client
  *
  * Creates a Supabase client for use in Server Components and Route Handlers.
- *
- * Responsibilities:
- * - Provide a server-safe Supabase client that can read/write cookies
- * - Handle cookie-based session management for server-side auth
+ * Uses cookies to maintain user sessions and anon key with RLS.
  */
 
-import { createServerClient } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import type { CookieOptions } from '@supabase/ssr';
+import type { Database } from '@/lib/types/database.types';
 
 // ============================================================================
 // CONSTANTS
@@ -21,39 +17,30 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 // ============================================================================
-// TYPES
-// ============================================================================
-
-interface CookieToSet {
-  name: string;
-  value: string;
-  options?: CookieOptions;
-}
-
-// ============================================================================
 // MAIN EXPORT
 // ============================================================================
 
 /**
  * Creates a Supabase client for server-side usage (Server Components, Route Handlers).
- * @returns Promise resolving to a Supabase client configured with cookie access
+ * Reads cookies to access the authenticated user's session.
+ * @returns Supabase client with user session from cookies
  */
-export async function createClient(): Promise<SupabaseClient> {
+export async function createClient() {
   const cookieStore = await cookies();
 
-  return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  return createServerClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
     cookies: {
       getAll() {
         return cookieStore.getAll();
       },
-      setAll(cookiesToSet: CookieToSet[]) {
+      setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
         try {
           cookiesToSet.forEach(({ name, value, options }) => {
             cookieStore.set(name, value, options);
           });
         } catch {
-          // setAll is called from a Server Component where cookies cannot be set.
-          // This is expected behavior when refreshing sessions in RSC.
+          // setAll can fail in Server Components (read-only context)
+          // Session refresh will be handled by middleware instead
         }
       },
     },

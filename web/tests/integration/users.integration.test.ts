@@ -13,12 +13,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { testApiHandler } from 'next-test-api-route-handler';
 import {
-  prismaMock,
   resetAllMocks,
   mockAuthenticatedSession,
   defaultMockSession,
   generateTestUuid,
   generateTestArxivId,
+  mockQueryReturns,
+  mockOrderReturns,
 } from './setup';
 
 // ============================================================================
@@ -50,18 +51,20 @@ describe('Users API - My List', () => {
 
     it('returns list when authenticated', async () => {
       mockAuthenticatedSession();
-      prismaMock.userList.findMany.mockResolvedValue([
+      // Mock user_lists query with joined papers
+      mockOrderReturns([
         {
-          createdAt: new Date(),
-          paper: {
-            paperUuid: generateTestUuid(),
+          created_at: new Date().toISOString(),
+          papers: {
+            paper_uuid: generateTestUuid(),
             title: 'Test Paper',
             authors: 'Test Author',
-            thumbnailDataUrl: null,
-            slugs: [],
+            thumbnail_data_url: null,
           },
         },
       ]);
+      // Mock slugs query
+      mockOrderReturns([]);
 
       const appHandler = await import('@/app/api/users/me/list/route');
 
@@ -102,11 +105,11 @@ describe('Users API - My List', () => {
     it('checks if paper is in list when authenticated', async () => {
       mockAuthenticatedSession();
       // Mock paper lookup
-      prismaMock.paper.findUnique.mockResolvedValue({ id: 1 });
+      mockQueryReturns({ id: 1 });
       // Mock userList lookup
-      prismaMock.userList.findUnique.mockResolvedValue({
-        userId: defaultMockSession.user.id,
-        paperId: 1,
+      mockQueryReturns({
+        user_id: defaultMockSession.user.id,
+        paper_id: 1,
       });
 
       const appHandler = await import('@/app/api/users/me/list/[uuid]/route');
@@ -149,13 +152,11 @@ describe('Users API - My List', () => {
 
     it('adds paper to list when authenticated', async () => {
       mockAuthenticatedSession();
-      prismaMock.user.findUnique.mockResolvedValue({ id: defaultMockSession.user.id });
-      prismaMock.paper.findUnique.mockResolvedValue({ id: 1, paperUuid: generateTestUuid() });
-      prismaMock.userList.findUnique.mockResolvedValue(null);
-      prismaMock.userList.create.mockResolvedValue({
-        userId: defaultMockSession.user.id,
-        paperId: 1,
-      });
+      // Mock paper lookup
+      mockQueryReturns({ id: 1, paper_uuid: generateTestUuid() });
+      // Mock existing list check (not found)
+      mockQueryReturns(null);
+      // Insert succeeds (no return needed for insert without select)
 
       const appHandler = await import('@/app/api/users/me/list/[uuid]/route');
       const uuid = generateTestUuid();
@@ -197,8 +198,11 @@ describe('Users API - My List', () => {
 
     it('removes paper from list when authenticated', async () => {
       mockAuthenticatedSession();
-      prismaMock.paper.findUnique.mockResolvedValue({ id: 1 });
-      prismaMock.userList.deleteMany.mockResolvedValue({ count: 1 });
+      // Mock paper lookup
+      mockQueryReturns({ id: 1 });
+      // Mock existing list check (found)
+      mockQueryReturns({ id: 1 });
+      // Delete succeeds
 
       const appHandler = await import('@/app/api/users/me/list/[uuid]/route');
       const uuid = generateTestUuid();
@@ -248,7 +252,7 @@ describe('Users API - My Requests', () => {
 
     it('returns requests when authenticated', async () => {
       mockAuthenticatedSession();
-      prismaMock.userRequest.findMany.mockResolvedValue([]);
+      mockOrderReturns([]);
 
       const appHandler = await import('@/app/api/users/me/requests/route');
 
@@ -367,18 +371,18 @@ describe('Users API - Processing Metrics', () => {
 
     it('returns metrics when authenticated', async () => {
       mockAuthenticatedSession();
-      // Paper must have initiatedByUserId matching the session user
-      prismaMock.paper.findUnique.mockResolvedValue({
-        paperUuid: generateTestUuid(),
+      // Paper must have initiated_by_user_id matching the session user
+      mockQueryReturns({
+        paper_uuid: generateTestUuid(),
         status: 'completed',
-        numPages: 10,
-        processingTimeSeconds: 120,
-        totalCost: 0.05,
-        avgCostPerPage: 0.005,
-        startedAt: new Date(),
-        finishedAt: new Date(),
-        errorMessage: null,
-        initiatedByUserId: defaultMockSession.user.id,
+        num_pages: 10,
+        processing_time_seconds: 120,
+        total_cost: 0.05,
+        avg_cost_per_page: 0.005,
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+        error_message: null,
+        initiated_by_user_id: defaultMockSession.user.id,
       });
 
       const appHandler = await import(

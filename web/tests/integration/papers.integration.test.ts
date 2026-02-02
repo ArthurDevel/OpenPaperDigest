@@ -14,14 +14,18 @@
  * - GET /api/papers/thumbnails/[uuid] - get thumbnail
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { testApiHandler } from 'next-test-api-route-handler';
 import {
-  prismaMock,
   resetAllMocks,
   generateTestUuid,
   generateTestArxivId,
-  createMockPaper,
+  mockQueryReturns,
+  mockQueryReturnsSingle,
+  mockCountReturns,
+  mockGteCountReturns,
+  mockRangeReturns,
+  mockOrderReturns,
 } from './setup';
 
 // ============================================================================
@@ -35,25 +39,27 @@ describe('Papers API - Minimal List', () => {
 
   describe('GET /api/papers/minimal', () => {
     it('returns paginated list with default parameters', async () => {
-      const mockPapers = [
+      // Mock count query
+      mockCountReturns(2);
+
+      // Mock papers query (via range)
+      mockRangeReturns([
         {
-          paperUuid: generateTestUuid(),
+          paper_uuid: generateTestUuid(),
           title: 'Test Paper 1',
           authors: 'Author 1',
-          thumbnailDataUrl: null,
-          slugs: [{ slug: 'test-paper-1-author' }],
+          thumbnail_data_url: null,
         },
         {
-          paperUuid: generateTestUuid(),
+          paper_uuid: generateTestUuid(),
           title: 'Test Paper 2',
           authors: 'Author 2',
-          thumbnailDataUrl: null,
-          slugs: [],
+          thumbnail_data_url: null,
         },
-      ];
+      ]);
 
-      prismaMock.paper.findMany.mockResolvedValue(mockPapers);
-      prismaMock.paper.count.mockResolvedValue(2);
+      // Mock slugs query
+      mockOrderReturns([]);
 
       const appHandler = await import('@/app/api/papers/minimal/route');
 
@@ -66,9 +72,9 @@ describe('Papers API - Minimal List', () => {
 
           const data = await response.json();
           expect(data).toHaveProperty('items');
-          expect(data).toHaveProperty('total');
           expect(data).toHaveProperty('page');
           expect(data).toHaveProperty('limit');
+          expect(data).toHaveProperty('hasMore');
           expect(Array.isArray(data.items)).toBe(true);
           expect(data.items.length).toBe(2);
         },
@@ -76,8 +82,9 @@ describe('Papers API - Minimal List', () => {
     });
 
     it('returns paginated list with custom page and limit', async () => {
-      prismaMock.paper.findMany.mockResolvedValue([]);
-      prismaMock.paper.count.mockResolvedValue(0);
+      mockCountReturns(0);
+      mockRangeReturns([]);
+      mockOrderReturns([]);
 
       const appHandler = await import('@/app/api/papers/minimal/route');
 
@@ -197,7 +204,8 @@ describe('Papers API - Count Since', () => {
 
   describe('GET /api/papers/count_since', () => {
     it('returns count with valid ISO timestamp', async () => {
-      prismaMock.paper.count.mockResolvedValue(5);
+      // Query ends with .gte() for timestamp comparison with count option
+      mockGteCountReturns(5);
 
       const appHandler = await import('@/app/api/papers/count_since/route');
       const since = new Date(Date.now() - 86400000).toISOString();
@@ -267,7 +275,7 @@ describe('Papers API - Check ArXiv', () => {
 
   describe('GET /api/papers/check_arxiv/[id]', () => {
     it('returns exists: false for non-existent paper', async () => {
-      prismaMock.paper.findUnique.mockResolvedValue(null);
+      mockQueryReturns(null);
 
       const appHandler = await import('@/app/api/papers/check_arxiv/[id]/route');
       const arxivId = generateTestArxivId();
@@ -289,11 +297,13 @@ describe('Papers API - Check ArXiv', () => {
 
     it('returns exists: true for completed paper', async () => {
       const paperUuid = generateTestUuid();
-      prismaMock.paper.findUnique.mockResolvedValue({
-        paperUuid,
+      // First query: paper lookup
+      mockQueryReturns({
+        paper_uuid: paperUuid,
         status: 'completed',
-        slugs: [{ slug: 'test-paper-slug' }],
       });
+      // Second query: slug lookup
+      mockQueryReturns({ slug: 'test-paper-slug' });
 
       const appHandler = await import('@/app/api/papers/check_arxiv/[id]/route');
       const arxivId = generateTestArxivId();
@@ -327,9 +337,9 @@ describe('Papers API - Slug Resolution', () => {
   describe('GET /api/papers/slug/[slug]', () => {
     it('returns paper data for valid slug', async () => {
       const paperUuid = generateTestUuid();
-      prismaMock.paperSlug.findUnique.mockResolvedValue({
+      mockQueryReturns({
         slug: 'test-paper-slug',
-        paperUuid,
+        paper_uuid: paperUuid,
         tombstone: false,
       });
 
@@ -352,7 +362,7 @@ describe('Papers API - Slug Resolution', () => {
     });
 
     it('returns null paperUuid for non-existent slug', async () => {
-      prismaMock.paperSlug.findUnique.mockResolvedValue(null);
+      mockQueryReturns(null);
 
       const appHandler = await import('@/app/api/papers/slug/[slug]/route');
 
@@ -383,7 +393,7 @@ describe('Papers API - Paper by UUID', () => {
 
   describe('GET /api/papers/[uuid]', () => {
     it('returns 404 for non-existent paper', async () => {
-      prismaMock.paper.findUnique.mockResolvedValue(null);
+      mockQueryReturns(null);
 
       const appHandler = await import('@/app/api/papers/[uuid]/route');
       const uuid = generateTestUuid();
@@ -405,16 +415,15 @@ describe('Papers API - Paper by UUID', () => {
 
     it('returns paper data for existing paper', async () => {
       const uuid = generateTestUuid();
-      const mockPaper = {
-        paperUuid: uuid,
+      mockQueryReturns({
+        paper_uuid: uuid,
         title: 'Test Paper',
         authors: 'Test Author',
-        arxivUrl: 'https://arxiv.org/abs/2301.00001',
-        thumbnailDataUrl: null,
-        processedContent: JSON.stringify({ some: 'content' }),
-        processingTimeSeconds: 120,
-      };
-      prismaMock.paper.findUnique.mockResolvedValue(mockPaper);
+        arxiv_url: 'https://arxiv.org/abs/2301.00001',
+        thumbnail_data_url: null,
+        processed_content: JSON.stringify({ some: 'content' }),
+        processing_time_seconds: 120,
+      });
 
       const appHandler = await import('@/app/api/papers/[uuid]/route');
 
@@ -436,7 +445,7 @@ describe('Papers API - Paper by UUID', () => {
 
   describe('GET /api/papers/[uuid]/summary', () => {
     it('returns 404 for non-existent paper', async () => {
-      prismaMock.paper.findUnique.mockResolvedValue(null);
+      mockQueryReturns(null);
 
       const appHandler = await import('@/app/api/papers/[uuid]/summary/route');
       const uuid = generateTestUuid();
@@ -457,13 +466,13 @@ describe('Papers API - Paper by UUID', () => {
 
     it('returns summary for existing paper', async () => {
       const uuid = generateTestUuid();
-      prismaMock.paper.findUnique.mockResolvedValue({
-        paperUuid: uuid,
+      mockQueryReturns({
+        paper_uuid: uuid,
         title: 'Test Paper',
         authors: 'Test Author',
-        arxivUrl: 'https://arxiv.org/abs/2301.00001',
-        processedContent: JSON.stringify({ five_minute_summary: 'Summary text' }),
-        numPages: 10,
+        arxiv_url: 'https://arxiv.org/abs/2301.00001',
+        processed_content: JSON.stringify({ five_minute_summary: 'Summary text' }),
+        num_pages: 10,
       });
 
       const appHandler = await import('@/app/api/papers/[uuid]/summary/route');
@@ -487,7 +496,7 @@ describe('Papers API - Paper by UUID', () => {
 
   describe('GET /api/papers/[uuid]/markdown', () => {
     it('returns 404 for non-existent paper', async () => {
-      prismaMock.paper.findUnique.mockResolvedValue(null);
+      mockQueryReturns(null);
 
       const appHandler = await import('@/app/api/papers/[uuid]/markdown/route');
       const uuid = generateTestUuid();
@@ -507,12 +516,12 @@ describe('Papers API - Paper by UUID', () => {
     });
 
     it('returns markdown for existing paper', async () => {
-      const uuid = generateTestUuid();
-      prismaMock.paper.findUnique.mockResolvedValue({
-        processedContent: JSON.stringify({ final_markdown: '# Test Markdown' }),
+      mockQueryReturns({
+        processed_content: JSON.stringify({ final_markdown: '# Test Markdown' }),
       });
 
       const appHandler = await import('@/app/api/papers/[uuid]/markdown/route');
+      const uuid = generateTestUuid();
 
       await testApiHandler({
         appHandler,
@@ -564,10 +573,12 @@ describe('Papers API - Enqueue ArXiv', () => {
 
     it('creates new paper for valid arXiv URL', async () => {
       const paperUuid = generateTestUuid();
-      prismaMock.paper.findUnique.mockResolvedValue(null);
-      prismaMock.paper.create.mockResolvedValue({
+      // First query: check if paper exists
+      mockQueryReturns(null);
+      // Second query: insert returns the new paper
+      mockQueryReturnsSingle({
         id: 1,
-        paperUuid,
+        paper_uuid: paperUuid,
         status: 'not_started',
       });
 
@@ -593,9 +604,9 @@ describe('Papers API - Enqueue ArXiv', () => {
 
     it('returns existing paper if already enqueued', async () => {
       const paperUuid = generateTestUuid();
-      prismaMock.paper.findUnique.mockResolvedValue({
+      mockQueryReturns({
         id: 1,
-        paperUuid,
+        paper_uuid: paperUuid,
         status: 'processing',
       });
 
@@ -632,7 +643,7 @@ describe('Papers API - Thumbnails', () => {
 
   describe('GET /api/papers/thumbnails/[uuid]', () => {
     it('returns 404 for non-existent paper', async () => {
-      prismaMock.paper.findUnique.mockResolvedValue(null);
+      mockQueryReturns(null);
 
       const appHandler = await import('@/app/api/papers/thumbnails/[uuid]/route');
       const uuid = generateTestUuid();
@@ -652,8 +663,8 @@ describe('Papers API - Thumbnails', () => {
     });
 
     it('returns 404 for paper without thumbnail', async () => {
-      prismaMock.paper.findUnique.mockResolvedValue({
-        thumbnailDataUrl: null,
+      mockQueryReturns({
+        thumbnail_data_url: null,
       });
 
       const appHandler = await import('@/app/api/papers/thumbnails/[uuid]/route');
@@ -673,8 +684,8 @@ describe('Papers API - Thumbnails', () => {
     it('returns thumbnail image for paper with valid thumbnail', async () => {
       // Base64 encoded 1x1 transparent PNG
       const base64Png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-      prismaMock.paper.findUnique.mockResolvedValue({
-        thumbnailDataUrl: `data:image/png;base64,${base64Png}`,
+      mockQueryReturns({
+        thumbnail_data_url: `data:image/png;base64,${base64Png}`,
       });
 
       const appHandler = await import('@/app/api/papers/thumbnails/[uuid]/route');

@@ -2,28 +2,10 @@
  * User-related type definitions for the Paper Summarizer application.
  *
  * Responsibilities:
- * - Define user entity types
  * - Define user list item types (papers saved by user)
  * - Define user request item types (papers requested by user)
  * - Define API request/response DTOs for user endpoints
  */
-
-// ============================================================================
-// INTERFACES - User Entity Types
-// ============================================================================
-
-/**
- * User record from the database.
- * Represents an authenticated user of the application.
- */
-export interface User {
-  /** User ID (from BetterAuth) */
-  id: string;
-  /** User's email address */
-  email: string;
-  /** When the user record was created */
-  createdAt: Date;
-}
 
 // ============================================================================
 // INTERFACES - User List Types
@@ -72,17 +54,6 @@ export interface UserRequestItem {
 // ============================================================================
 
 /**
- * Request body for syncing a new user from BetterAuth.
- * Called by the authentication hook when a user signs up.
- */
-export interface SyncUserPayload {
-  /** User ID from BetterAuth */
-  id: string;
-  /** User's email address */
-  email: string;
-}
-
-/**
  * Response indicating whether an item exists.
  * Used for checking list/request membership.
  */
@@ -114,7 +85,7 @@ export interface DeletedResponse {
 // ============================================================================
 
 /**
- * A paper request with user information for admin display.
+ * A paper request for admin display.
  * Used by admin endpoints to show all requests across users.
  */
 export interface AdminRequestItem {
@@ -122,8 +93,6 @@ export interface AdminRequestItem {
   id: number;
   /** User ID who made the request */
   userId: string;
-  /** User's email address */
-  userEmail: string;
   /** arXiv identifier of the requested paper */
   arxivId: string;
   /** Paper title (from arXiv metadata) */

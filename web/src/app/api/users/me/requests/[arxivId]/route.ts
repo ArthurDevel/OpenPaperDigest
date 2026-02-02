@@ -95,11 +95,6 @@ export async function POST(
     const result = await usersService.addRequest(userId, arxivId, title, authors);
     return NextResponse.json(result);
   } catch (error) {
-    // Check for specific error messages from service
-    if (error instanceof Error && error.message.includes('User not found')) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
     console.error('Error adding request:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

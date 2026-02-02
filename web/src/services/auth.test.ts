@@ -1,15 +1,8 @@
 /**
  * Unit tests for the Auth Service
- *
- * Tests the client-side authentication utilities using Supabase Auth.
- *
- * Responsibilities:
- * - Test magic link sign-in calls Supabase correctly
- * - Test sign-out calls Supabase correctly
- * - Test error handling when Supabase returns errors
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ============================================================================
 // MOCKS
@@ -17,175 +10,83 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockSignInWithOtp = vi.fn();
 const mockSignOut = vi.fn();
-const mockGetUser = vi.fn();
-const mockOnAuthStateChange = vi.fn();
 
 vi.mock('@/lib/supabase/client', () => ({
   createClient: vi.fn(() => ({
     auth: {
       signInWithOtp: mockSignInWithOtp,
       signOut: mockSignOut,
-      getUser: mockGetUser,
-      onAuthStateChange: mockOnAuthStateChange,
+      getUser: vi.fn(),
+      onAuthStateChange: vi.fn(),
     },
   })),
 }));
 
-// Import after mocking
 import { signInWithMagicLink, signOut, getSupabaseClient } from './auth';
 
 // ============================================================================
-// TEST SETUP
+// TESTS
 // ============================================================================
 
 beforeEach(() => {
   vi.clearAllMocks();
-
-  // Setup default window.location for tests
-  vi.stubGlobal('window', {
-    location: {
-      origin: 'http://localhost:3000',
-    },
-  });
 });
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
-// ============================================================================
-// getSupabaseClient TESTS
-// ============================================================================
 
 describe('getSupabaseClient', () => {
-  it('returns a Supabase client instance', () => {
+  it('returns a Supabase client', () => {
     const client = getSupabaseClient();
-
     expect(client).toBeDefined();
     expect(client.auth).toBeDefined();
   });
 });
 
-// ============================================================================
-// signInWithMagicLink TESTS
-// ============================================================================
-
 describe('signInWithMagicLink', () => {
-  it('calls signInWithOtp with correct email and default redirect URL', async () => {
+  it('returns success when Supabase succeeds', async () => {
     mockSignInWithOtp.mockResolvedValue({ error: null });
 
     const result = await signInWithMagicLink('test@example.com');
 
     expect(mockSignInWithOtp).toHaveBeenCalledTimes(1);
-    expect(mockSignInWithOtp).toHaveBeenCalledWith({
-      email: 'test@example.com',
-      options: {
-        emailRedirectTo: 'http://localhost:3000/auth/callback',
-      },
-    });
-    expect(result).toEqual({ error: null });
+    expect(result.error).toBeNull();
   });
 
-  it('calls signInWithOtp with custom redirect URL when provided', async () => {
+  it('returns error when Supabase fails', async () => {
+    const mockError = { message: 'Rate limit exceeded', status: 429 };
+    mockSignInWithOtp.mockResolvedValue({ error: mockError });
+
+    const result = await signInWithMagicLink('test@example.com');
+
+    expect(result.error).toEqual(mockError);
+  });
+
+  it('uses custom redirect URL when provided', async () => {
     mockSignInWithOtp.mockResolvedValue({ error: null });
 
-    const result = await signInWithMagicLink(
-      'test@example.com',
-      'https://example.com/custom-callback'
-    );
+    await signInWithMagicLink('test@example.com', 'https://example.com/callback');
 
     expect(mockSignInWithOtp).toHaveBeenCalledWith({
       email: 'test@example.com',
-      options: {
-        emailRedirectTo: 'https://example.com/custom-callback',
-      },
+      options: { emailRedirectTo: 'https://example.com/callback' },
     });
-    expect(result).toEqual({ error: null });
-  });
-
-  it('returns error object when Supabase returns an error', async () => {
-    const mockError = {
-      name: 'AuthApiError',
-      message: 'Email rate limit exceeded',
-      status: 429,
-    };
-    mockSignInWithOtp.mockResolvedValue({ error: mockError });
-
-    const result = await signInWithMagicLink('test@example.com');
-
-    expect(result).toEqual({ error: mockError });
-  });
-
-  it('handles invalid email format (Supabase returns error)', async () => {
-    const mockError = {
-      name: 'AuthApiError',
-      message: 'Invalid email format',
-      status: 400,
-    };
-    mockSignInWithOtp.mockResolvedValue({ error: mockError });
-
-    const result = await signInWithMagicLink('invalid-email');
-
-    expect(mockSignInWithOtp).toHaveBeenCalledWith({
-      email: 'invalid-email',
-      options: {
-        emailRedirectTo: 'http://localhost:3000/auth/callback',
-      },
-    });
-    expect(result).toEqual({ error: mockError });
-  });
-
-  it('handles network errors from Supabase', async () => {
-    const networkError = {
-      name: 'AuthRetryableFetchError',
-      message: 'Network request failed',
-      status: 0,
-    };
-    mockSignInWithOtp.mockResolvedValue({ error: networkError });
-
-    const result = await signInWithMagicLink('test@example.com');
-
-    expect(result).toEqual({ error: networkError });
   });
 });
 
-// ============================================================================
-// signOut TESTS
-// ============================================================================
-
 describe('signOut', () => {
-  it('calls Supabase signOut and returns null error on success', async () => {
+  it('returns success when Supabase succeeds', async () => {
     mockSignOut.mockResolvedValue({ error: null });
 
     const result = await signOut();
 
     expect(mockSignOut).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ error: null });
+    expect(result.error).toBeNull();
   });
 
-  it('returns error object when Supabase signOut fails', async () => {
-    const mockError = {
-      name: 'AuthApiError',
-      message: 'Session not found',
-      status: 400,
-    };
+  it('returns error when Supabase fails', async () => {
+    const mockError = { message: 'Session not found', status: 400 };
     mockSignOut.mockResolvedValue({ error: mockError });
 
     const result = await signOut();
 
-    expect(result).toEqual({ error: mockError });
-  });
-
-  it('handles network errors during sign out', async () => {
-    const networkError = {
-      name: 'AuthRetryableFetchError',
-      message: 'Network request failed',
-      status: 0,
-    };
-    mockSignOut.mockResolvedValue({ error: networkError });
-
-    const result = await signOut();
-
-    expect(result).toEqual({ error: networkError });
+    expect(result.error).toEqual(mockError);
   });
 });

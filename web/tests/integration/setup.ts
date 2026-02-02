@@ -2,8 +2,8 @@
  * Integration Test Setup
  *
  * Provides common mocks and helpers for API route integration tests.
- * - Mocks Prisma client for database operations
- * - Mocks Supabase client for user authentication
+ * - Mocks Supabase client for database operations (chainable query builder)
+ * - Mocks Supabase auth for user authentication
  * - Mocks admin auth helper for admin endpoints
  * - Provides test data factories
  */
@@ -12,98 +12,85 @@ import { vi } from 'vitest';
 import { NextResponse } from 'next/server';
 
 // ============================================================================
-// PRISMA MOCK
+// SUPABASE CHAINABLE MOCK
 // ============================================================================
 
 /**
- * Mocked Prisma client with all methods as vi.fn()
+ * Mock functions for the Supabase query builder chain.
+ * All chainable methods return the chain object.
+ * Terminal methods (maybeSingle, single) return promises.
  */
-export const prismaMock = {
-  paper: {
-    findUnique: vi.fn(),
-    findMany: vi.fn(),
-    findFirst: vi.fn(),
-    create: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-    count: vi.fn(),
-    upsert: vi.fn(),
-  },
-  paperSlug: {
-    findUnique: vi.fn(),
-    findFirst: vi.fn(),
-    create: vi.fn(),
-    deleteMany: vi.fn(),
-  },
-  paperStatusHistory: {
-    findFirst: vi.fn(),
-    findUnique: vi.fn(),
-  },
-  userList: {
-    findUnique: vi.fn(),
-    findMany: vi.fn(),
-    findFirst: vi.fn(),
-    create: vi.fn(),
-    delete: vi.fn(),
-    deleteMany: vi.fn(),
-  },
-  userRequest: {
-    findUnique: vi.fn(),
-    findMany: vi.fn(),
-    findFirst: vi.fn(),
-    create: vi.fn(),
-    delete: vi.fn(),
-    deleteMany: vi.fn(),
-  },
-  user: {
-    findUnique: vi.fn(),
-    findFirst: vi.fn(),
-    create: vi.fn(),
-    upsert: vi.fn(),
-  },
-  $queryRaw: vi.fn(),
-  $executeRaw: vi.fn(),
+export const mockMaybeSingle = vi.fn();
+export const mockSingle = vi.fn();
+export const mockLimit = vi.fn();
+export const mockRange = vi.fn();
+export const mockOrder = vi.fn();
+export const mockIn = vi.fn();
+export const mockGte = vi.fn();
+export const mockLte = vi.fn();
+export const mockEq = vi.fn();
+export const mockSelect = vi.fn();
+export const mockInsert = vi.fn();
+export const mockUpdate = vi.fn();
+export const mockDelete = vi.fn();
+export const mockFrom = vi.fn();
+
+// Default result for awaiting the query builder directly
+let defaultQueryResult = { data: null, error: null, count: null };
+
+/**
+ * The chainable mock object. This single object is returned by all chainable methods
+ * so that chains like `.from().select().eq().order().limit()` work correctly.
+ * It's also a thenable so it can be awaited directly.
+ */
+const chainable = {
+  select: mockSelect,
+  insert: mockInsert,
+  update: mockUpdate,
+  delete: mockDelete,
+  eq: mockEq,
+  in: mockIn,
+  gte: mockGte,
+  lte: mockLte,
+  order: mockOrder,
+  limit: mockLimit,
+  range: mockRange,
+  maybeSingle: mockMaybeSingle,
+  single: mockSingle,
+  // Make chainable thenable so it can be awaited directly
+  then: (resolve: (value: unknown) => unknown) => Promise.resolve(defaultQueryResult).then(resolve),
 };
 
-vi.mock('@/lib/db', () => ({
-  prisma: prismaMock,
-}));
+// Configure all chainable methods to return the same chainable object
+mockLimit.mockReturnValue(chainable);
+mockRange.mockReturnValue(chainable);
+mockOrder.mockReturnValue(chainable);
+mockIn.mockReturnValue(chainable);
+mockGte.mockReturnValue(chainable);
+mockLte.mockReturnValue(chainable);
+mockEq.mockReturnValue(chainable);
+mockSelect.mockReturnValue(chainable);
+mockInsert.mockReturnValue(chainable);
+mockUpdate.mockReturnValue(chainable);
+mockDelete.mockReturnValue(chainable);
+mockFrom.mockReturnValue(chainable);
 
-// ============================================================================
-// SUPABASE AUTH MOCK
-// ============================================================================
-
-/**
- * Mock session for authenticated user tests
- */
-export interface MockSession {
-  user: {
-    id: string;
-    email: string;
-  };
-}
-
-/**
- * Default mock session for testing
- */
-export const defaultMockSession: MockSession = {
-  user: {
-    id: 'test-user-id',
-    email: 'test@example.com',
-  },
-};
+// Default resolved values for terminal methods
+mockMaybeSingle.mockResolvedValue({ data: null, error: null });
+mockSingle.mockResolvedValue({ data: null, error: null });
 
 /**
- * Mocked Supabase client with auth.getUser method
+ * The mocked Supabase client object.
  */
-export const mockSupabaseClient = {
+export const supabaseMock = {
+  from: mockFrom,
   auth: {
     getUser: vi.fn(),
   },
 };
 
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn(() => Promise.resolve(mockSupabaseClient)),
+  createClient: vi.fn(() => Promise.resolve(supabaseMock)),
 }));
 
 // ============================================================================
@@ -130,6 +117,30 @@ vi.mock('@/lib/env', () => ({
     DATABASE_URL: 'mock://database',
   },
 }));
+
+// ============================================================================
+// SESSION TYPES AND DEFAULTS
+// ============================================================================
+
+/**
+ * Mock session for authenticated user tests
+ */
+export interface MockSession {
+  user: {
+    id: string;
+    email: string;
+  };
+}
+
+/**
+ * Default mock session for testing
+ */
+export const defaultMockSession: MockSession = {
+  user: {
+    id: 'test-user-id',
+    email: 'test@example.com',
+  },
+};
 
 // ============================================================================
 // TEST UTILITIES
@@ -180,21 +191,21 @@ export function createTestPaperPayload(uuid?: string): Record<string, unknown> {
 }
 
 /**
- * Creates a mock paper object for database responses.
+ * Creates a mock paper object for database responses (snake_case for Supabase).
  * @param overrides - Properties to override
  * @returns Mock paper object
  */
 export function createMockPaper(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    paperUuid: generateTestUuid(),
-    arxivId: generateTestArxivId(),
+    paper_uuid: generateTestUuid(),
+    arxiv_id: generateTestArxivId(),
     title: 'Test Paper Title',
     authors: 'Test Author 1, Test Author 2',
     abstract: 'This is a test abstract.',
-    sourceUrl: 'https://arxiv.org/abs/2301.00001',
+    arxiv_url: 'https://arxiv.org/abs/2301.00001',
     status: 'completed',
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     ...overrides,
   };
 }
@@ -224,8 +235,29 @@ export function getInvalidAdminAuthHeader(): string {
 export function resetAllMocks(): void {
   vi.clearAllMocks();
 
+  // Reset default query result
+  defaultQueryResult = { data: null, error: null, count: null };
+
+  // Reset all chainable methods to return the chainable object
+  mockLimit.mockReturnValue(chainable);
+  mockRange.mockReturnValue(chainable);
+  mockOrder.mockReturnValue(chainable);
+  mockIn.mockReturnValue(chainable);
+  mockGte.mockReturnValue(chainable);
+  mockLte.mockReturnValue(chainable);
+  mockEq.mockReturnValue(chainable);
+  mockSelect.mockReturnValue(chainable);
+  mockInsert.mockReturnValue(chainable);
+  mockUpdate.mockReturnValue(chainable);
+  mockDelete.mockReturnValue(chainable);
+  mockFrom.mockReturnValue(chainable);
+
+  // Reset terminal methods to default values
+  mockMaybeSingle.mockResolvedValue({ data: null, error: null });
+  mockSingle.mockResolvedValue({ data: null, error: null });
+
   // Reset Supabase auth mock to return unauthenticated by default
-  mockSupabaseClient.auth.getUser.mockResolvedValue({
+  supabaseMock.auth.getUser.mockResolvedValue({
     data: { user: null },
     error: new Error('Not authenticated'),
   });
@@ -241,7 +273,7 @@ export function resetAllMocks(): void {
  * @param session - Session object to return (uses default if not provided)
  */
 export function mockAuthenticatedSession(session: MockSession = defaultMockSession): void {
-  mockSupabaseClient.auth.getUser.mockResolvedValue({
+  supabaseMock.auth.getUser.mockResolvedValue({
     data: {
       user: {
         id: session.user.id,
@@ -258,4 +290,108 @@ export function mockAuthenticatedSession(session: MockSession = defaultMockSessi
  */
 export function mockAdminAuthenticated(): void {
   adminGuardMock.mockReturnValue(null);
+}
+
+// ============================================================================
+// SUPABASE MOCK HELPERS
+// ============================================================================
+
+/**
+ * Configure mockMaybeSingle to return data for the next call.
+ * @param data - Data to return
+ */
+export function mockQueryReturns(data: unknown): void {
+  mockMaybeSingle.mockResolvedValueOnce({ data, error: null });
+}
+
+/**
+ * Configure mockSingle to return data for the next call.
+ * @param data - Data to return
+ */
+export function mockQueryReturnsSingle(data: unknown): void {
+  mockSingle.mockResolvedValueOnce({ data, error: null });
+}
+
+/**
+ * Configure mockEq to return count result (for count queries).
+ * Use this for queries ending with `.select('*', { count: 'exact', head: true }).eq(...)`.
+ * @param count - Count to return
+ */
+export function mockCountReturns(count: number): void {
+  // For count queries, the eq() call returns { count, error } directly
+  // Also include chainable methods in case more chaining happens
+  mockEq.mockReturnValueOnce({
+    ...chainable,
+    count,
+    error: null,
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ count, error: null }).then(resolve),
+  });
+}
+
+/**
+ * Configure mockGte to return count result (for count queries with gte).
+ * Use this for queries ending with `.gte(...)` that return a count.
+ * @param count - Count to return
+ */
+export function mockGteCountReturns(count: number): void {
+  mockGte.mockReturnValueOnce({
+    ...chainable,
+    count,
+    error: null,
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ count, error: null }).then(resolve),
+  });
+}
+
+/**
+ * Configure mockRange to return data (for paginated queries).
+ * @param data - Array of data to return
+ */
+export function mockRangeReturns(data: unknown[]): void {
+  mockRange.mockReturnValueOnce({
+    ...chainable,
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data, error: null }).then(resolve),
+  });
+}
+
+/**
+ * Configure mockLimit to return data (for queries with limit).
+ * @param data - Array of data to return
+ */
+export function mockLimitReturns(data: unknown[]): void {
+  mockLimit.mockReturnValueOnce({
+    ...chainable,
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data, error: null }).then(resolve),
+  });
+}
+
+/**
+ * Configure mockOrder to return data (for ordered queries without range).
+ * @param data - Array of data to return
+ */
+export function mockOrderReturns(data: unknown[]): void {
+  mockOrder.mockReturnValueOnce({
+    ...chainable,
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data, error: null }).then(resolve),
+  });
+}
+
+/**
+ * Configure mockIn to return data (for queries with .in() filter).
+ * @param data - Array of data to return
+ */
+export function mockInReturns(data: unknown[]): void {
+  mockIn.mockReturnValueOnce({
+    ...chainable,
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data, error: null }).then(resolve),
+  });
+}
+
+/**
+ * Configure mockDelete to succeed.
+ */
+export function mockDeleteSucceeds(): void {
+  mockEq.mockReturnValueOnce({
+    ...chainable,
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ error: null }).then(resolve),
+  });
 }

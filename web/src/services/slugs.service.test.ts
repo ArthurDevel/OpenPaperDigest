@@ -3,34 +3,106 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { buildPaperSlug, resolveSlug, getSlugForPaper, createSlug } from './slugs.service';
 
-// Mock Prisma
-vi.mock('@/lib/db', () => ({
-  prisma: {
-    paperSlug: {
-      findUnique: vi.fn(),
-      findFirst: vi.fn(),
-      create: vi.fn(),
-    },
-    paper: {
-      findUnique: vi.fn(),
-    },
-  },
+// ============================================================================
+// MOCK SETUP
+// ============================================================================
+
+// Use vi.hoisted to ensure mock functions are available when vi.mock runs
+const {
+  mockMaybeSingle,
+  mockSingle,
+  mockSelect,
+  mockInsert,
+  mockUpdate,
+  mockDelete,
+  mockEq,
+  mockOrder,
+  mockLimit,
+  mockFrom,
+} = vi.hoisted(() => {
+  const mockMaybeSingle = vi.fn();
+  const mockSingle = vi.fn();
+  const mockLimit = vi.fn();
+  const mockOrder = vi.fn();
+  const mockEq = vi.fn();
+  const mockSelect = vi.fn();
+  const mockInsert = vi.fn();
+  const mockUpdate = vi.fn();
+  const mockDelete = vi.fn();
+  const mockFrom = vi.fn();
+
+  // Set up the chainable returns
+  mockLimit.mockImplementation(() => ({
+    maybeSingle: mockMaybeSingle,
+  }));
+
+  mockOrder.mockImplementation(() => ({
+    limit: mockLimit,
+    maybeSingle: mockMaybeSingle,
+  }));
+
+  mockEq.mockImplementation(() => ({
+    eq: mockEq,
+    order: mockOrder,
+    limit: mockLimit,
+    maybeSingle: mockMaybeSingle,
+    single: mockSingle,
+    select: mockSelect,
+  }));
+
+  mockSelect.mockImplementation(() => ({
+    eq: mockEq,
+    order: mockOrder,
+    limit: mockLimit,
+    maybeSingle: mockMaybeSingle,
+    single: mockSingle,
+  }));
+
+  mockInsert.mockImplementation(() => ({
+    select: mockSelect,
+    single: mockSingle,
+  }));
+
+  mockUpdate.mockImplementation(() => ({
+    eq: mockEq,
+    select: mockSelect,
+    single: mockSingle,
+  }));
+
+  mockDelete.mockImplementation(() => ({
+    eq: mockEq,
+  }));
+
+  mockFrom.mockImplementation(() => ({
+    select: mockSelect,
+    insert: mockInsert,
+    update: mockUpdate,
+    delete: mockDelete,
+    eq: mockEq,
+  }));
+
+  return {
+    mockMaybeSingle,
+    mockSingle,
+    mockSelect,
+    mockInsert,
+    mockUpdate,
+    mockDelete,
+    mockEq,
+    mockOrder,
+    mockLimit,
+    mockFrom,
+  };
+});
+
+vi.mock('@/lib/supabase/server', () => ({
+  createClient: vi.fn().mockResolvedValue({
+    from: mockFrom,
+  }),
 }));
 
-import { prisma } from '@/lib/db';
-
-const mockedPrisma = prisma as unknown as {
-  paperSlug: {
-    findUnique: ReturnType<typeof vi.fn>;
-    findFirst: ReturnType<typeof vi.fn>;
-    create: ReturnType<typeof vi.fn>;
-  };
-  paper: {
-    findUnique: ReturnType<typeof vi.fn>;
-  };
-};
+import { buildPaperSlug, resolveSlug, getSlugForPaper, createSlug } from './slugs.service';
 
 // ============================================================================
 // TESTS
@@ -110,11 +182,11 @@ describe('slugs.service', () => {
   });
 
   // --------------------------------------------------------------------------
-  // resolveSlug - Database tests with mocked Prisma
+  // resolveSlug - Database tests with mocked Supabase
   // --------------------------------------------------------------------------
   describe('resolveSlug', () => {
     it('returns null paperUuid when slug not found', async () => {
-      mockedPrisma.paperSlug.findUnique.mockResolvedValue(null);
+      mockMaybeSingle.mockResolvedValue({ data: null, error: null });
 
       const result = await resolveSlug('test-slug');
 
@@ -123,17 +195,19 @@ describe('slugs.service', () => {
         slug: 'test-slug',
         tombstone: false,
       });
-      expect(mockedPrisma.paperSlug.findUnique).toHaveBeenCalledWith({
-        where: { slug: 'test-slug' },
-        select: { slug: true, paperUuid: true, tombstone: true },
-      });
+      expect(mockFrom).toHaveBeenCalledWith('paper_slugs');
+      expect(mockSelect).toHaveBeenCalledWith('slug, paper_uuid, tombstone');
+      expect(mockEq).toHaveBeenCalledWith('slug', 'test-slug');
     });
 
     it('returns slug data when found', async () => {
-      mockedPrisma.paperSlug.findUnique.mockResolvedValue({
-        slug: 'test-slug',
-        paperUuid: 'uuid-123',
-        tombstone: false,
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          slug: 'test-slug',
+          paper_uuid: 'uuid-123',
+          tombstone: false,
+        },
+        error: null,
       });
 
       const result = await resolveSlug('test-slug');
@@ -146,24 +220,36 @@ describe('slugs.service', () => {
     });
 
     it('returns tombstone status when slug is tombstoned', async () => {
-      mockedPrisma.paperSlug.findUnique.mockResolvedValue({
-        slug: 'old-slug',
-        paperUuid: 'uuid-123',
-        tombstone: true,
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          slug: 'old-slug',
+          paper_uuid: 'uuid-123',
+          tombstone: true,
+        },
+        error: null,
       });
 
       const result = await resolveSlug('old-slug');
 
       expect(result.tombstone).toBe(true);
     });
+
+    it('throws error when database error occurs', async () => {
+      mockMaybeSingle.mockResolvedValue({
+        data: null,
+        error: { message: 'Database error' },
+      });
+
+      await expect(resolveSlug('test-slug')).rejects.toThrow('Database error');
+    });
   });
 
   // --------------------------------------------------------------------------
-  // getSlugForPaper - Database tests with mocked Prisma
+  // getSlugForPaper - Database tests with mocked Supabase
   // --------------------------------------------------------------------------
   describe('getSlugForPaper', () => {
     it('returns null paperUuid when no active slug exists', async () => {
-      mockedPrisma.paperSlug.findFirst.mockResolvedValue(null);
+      mockMaybeSingle.mockResolvedValue({ data: null, error: null });
 
       const result = await getSlugForPaper('uuid-123');
 
@@ -172,18 +258,22 @@ describe('slugs.service', () => {
         slug: '',
         tombstone: false,
       });
-      expect(mockedPrisma.paperSlug.findFirst).toHaveBeenCalledWith({
-        where: { paperUuid: 'uuid-123', tombstone: false },
-        orderBy: { createdAt: 'desc' },
-        select: { slug: true, paperUuid: true, tombstone: true },
-      });
+      expect(mockFrom).toHaveBeenCalledWith('paper_slugs');
+      expect(mockSelect).toHaveBeenCalledWith('slug, paper_uuid, tombstone');
+      expect(mockEq).toHaveBeenCalledWith('paper_uuid', 'uuid-123');
+      expect(mockEq).toHaveBeenCalledWith('tombstone', false);
+      expect(mockOrder).toHaveBeenCalledWith('created_at', { ascending: false });
+      expect(mockLimit).toHaveBeenCalledWith(1);
     });
 
     it('returns slug data when active slug found', async () => {
-      mockedPrisma.paperSlug.findFirst.mockResolvedValue({
-        slug: 'paper-slug',
-        paperUuid: 'uuid-123',
-        tombstone: false,
+      mockMaybeSingle.mockResolvedValue({
+        data: {
+          slug: 'paper-slug',
+          paper_uuid: 'uuid-123',
+          tombstone: false,
+        },
+        error: null,
       });
 
       const result = await getSlugForPaper('uuid-123');
@@ -197,14 +287,18 @@ describe('slugs.service', () => {
   });
 
   // --------------------------------------------------------------------------
-  // createSlug - Database tests with mocked Prisma
+  // createSlug - Database tests with mocked Supabase
   // --------------------------------------------------------------------------
   describe('createSlug', () => {
     it('returns existing slug without creating new one', async () => {
-      mockedPrisma.paperSlug.findFirst.mockResolvedValue({
-        slug: 'existing-slug',
-        paperUuid: 'uuid-123',
-        tombstone: false,
+      // First call: getSlugForPaper finds existing slug
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          slug: 'existing-slug',
+          paper_uuid: 'uuid-123',
+          tombstone: false,
+        },
+        error: null,
       });
 
       const result = await createSlug('uuid-123');
@@ -214,13 +308,16 @@ describe('slugs.service', () => {
         slug: 'existing-slug',
         tombstone: false,
       });
-      expect(mockedPrisma.paper.findUnique).not.toHaveBeenCalled();
-      expect(mockedPrisma.paperSlug.create).not.toHaveBeenCalled();
+      // Should not have called insert
+      expect(mockInsert).not.toHaveBeenCalled();
     });
 
     it('throws error when paper not found', async () => {
-      mockedPrisma.paperSlug.findFirst.mockResolvedValue(null);
-      mockedPrisma.paper.findUnique.mockResolvedValue(null);
+      // First call: getSlugForPaper returns no slug
+      mockMaybeSingle
+        .mockResolvedValueOnce({ data: null, error: null })
+        // Second call: paper lookup returns nothing
+        .mockResolvedValueOnce({ data: null, error: null });
 
       await expect(createSlug('nonexistent-uuid')).rejects.toThrow(
         'Paper not found: nonexistent-uuid'
@@ -228,16 +325,25 @@ describe('slugs.service', () => {
     });
 
     it('creates new slug when none exists', async () => {
-      mockedPrisma.paperSlug.findFirst.mockResolvedValue(null);
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        title: 'Test Paper',
-        authors: 'John Smith',
-      });
-      mockedPrisma.paperSlug.findUnique.mockResolvedValue(null);
-      mockedPrisma.paperSlug.create.mockResolvedValue({
-        slug: 'test-paper-smith',
-        paperUuid: 'uuid-123',
-        tombstone: false,
+      // First call: getSlugForPaper returns no slug
+      mockMaybeSingle
+        .mockResolvedValueOnce({ data: null, error: null })
+        // Second call: paper lookup returns paper data
+        .mockResolvedValueOnce({
+          data: { title: 'Test Paper', authors: 'John Smith' },
+          error: null,
+        })
+        // Third call: check existing slug returns nothing
+        .mockResolvedValueOnce({ data: null, error: null });
+
+      // Fourth call: insert with single returns created slug
+      mockSingle.mockResolvedValueOnce({
+        data: {
+          slug: 'test-paper-smith',
+          paper_uuid: 'uuid-123',
+          tombstone: false,
+        },
+        error: null,
       });
 
       const result = await createSlug('uuid-123');
@@ -247,55 +353,74 @@ describe('slugs.service', () => {
         slug: 'test-paper-smith',
         tombstone: false,
       });
-      expect(mockedPrisma.paperSlug.create).toHaveBeenCalledWith({
-        data: {
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
           slug: 'test-paper-smith',
-          paperUuid: 'uuid-123',
+          paper_uuid: 'uuid-123',
           tombstone: false,
-        },
-      });
+        })
+      );
     });
 
     it('appends UUID suffix when slug collision with different paper', async () => {
-      mockedPrisma.paperSlug.findFirst.mockResolvedValue(null);
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        title: 'Test Paper',
-        authors: 'John Smith',
-      });
-      mockedPrisma.paperSlug.findUnique.mockResolvedValue({
-        slug: 'test-paper-smith',
-        paperUuid: 'other-uuid',
-        tombstone: false,
-      });
-      mockedPrisma.paperSlug.create.mockResolvedValue({
-        slug: 'test-paper-smith-uuid-123',
-        paperUuid: 'uuid-12345678-abcd',
-        tombstone: false,
+      // First call: getSlugForPaper returns no slug
+      mockMaybeSingle
+        .mockResolvedValueOnce({ data: null, error: null })
+        // Second call: paper lookup returns paper data
+        .mockResolvedValueOnce({
+          data: { title: 'Test Paper', authors: 'John Smith' },
+          error: null,
+        })
+        // Third call: check existing slug returns collision with different paper
+        .mockResolvedValueOnce({
+          data: {
+            slug: 'test-paper-smith',
+            paper_uuid: 'other-uuid',
+            tombstone: false,
+          },
+          error: null,
+        });
+
+      // Fourth call: insert with single returns created slug with suffix
+      mockSingle.mockResolvedValueOnce({
+        data: {
+          slug: 'test-paper-smith-uuid-123',
+          paper_uuid: 'uuid-12345678-abcd',
+          tombstone: false,
+        },
+        error: null,
       });
 
       const result = await createSlug('uuid-12345678-abcd');
 
-      expect(mockedPrisma.paperSlug.create).toHaveBeenCalledWith({
-        data: {
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
           slug: 'test-paper-smith-uuid-123',
-          paperUuid: 'uuid-12345678-abcd',
+          paper_uuid: 'uuid-12345678-abcd',
           tombstone: false,
-        },
-      });
+        })
+      );
       expect(result.slug).toBe('test-paper-smith-uuid-123');
     });
 
     it('returns existing slug when collision is with same paper and active', async () => {
-      mockedPrisma.paperSlug.findFirst.mockResolvedValue(null);
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        title: 'Test Paper',
-        authors: 'John Smith',
-      });
-      mockedPrisma.paperSlug.findUnique.mockResolvedValue({
-        slug: 'test-paper-smith',
-        paperUuid: 'uuid-123',
-        tombstone: false,
-      });
+      // First call: getSlugForPaper returns no slug
+      mockMaybeSingle
+        .mockResolvedValueOnce({ data: null, error: null })
+        // Second call: paper lookup returns paper data
+        .mockResolvedValueOnce({
+          data: { title: 'Test Paper', authors: 'John Smith' },
+          error: null,
+        })
+        // Third call: check existing slug returns same paper, active
+        .mockResolvedValueOnce({
+          data: {
+            slug: 'test-paper-smith',
+            paper_uuid: 'uuid-123',
+            tombstone: false,
+          },
+          error: null,
+        });
 
       const result = await createSlug('uuid-123');
 
@@ -304,29 +429,41 @@ describe('slugs.service', () => {
         slug: 'test-paper-smith',
         tombstone: false,
       });
-      expect(mockedPrisma.paperSlug.create).not.toHaveBeenCalled();
+      expect(mockInsert).not.toHaveBeenCalled();
     });
 
     it('creates new slug with suffix when existing slug is tombstoned', async () => {
-      mockedPrisma.paperSlug.findFirst.mockResolvedValue(null);
-      mockedPrisma.paper.findUnique.mockResolvedValue({
-        title: 'Test Paper',
-        authors: 'John Smith',
-      });
-      mockedPrisma.paperSlug.findUnique.mockResolvedValue({
-        slug: 'test-paper-smith',
-        paperUuid: 'uuid-123',
-        tombstone: true,
-      });
-      mockedPrisma.paperSlug.create.mockResolvedValue({
-        slug: 'test-paper-smith-uuid-123',
-        paperUuid: 'uuid-12345678',
-        tombstone: false,
+      // First call: getSlugForPaper returns no slug
+      mockMaybeSingle
+        .mockResolvedValueOnce({ data: null, error: null })
+        // Second call: paper lookup returns paper data
+        .mockResolvedValueOnce({
+          data: { title: 'Test Paper', authors: 'John Smith' },
+          error: null,
+        })
+        // Third call: check existing slug returns tombstoned
+        .mockResolvedValueOnce({
+          data: {
+            slug: 'test-paper-smith',
+            paper_uuid: 'uuid-123',
+            tombstone: true,
+          },
+          error: null,
+        });
+
+      // Fourth call: insert with single returns created slug
+      mockSingle.mockResolvedValueOnce({
+        data: {
+          slug: 'test-paper-smith-uuid-123',
+          paper_uuid: 'uuid-12345678',
+          tombstone: false,
+        },
+        error: null,
       });
 
       const result = await createSlug('uuid-12345678');
 
-      expect(mockedPrisma.paperSlug.create).toHaveBeenCalled();
+      expect(mockInsert).toHaveBeenCalled();
     });
   });
 });

@@ -2,15 +2,12 @@
  * User Service
  *
  * Provides business logic for user-related operations.
- * - User sync from BetterAuth authentication hooks
  * - User list management (add, remove, check papers)
  * - User request management (paper processing requests)
  */
 
-import { prisma } from '@/lib/db';
+import { createClient } from '@/lib/supabase/server';
 import type {
-  User,
-  SyncUserPayload,
   CreatedResponse,
   DeletedResponse,
   ExistsResponse,
@@ -21,56 +18,7 @@ import type {
   StartProcessingResponse,
 } from '@/types/user';
 import type { ProcessingMetrics, PaperStatus } from '@/types/paper';
-
-// ============================================================================
-// MAIN HANDLERS - User Management
-// ============================================================================
-
-/**
- * Create or update a user record from BetterAuth hook data.
- * This is called when a user signs up or logs in for the first time.
- * @param payload - User data from BetterAuth
- * @returns Object indicating whether a new user was created
- */
-export async function syncNewUser(payload: SyncUserPayload): Promise<{ created: boolean }> {
-  const existing = await prisma.user.findUnique({
-    where: { id: payload.id },
-  });
-
-  if (existing) {
-    return { created: false };
-  }
-
-  await prisma.user.create({
-    data: {
-      id: payload.id,
-      email: payload.email,
-    },
-  });
-
-  return { created: true };
-}
-
-/**
- * Get a user record by their auth provider ID.
- * @param authProviderId - The user's ID from BetterAuth
- * @returns User record or null if not found
- */
-export async function getUserByAuthProviderId(authProviderId: string): Promise<User | null> {
-  const user = await prisma.user.findUnique({
-    where: { id: authProviderId },
-  });
-
-  if (!user) {
-    return null;
-  }
-
-  return {
-    id: user.id,
-    email: user.email,
-    createdAt: user.createdAt,
-  };
-}
+import type { Tables, TablesInsert } from '@/lib/types/database.types';
 
 // ============================================================================
 // MAIN HANDLERS - User List Management
@@ -86,43 +34,51 @@ export async function addToList(
   authProviderId: string,
   paperUuid: string
 ): Promise<CreatedResponse> {
-  // Verify user exists
-  const user = await prisma.user.findUnique({
-    where: { id: authProviderId },
-  });
-  if (!user) {
-    throw new Error(`User not found: ${authProviderId}`);
-  }
+  const supabase = await createClient();
 
   // Verify paper exists and get its internal ID
-  const paper = await prisma.paper.findUnique({
-    where: { paperUuid },
-    select: { id: true },
-  });
+  const { data: paperData, error: paperError } = await supabase
+    .from('papers')
+    .select('id')
+    .eq('paper_uuid', paperUuid)
+    .maybeSingle();
+
+  if (paperError) throw new Error(paperError.message);
+
+  const paper = paperData as Tables<'papers'> | null;
+
   if (!paper) {
     throw new Error(`Paper not found: ${paperUuid}`);
   }
 
-  // Check if already in list
-  const existing = await prisma.userList.findUnique({
-    where: {
-      userId_paperId: {
-        userId: authProviderId,
-        paperId: paper.id,
-      },
-    },
-  });
+  // Check if already in list (compound unique lookup)
+  const { data: existingData, error: existingError } = await supabase
+    .from('user_lists')
+    .select()
+    .eq('user_id', authProviderId)
+    .eq('paper_id', paper.id)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+
+  const existing = existingData as Tables<'user_lists'> | null;
 
   if (existing) {
     return { created: false };
   }
 
-  await prisma.userList.create({
-    data: {
-      userId: authProviderId,
-      paperId: paper.id,
-    },
-  });
+  const insertData: TablesInsert<'user_lists'> = {
+    user_id: authProviderId,
+    paper_id: paper.id,
+    created_at: new Date().toISOString(),
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: createError } = await (supabase
+    .from('user_lists') as any)
+    .insert(insertData);
+
+  if (createError) throw new Error(createError.message);
 
   return { created: true };
 }
@@ -137,24 +93,49 @@ export async function removeFromList(
   authProviderId: string,
   paperUuid: string
 ): Promise<DeletedResponse> {
+  const supabase = await createClient();
+
   // Get paper internal ID
-  const paper = await prisma.paper.findUnique({
-    where: { paperUuid },
-    select: { id: true },
-  });
+  const { data: paperData, error: paperError } = await supabase
+    .from('papers')
+    .select('id')
+    .eq('paper_uuid', paperUuid)
+    .maybeSingle();
+
+  if (paperError) throw new Error(paperError.message);
+
+  const paper = paperData as Tables<'papers'> | null;
+
   if (!paper) {
     return { deleted: false };
   }
 
-  // Try to delete the list entry
-  const deleted = await prisma.userList.deleteMany({
-    where: {
-      userId: authProviderId,
-      paperId: paper.id,
-    },
-  });
+  // Check if entry exists before deleting
+  const { data: existingData, error: existingError } = await supabase
+    .from('user_lists')
+    .select('id')
+    .eq('user_id', authProviderId)
+    .eq('paper_id', paper.id)
+    .maybeSingle();
 
-  return { deleted: deleted.count > 0 };
+  if (existingError) throw new Error(existingError.message);
+
+  const existing = existingData as Tables<'user_lists'> | null;
+
+  if (!existing) {
+    return { deleted: false };
+  }
+
+  // Delete the list entry
+  const { error: deleteError } = await supabase
+    .from('user_lists')
+    .delete()
+    .eq('user_id', authProviderId)
+    .eq('paper_id', paper.id);
+
+  if (deleteError) throw new Error(deleteError.message);
+
+  return { deleted: true };
 }
 
 /**
@@ -163,34 +144,62 @@ export async function removeFromList(
  * @returns Array of papers in the user's list with metadata
  */
 export async function getList(authProviderId: string): Promise<UserListItem[]> {
-  const listItems = await prisma.userList.findMany({
-    where: { userId: authProviderId },
-    include: {
-      paper: {
-        select: {
-          paperUuid: true,
-          title: true,
-          authors: true,
-          thumbnailDataUrl: true,
-          slugs: {
-            where: { tombstone: false },
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-            select: { slug: true },
-          },
-        },
-      },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('user_lists')
+    .select(`
+      created_at,
+      papers (
+        paper_uuid,
+        title,
+        authors,
+        thumbnail_data_url
+      )
+    `)
+    .eq('user_id', authProviderId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+
+  // Type the join result explicitly (Supabase doesn't infer nested selects well)
+  const listItems = (data ?? []) as Array<{
+    created_at: string;
+    papers: { paper_uuid: string; title: string | null; authors: string | null; thumbnail_data_url: string | null } | null;
+  }>;
+
+  // Get paper_uuids to fetch slugs separately
+  const paperUuids = listItems
+    .map((item) => item.papers?.paper_uuid)
+    .filter((uuid): uuid is string => uuid != null);
+
+  // Fetch active slugs for all papers
+  const { data: slugsData, error: slugsError } = await supabase
+    .from('paper_slugs')
+    .select('paper_uuid, slug, created_at')
+    .in('paper_uuid', paperUuids)
+    .eq('tombstone', false)
+    .order('created_at', { ascending: false });
+
+  if (slugsError) throw new Error(slugsError.message);
+
+  const slugs = (slugsData ?? []) as Tables<'paper_slugs'>[];
+
+  // Build a map of paper_uuid -> most recent slug
+  const slugMap = new Map<string, string>();
+  for (const slug of slugs) {
+    if (slug.paper_uuid && !slugMap.has(slug.paper_uuid)) {
+      slugMap.set(slug.paper_uuid, slug.slug);
+    }
+  }
 
   return listItems.map((item) => ({
-    paperUuid: item.paper.paperUuid,
-    title: item.paper.title,
-    authors: item.paper.authors,
-    thumbnailDataUrl: item.paper.thumbnailDataUrl,
-    slug: item.paper.slugs[0]?.slug ?? null,
-    createdAt: item.createdAt,
+    paperUuid: item.papers?.paper_uuid ?? '',
+    title: item.papers?.title ?? null,
+    authors: item.papers?.authors ?? null,
+    thumbnailDataUrl: item.papers?.thumbnail_data_url ?? null,
+    slug: item.papers?.paper_uuid ? slugMap.get(item.papers.paper_uuid) ?? null : null,
+    createdAt: new Date(item.created_at),
   }));
 }
 
@@ -204,23 +213,33 @@ export async function isInList(
   authProviderId: string,
   paperUuid: string
 ): Promise<ExistsResponse> {
+  const supabase = await createClient();
+
   // Get paper internal ID
-  const paper = await prisma.paper.findUnique({
-    where: { paperUuid },
-    select: { id: true },
-  });
+  const { data: paperData, error: paperError } = await supabase
+    .from('papers')
+    .select('id')
+    .eq('paper_uuid', paperUuid)
+    .maybeSingle();
+
+  if (paperError) throw new Error(paperError.message);
+
+  const paper = paperData as Tables<'papers'> | null;
+
   if (!paper) {
     return { exists: false };
   }
 
-  const existing = await prisma.userList.findUnique({
-    where: {
-      userId_paperId: {
-        userId: authProviderId,
-        paperId: paper.id,
-      },
-    },
-  });
+  const { data: existingData, error: existingError } = await supabase
+    .from('user_lists')
+    .select('id')
+    .eq('user_id', authProviderId)
+    .eq('paper_id', paper.id)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+
+  const existing = existingData as Tables<'user_lists'> | null;
 
   return { exists: !!existing };
 }
@@ -243,36 +262,39 @@ export async function addRequest(
   title: string | null,
   authors: string | null
 ): Promise<CreatedResponse> {
-  // Verify user exists
-  const user = await prisma.user.findUnique({
-    where: { id: authProviderId },
-  });
-  if (!user) {
-    throw new Error(`User not found: ${authProviderId}`);
-  }
+  const supabase = await createClient();
 
-  // Check if request already exists
-  const existing = await prisma.userRequest.findUnique({
-    where: {
-      userId_arxivId: {
-        userId: authProviderId,
-        arxivId,
-      },
-    },
-  });
+  // Check if request already exists (compound unique lookup)
+  const { data: existingData, error: existingError } = await supabase
+    .from('user_requests')
+    .select()
+    .eq('user_id', authProviderId)
+    .eq('arxiv_id', arxivId)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+
+  const existing = existingData as Tables<'user_requests'> | null;
 
   if (existing) {
     return { created: false };
   }
 
-  await prisma.userRequest.create({
-    data: {
-      userId: authProviderId,
-      arxivId,
-      title,
-      authors,
-    },
-  });
+  const insertData: TablesInsert<'user_requests'> = {
+    user_id: authProviderId,
+    arxiv_id: arxivId,
+    title,
+    authors,
+    created_at: new Date().toISOString(),
+    is_processed: false,
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: createError } = await (supabase
+    .from('user_requests') as any)
+    .insert(insertData);
+
+  if (createError) throw new Error(createError.message);
 
   return { created: true };
 }
@@ -287,14 +309,33 @@ export async function removeRequest(
   authProviderId: string,
   arxivId: string
 ): Promise<DeletedResponse> {
-  const deleted = await prisma.userRequest.deleteMany({
-    where: {
-      userId: authProviderId,
-      arxivId,
-    },
-  });
+  const supabase = await createClient();
 
-  return { deleted: deleted.count > 0 };
+  // Check if request exists before deleting
+  const { data: existingData, error: existingError } = await supabase
+    .from('user_requests')
+    .select('id')
+    .eq('user_id', authProviderId)
+    .eq('arxiv_id', arxivId)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+
+  const existing = existingData as Tables<'user_requests'> | null;
+
+  if (!existing) {
+    return { deleted: false };
+  }
+
+  const { error: deleteError } = await supabase
+    .from('user_requests')
+    .delete()
+    .eq('user_id', authProviderId)
+    .eq('arxiv_id', arxivId);
+
+  if (deleteError) throw new Error(deleteError.message);
+
+  return { deleted: true };
 }
 
 /**
@@ -303,18 +344,25 @@ export async function removeRequest(
  * @returns Array of user's paper requests with metadata
  */
 export async function listRequests(authProviderId: string): Promise<UserRequestItem[]> {
-  const requests = await prisma.userRequest.findMany({
-    where: { userId: authProviderId },
-    orderBy: { createdAt: 'desc' },
-  });
+  const supabase = await createClient();
+
+  const { data: requestsData, error } = await supabase
+    .from('user_requests')
+    .select()
+    .eq('user_id', authProviderId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+
+  const requests = (requestsData ?? []) as Tables<'user_requests'>[];
 
   return requests.map((request) => ({
-    arxivId: request.arxivId,
+    arxivId: request.arxiv_id,
     title: request.title,
     authors: request.authors,
-    createdAt: request.createdAt,
-    isProcessed: request.isProcessed,
-    processedSlug: request.processedSlug,
+    createdAt: new Date(request.created_at),
+    isProcessed: request.is_processed,
+    processedSlug: request.processed_slug,
   }));
 }
 
@@ -328,43 +376,65 @@ export async function doesRequestExist(
   authProviderId: string,
   arxivId: string
 ): Promise<ExistsResponse> {
-  const existing = await prisma.userRequest.findUnique({
-    where: {
-      userId_arxivId: {
-        userId: authProviderId,
-        arxivId,
-      },
-    },
-  });
+  const supabase = await createClient();
+
+  const { data: existingData, error } = await supabase
+    .from('user_requests')
+    .select('id')
+    .eq('user_id', authProviderId)
+    .eq('arxiv_id', arxivId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+
+  const existing = existingData as Tables<'user_requests'> | null;
 
   return { exists: !!existing };
 }
 
 /**
  * Get all paper requests from all users (admin only).
- * Returns requests with user email for admin display.
- * @returns Array of all paper requests with user email
+ * @returns Array of all paper requests
  */
 export async function getAllRequests(): Promise<AdminRequestItem[]> {
-  const requests = await prisma.userRequest.findMany({
-    include: {
-      user: {
-        select: { email: true },
-      },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('user_requests')
+    .select(`
+      id,
+      user_id,
+      arxiv_id,
+      title,
+      authors,
+      created_at,
+      is_processed,
+      processed_slug
+    `)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+
+  const requests = (data ?? []) as Array<{
+    id: number;
+    user_id: string;
+    arxiv_id: string;
+    title: string | null;
+    authors: string | null;
+    created_at: string;
+    is_processed: boolean;
+    processed_slug: string | null;
+  }>;
 
   return requests.map((request) => ({
-    id: Number(request.id),
-    userId: request.userId,
-    userEmail: request.user.email,
-    arxivId: request.arxivId,
+    id: request.id,
+    userId: request.user_id,
+    arxivId: request.arxiv_id,
     title: request.title,
     authors: request.authors,
-    createdAt: request.createdAt,
-    isProcessed: request.isProcessed,
-    processedSlug: request.processedSlug,
+    createdAt: new Date(request.created_at),
+    isProcessed: request.is_processed,
+    processedSlug: request.processed_slug,
   }));
 }
 
@@ -383,15 +453,22 @@ export async function getAggregatedRequests(
   limit: number = 500,
   offset: number = 0
 ): Promise<AggregatedRequestItem[]> {
+  const supabase = await createClient();
+
   // Get all requests grouped by arxivId
-  const requests = await prisma.userRequest.findMany({
-    orderBy: { createdAt: 'desc' },
-  });
+  const { data, error } = await supabase
+    .from('user_requests')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+
+  const requests = (data ?? []) as Tables<'user_requests'>[];
 
   // Group by arxivId
   const grouped = new Map<string, {
     arxivId: string;
-    requests: typeof requests;
+    requests: Tables<'user_requests'>[];
     title: string | null;
     authors: string | null;
     isProcessed: boolean;
@@ -399,25 +476,25 @@ export async function getAggregatedRequests(
   }>();
 
   for (const req of requests) {
-    const existing = grouped.get(req.arxivId);
+    const existing = grouped.get(req.arxiv_id);
     if (existing) {
       existing.requests.push(req);
       // Update title/authors if not set
       if (!existing.title && req.title) existing.title = req.title;
       if (!existing.authors && req.authors) existing.authors = req.authors;
       // Mark as processed if any request is processed
-      if (req.isProcessed) {
+      if (req.is_processed) {
         existing.isProcessed = true;
-        existing.processedSlug = req.processedSlug;
+        existing.processedSlug = req.processed_slug;
       }
     } else {
-      grouped.set(req.arxivId, {
-        arxivId: req.arxivId,
+      grouped.set(req.arxiv_id, {
+        arxivId: req.arxiv_id,
         requests: [req],
         title: req.title,
         authors: req.authors,
-        isProcessed: req.isProcessed,
-        processedSlug: req.processedSlug,
+        isProcessed: req.is_processed,
+        processedSlug: req.processed_slug,
       });
     }
   }
@@ -426,15 +503,15 @@ export async function getAggregatedRequests(
   const items: AggregatedRequestItem[] = [];
   for (const [arxivId, data] of grouped) {
     const sortedRequests = data.requests.sort(
-      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
     items.push({
       arxivId,
       arxivAbsUrl: `https://arxiv.org/abs/${arxivId}`,
       arxivPdfUrl: `https://arxiv.org/pdf/${arxivId}.pdf`,
       requestCount: data.requests.length,
-      firstRequestedAt: sortedRequests[0].createdAt,
-      lastRequestedAt: sortedRequests[sortedRequests.length - 1].createdAt,
+      firstRequestedAt: new Date(sortedRequests[0].created_at),
+      lastRequestedAt: new Date(sortedRequests[sortedRequests.length - 1].created_at),
       title: data.title,
       authors: data.authors,
       numPages: null, // Not stored in user requests
@@ -460,14 +537,31 @@ export async function getAggregatedRequests(
  * @returns True if deleted, false if not found
  */
 export async function deleteRequestById(requestId: number): Promise<boolean> {
-  try {
-    await prisma.userRequest.delete({
-      where: { id: BigInt(requestId) },
-    });
-    return true;
-  } catch {
+  const supabase = await createClient();
+
+  // Check if request exists before deleting
+  const { data: existingData, error: existingError } = await supabase
+    .from('user_requests')
+    .select('id')
+    .eq('id', requestId)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+
+  const existing = existingData as Tables<'user_requests'> | null;
+
+  if (!existing) {
     return false;
   }
+
+  const { error: deleteError } = await supabase
+    .from('user_requests')
+    .delete()
+    .eq('id', requestId);
+
+  if (deleteError) throw new Error(deleteError.message);
+
+  return true;
 }
 
 /**
@@ -476,10 +570,31 @@ export async function deleteRequestById(requestId: number): Promise<boolean> {
  * @returns Number of requests deleted
  */
 export async function deleteAllRequestsForArxiv(arxivId: string): Promise<number> {
-  const result = await prisma.userRequest.deleteMany({
-    where: { arxivId },
-  });
-  return result.count;
+  const supabase = await createClient();
+
+  // Count existing requests before deleting (Supabase doesn't return count directly)
+  const { data: existingData, error: countError } = await supabase
+    .from('user_requests')
+    .select('id')
+    .eq('arxiv_id', arxivId);
+
+  if (countError) throw new Error(countError.message);
+
+  const existing = (existingData ?? []) as Tables<'user_requests'>[];
+  const count = existing.length;
+
+  if (count === 0) {
+    return 0;
+  }
+
+  const { error: deleteError } = await supabase
+    .from('user_requests')
+    .delete()
+    .eq('arxiv_id', arxivId);
+
+  if (deleteError) throw new Error(deleteError.message);
+
+  return count;
 }
 
 /**
@@ -491,15 +606,22 @@ export async function deleteAllRequestsForArxiv(arxivId: string): Promise<number
 export async function startProcessingRequest(
   arxivId: string
 ): Promise<StartProcessingResponse> {
+  const supabase = await createClient();
+
   // Check if paper already exists
-  const existingPaper = await prisma.paper.findUnique({
-    where: { arxivId },
-    select: { paperUuid: true, status: true },
-  });
+  const { data: existingPaperData, error: findError } = await supabase
+    .from('papers')
+    .select('paper_uuid, status')
+    .eq('arxiv_id', arxivId)
+    .maybeSingle();
+
+  if (findError) throw new Error(findError.message);
+
+  const existingPaper = existingPaperData as Tables<'papers'> | null;
 
   if (existingPaper) {
     return {
-      paperUuid: existingPaper.paperUuid,
+      paperUuid: existingPaper.paper_uuid,
       status: existingPaper.status,
     };
   }
@@ -507,21 +629,30 @@ export async function startProcessingRequest(
   // Create new paper record with status 'not_started'
   const { randomUUID } = await import('crypto');
   const paperUuid = randomUUID();
-  const now = new Date();
+  const now = new Date().toISOString();
 
-  const paper = await prisma.paper.create({
-    data: {
-      paperUuid,
-      arxivId,
-      arxivUrl: `https://arxiv.org/abs/${arxivId}`,
-      status: 'not_started',
-      createdAt: now,
-      updatedAt: now,
-    },
-  });
+  const insertData: TablesInsert<'papers'> = {
+    paper_uuid: paperUuid,
+    arxiv_id: arxivId,
+    arxiv_url: `https://arxiv.org/abs/${arxivId}`,
+    status: 'not_started',
+    created_at: now,
+    updated_at: now,
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: paperData, error: createError } = await (supabase
+    .from('papers') as any)
+    .insert(insertData)
+    .select('paper_uuid, status')
+    .single();
+
+  if (createError) throw new Error(createError.message);
+
+  const paper = paperData as Tables<'papers'>;
 
   return {
-    paperUuid: paper.paperUuid,
+    paperUuid: paper.paper_uuid,
     status: paper.status,
   };
 }
@@ -540,40 +671,47 @@ export async function getProcessingMetrics(
   authProviderId: string,
   paperUuid: string
 ): Promise<ProcessingMetrics | null> {
-  const paper = await prisma.paper.findUnique({
-    where: { paperUuid },
-    select: {
-      paperUuid: true,
-      status: true,
-      numPages: true,
-      processingTimeSeconds: true,
-      totalCost: true,
-      avgCostPerPage: true,
-      startedAt: true,
-      finishedAt: true,
-      errorMessage: true,
-      initiatedByUserId: true,
-    },
-  });
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('papers')
+    .select(`
+      paper_uuid,
+      status,
+      num_pages,
+      processing_time_seconds,
+      total_cost,
+      avg_cost_per_page,
+      started_at,
+      finished_at,
+      error_message,
+      initiated_by_user_id
+    `)
+    .eq('paper_uuid', paperUuid)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+
+  const paper = data as Tables<'papers'> | null;
 
   if (!paper) {
     return null;
   }
 
   // Verify the user initiated this paper
-  if (paper.initiatedByUserId !== authProviderId) {
+  if (paper.initiated_by_user_id !== authProviderId) {
     return null;
   }
 
   return {
-    paperUuid: paper.paperUuid,
+    paperUuid: paper.paper_uuid,
     status: paper.status as PaperStatus,
-    numPages: paper.numPages,
-    processingTimeSeconds: paper.processingTimeSeconds,
-    totalCost: paper.totalCost,
-    avgCostPerPage: paper.avgCostPerPage,
-    startedAt: paper.startedAt,
-    finishedAt: paper.finishedAt,
-    errorMessage: paper.errorMessage,
+    numPages: paper.num_pages,
+    processingTimeSeconds: paper.processing_time_seconds,
+    totalCost: paper.total_cost,
+    avgCostPerPage: paper.avg_cost_per_page,
+    startedAt: paper.started_at ? new Date(paper.started_at) : null,
+    finishedAt: paper.finished_at ? new Date(paper.finished_at) : null,
+    errorMessage: paper.error_message,
   };
 }
