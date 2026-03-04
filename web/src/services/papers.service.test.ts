@@ -262,16 +262,14 @@ describe('papers.service', () => {
   // getPaperSummary - Summary extraction from processedContent
   // --------------------------------------------------------------------------
   describe('getPaperSummary', () => {
-    it('extracts five_minute_summary from processedContent', async () => {
+    it('extracts five_minute_summary from summaries column', async () => {
       mockMaybeSingle.mockResolvedValue({
         data: {
           paper_uuid: 'test-uuid',
           title: 'Test Paper',
           authors: 'John Doe',
           arxiv_url: 'https://arxiv.org/abs/2301.12345',
-          processed_content: JSON.stringify({
-            five_minute_summary: 'This is a summary.',
-          }),
+          summaries: { five_minute_summary: 'This is a summary.' },
           num_pages: 10,
         },
         error: null,
@@ -286,14 +284,14 @@ describe('papers.service', () => {
       expect(result.thumbnailUrl).toBe('/api/papers/thumbnails/test-uuid');
     });
 
-    it('returns null fiveMinuteSummary when processedContent is null', async () => {
+    it('returns null fiveMinuteSummary when summaries is null', async () => {
       mockMaybeSingle.mockResolvedValue({
         data: {
           paper_uuid: 'test-uuid',
           title: 'Test Paper',
           authors: null,
           arxiv_url: null,
-          processed_content: null,
+          summaries: null,
           num_pages: null,
         },
         error: null,
@@ -305,32 +303,14 @@ describe('papers.service', () => {
       expect(result.pageCount).toBe(0);
     });
 
-    it('returns null fiveMinuteSummary when processedContent has invalid JSON', async () => {
+    it('returns null fiveMinuteSummary when five_minute_summary key is missing', async () => {
       mockMaybeSingle.mockResolvedValue({
         data: {
           paper_uuid: 'test-uuid',
           title: 'Test Paper',
           authors: null,
           arxiv_url: null,
-          processed_content: 'not valid json {{{',
-          num_pages: 5,
-        },
-        error: null,
-      });
-
-      const result = await getPaperSummary('test-uuid');
-
-      expect(result.fiveMinuteSummary).toBeNull();
-    });
-
-    it('returns null fiveMinuteSummary when five_minute_summary field is missing', async () => {
-      mockMaybeSingle.mockResolvedValue({
-        data: {
-          paper_uuid: 'test-uuid',
-          title: 'Test Paper',
-          authors: null,
-          arxiv_url: null,
-          processed_content: JSON.stringify({ other_field: 'value' }),
+          summaries: { other_field: 'value' },
           num_pages: 5,
         },
         error: null,

@@ -37,6 +37,8 @@ class PaperRecord(Base):
     external_popularity_signals = Column(JSON, nullable=True)
     # Complete processed paper JSON (replaces file system storage)
     processed_content = Column(Text, nullable=True)
+    # Extracted summaries stored as JSON dict (e.g. {"five_minute_summary": "..."})
+    summaries = Column(JSON, nullable=True)
     # PDF content hash for non-arXiv papers (SHA-256)
     content_hash = Column(String(64), nullable=True)
     # Direct PDF URL for non-arXiv papers

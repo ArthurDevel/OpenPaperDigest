@@ -165,7 +165,7 @@ export async function getPaperSummary(uuid: string): Promise<PaperSummary> {
       title,
       authors,
       arxiv_url,
-      processed_content,
+      summaries,
       num_pages
     `)
     .eq('paper_uuid', uuid)
@@ -179,16 +179,9 @@ export async function getPaperSummary(uuid: string): Promise<PaperSummary> {
     throw new Error(`Paper not found: ${uuid}`);
   }
 
-  // Extract five_minute_summary from processed content
-  let fiveMinuteSummary: string | null = null;
-  if (paper.processed_content) {
-    try {
-      const content = JSON.parse(paper.processed_content);
-      fiveMinuteSummary = content.five_minute_summary ?? null;
-    } catch {
-      // Ignore parse errors
-    }
-  }
+  // Read five_minute_summary from the summaries JSON column
+  const summaries = paper.summaries as Record<string, string> | null;
+  const fiveMinuteSummary = summaries?.five_minute_summary ?? null;
 
   return {
     paperId: paper.paper_uuid,
@@ -491,6 +484,12 @@ export async function importPaperJson(
   const existing = existingData as Tables<'papers'> | null;
 
   const now = new Date().toISOString();
+
+  // Extract five_minute_summary into summaries column
+  const processedContent = paper.processed_content as Record<string, unknown> | undefined;
+  const fiveMinuteSummary = processedContent?.five_minute_summary as string | undefined;
+  const summaries = fiveMinuteSummary ? { five_minute_summary: fiveMinuteSummary } : null;
+
   const updateData: TablesUpdate<'papers'> = {
     arxiv_id: (paper.arxiv_id as string) ?? null,
     arxiv_version: (paper.arxiv_version as string) ?? null,
@@ -503,6 +502,7 @@ export async function importPaperJson(
     processed_content: paper.processed_content
       ? JSON.stringify(paper.processed_content)
       : null,
+    summaries,
     finished_at: now,
     updated_at: now,
   };
@@ -537,6 +537,7 @@ export async function importPaperJson(
       processed_content: paper.processed_content
         ? JSON.stringify(paper.processed_content)
         : null,
+      summaries,
       finished_at: now,
       updated_at: now,
     };
