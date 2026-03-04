@@ -442,6 +442,7 @@ def save_paper(db: Session, processed_content: ProcessedDocument) -> Paper:
         'avg_cost_per_page': result_dict["avg_cost_per_page"],
         'thumbnail_data_url': result_dict["thumbnail_data_url"],
         'processed_content': json_string,
+        'summaries': {"five_minute_summary": processed_content.five_minute_summary},
         'finished_at': datetime.utcnow(),
     }
     
