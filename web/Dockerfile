@@ -5,7 +5,7 @@
 # Uses standalone output mode for smaller production images.
 #
 # Responsibilities:
-# - Build the Next.js application with Prisma client generation
+# - Build the Next.js application
 # - Create a minimal production image using standalone output
 # - Serve the web application on port 3000
 # ==============================================================================
@@ -25,7 +25,6 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # Copy package files and pnpm config
 COPY package.json pnpm-lock.yaml .npmrc ./
-COPY prisma ./prisma/
 
 # Install all dependencies (including devDependencies for build)
 RUN pnpm install --frozen-lockfile
@@ -43,14 +42,6 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-
-# Generate Prisma client
-RUN pnpm exec prisma generate
-
-# Copy prisma client to a known location for the runner stage (handles pnpm symlink structure)
-RUN mkdir -p /prisma-client && \
-    cp -rL node_modules/.prisma /prisma-client/ 2>/dev/null || \
-    cp -rL node_modules/.pnpm/@prisma+client*/node_modules/.prisma /prisma-client/
 
 # Build the Next.js application
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -78,10 +69,6 @@ COPY --from=builder /app/public ./public
 # Copy standalone build output
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-# Copy Prisma client from known location
-COPY --from=builder /prisma-client/.prisma ./node_modules/.prisma
-COPY --from=builder /app/prisma ./prisma
 
 # Install migration dependencies
 RUN corepack enable && corepack prepare pnpm@latest --activate && \
