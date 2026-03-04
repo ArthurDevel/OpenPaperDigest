@@ -107,6 +107,7 @@ export type Database = {
           processing_time_seconds: number | null
           started_at: string | null
           status: string
+          summaries: Json | null
           thumbnail_data_url: string | null
           title: string | null
           total_cost: number | null
@@ -132,6 +133,7 @@ export type Database = {
           processing_time_seconds?: number | null
           started_at?: string | null
           status: string
+          summaries?: Json | null
           thumbnail_data_url?: string | null
           title?: string | null
           total_cost?: number | null
@@ -157,6 +159,7 @@ export type Database = {
           processing_time_seconds?: number | null
           started_at?: string | null
           status?: string
+          summaries?: Json | null
           thumbnail_data_url?: string | null
           title?: string | null
           total_cost?: number | null
