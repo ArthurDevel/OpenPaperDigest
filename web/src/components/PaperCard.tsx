@@ -24,6 +24,8 @@ interface PaperCardProps {
   summary?: PaperSummaryResponse;
   onToggleExpand: (paperUuid: string) => void;
   onLoadSummary?: (paperUuid: string) => void;
+  /** Ref from useReadingTracker to attach to the expanded summary content */
+  readingTrackerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
@@ -33,6 +35,7 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
   summary,
   onToggleExpand,
   onLoadSummary,
+  readingTrackerRef,
 }, ref) => {
   const [copied, setCopied] = useState(false);
 
@@ -131,7 +134,7 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
                 </a>
               )}
             </div>
-            <div className="prose prose-sm dark:prose-invert max-w-none">
+            <div ref={readingTrackerRef} className="prose prose-sm dark:prose-invert max-w-none">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath]}
                 rehypePlugins={[rehypeKatex]}

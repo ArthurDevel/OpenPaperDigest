@@ -7,15 +7,19 @@
  * - Handle paper expansion to show summaries
  * - Manage infinite scroll with intersection observer
  * - Preserve scroll position when expanding/collapsing papers
+ * - Track user interactions (expand, read) for feed recommendations
  */
 
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback, useLayoutEffect } from 'react';
 import type { MinimalPaperItem } from '../types/paper';
-import { listMinimalPapersPaginated, fetchPaperSummary, PaperSummaryResponse } from '../services/api';
+import type { FeedResponse } from '../types/recommendation';
+import { fetchPaperSummary, PaperSummaryResponse } from '../services/api';
 import PaperCard from '../components/PaperCard';
 import { usePaperImpression, trackPaperOpened } from '../hooks/useUmamiTracking';
+import { useInteractionTracker } from '../hooks/useInteractionTracker';
+import { useReadingTracker } from '../hooks/useReadingTracker';
 import NewPapersBanner from '../components/NewPapersBanner';
 
 // ============================================================================
@@ -25,19 +29,35 @@ import NewPapersBanner from '../components/NewPapersBanner';
 const ITEMS_PER_PAGE = 20;
 
 // ============================================================================
-// HELPER COMPONENT
+// HELPER FUNCTIONS
 // ============================================================================
 
 /**
- * A wrapper for PaperCard that adds impression tracking.
+ * Estimates word count from a text string by splitting on whitespace.
+ * @param text - The text to count words in
+ * @returns The approximate word count
  */
-const PaperCardWithImpressionTracking = ({
+function estimateWordCount(text: string | null | undefined): number {
+  if (!text) return 0;
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+// ============================================================================
+// HELPER COMPONENTS
+// ============================================================================
+
+/**
+ * A wrapper for PaperCard that adds impression tracking and reading tracking.
+ * Uses useReadingTracker when the paper is expanded to measure active reading time.
+ */
+const PaperCardWithTracking = ({
   paper,
   isExpanded,
   isLoadingSummary,
   summary,
   onToggleExpand,
   onLoadSummary,
+  onReadComplete,
 }: {
   paper: MinimalPaperItem;
   isExpanded: boolean;
@@ -45,8 +65,15 @@ const PaperCardWithImpressionTracking = ({
   summary?: PaperSummaryResponse;
   onToggleExpand: (paperUuid: string) => void;
   onLoadSummary?: (paperUuid: string) => void;
+  onReadComplete: (paperUuid: string, readingRatio: number) => void;
 }) => {
   const impressionRef = usePaperImpression(paper.paperUuid, true);
+  const wordCount = estimateWordCount(summary?.fiveMinuteSummary);
+  const { ref: readingRef } = useReadingTracker(
+    paper.paperUuid,
+    wordCount,
+    onReadComplete
+  );
 
   return (
     <PaperCard
@@ -57,6 +84,7 @@ const PaperCardWithImpressionTracking = ({
       summary={summary}
       onToggleExpand={onToggleExpand}
       onLoadSummary={onLoadSummary}
+      readingTrackerRef={isExpanded ? readingRef : undefined}
     />
   );
 };
@@ -78,12 +106,16 @@ export default function ScrollingPapersPage() {
 
   const observerTarget = useRef<HTMLDivElement>(null);
 
+  // Interaction tracking for feed recommendations
+  const { trackExpand, trackRead, getSessionPaperUuids } = useInteractionTracker();
+
   // ============================================================================
   // EVENT HANDLERS
   // ============================================================================
 
   /**
-   * Loads a specific page of papers from the API
+   * Loads a specific page of papers from the ranked feed API.
+   * Sends already-loaded paper UUIDs as exclude list for deduplication.
    * @param page - The page number to load
    */
   const loadPage = useCallback(async (page: number): Promise<void> => {
@@ -92,7 +124,23 @@ export default function ScrollingPapersPage() {
     try {
       setIsLoading(true);
       setError(null);
-      const result = await listMinimalPapersPaginated(page, ITEMS_PER_PAGE);
+
+      // Build exclude list from already-loaded papers + session interactions
+      const loadedUuids = papers.map((p) => p.paperUuid);
+      const sessionUuids = getSessionPaperUuids();
+      const excludePaperUuids = [...new Set([...loadedUuids, ...sessionUuids])];
+
+      const response = await fetch('/api/papers/feed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page, limit: ITEMS_PER_PAGE, excludePaperUuids }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Feed request failed: ${response.status}`);
+      }
+
+      const result = (await response.json()) as FeedResponse;
 
       setPapers(prev => {
         // Avoid duplicates
@@ -116,7 +164,7 @@ export default function ScrollingPapersPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, paperSummaries, loadingSummaries]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isLoading, papers, paperSummaries, loadingSummaries, getSessionPaperUuids]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Toggles the expanded state of a paper
@@ -133,8 +181,10 @@ export default function ScrollingPapersPage() {
         return next;
       });
     } else {
-      // Track the "paper opened" event
+      // Track the "paper opened" event (Umami analytics)
       trackPaperOpened(paperUuid);
+      // Track expand for feed recommendations
+      trackExpand(paperUuid);
 
       // Expanding a new one - need to handle scroll preservation
       const previouslyExpanded = Array.from(expandedPaperIds)[0];
@@ -156,7 +206,7 @@ export default function ScrollingPapersPage() {
         loadPaperSummary(paperUuid);
       }
     }
-  }, [expandedPaperIds, paperSummaries, loadingSummaries]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [expandedPaperIds, paperSummaries, loadingSummaries, trackExpand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Loads the summary for a specific paper
@@ -252,7 +302,7 @@ export default function ScrollingPapersPage() {
             const isLoadingSummary = loadingSummaries.has(paper.paperUuid);
 
             return (
-              <PaperCardWithImpressionTracking
+              <PaperCardWithTracking
                 key={paper.paperUuid}
                 paper={paper}
                 isExpanded={isExpanded}
@@ -260,6 +310,7 @@ export default function ScrollingPapersPage() {
                 summary={summary}
                 onToggleExpand={toggleExpanded}
                 onLoadSummary={loadPaperSummary}
+                onReadComplete={trackRead}
               />
             );
           })}

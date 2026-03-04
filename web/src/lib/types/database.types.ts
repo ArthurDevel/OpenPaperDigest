@@ -95,6 +95,7 @@ export type Database = {
           avg_cost_per_page: number | null
           content_hash: string | null
           created_at: string
+          embedding: string | null
           error_message: string | null
           external_popularity_signals: Json | null
           finished_at: string | null
@@ -121,6 +122,7 @@ export type Database = {
           avg_cost_per_page?: number | null
           content_hash?: string | null
           created_at?: string
+          embedding?: string | null
           error_message?: string | null
           external_popularity_signals?: Json | null
           finished_at?: string | null
@@ -147,6 +149,7 @@ export type Database = {
           avg_cost_per_page?: number | null
           content_hash?: string | null
           created_at?: string
+          embedding?: string | null
           error_message?: string | null
           external_popularity_signals?: Json | null
           finished_at?: string | null
@@ -164,6 +167,33 @@ export type Database = {
           title?: string | null
           total_cost?: number | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      user_interactions: {
+        Row: {
+          created_at: string
+          id: number
+          interaction_type: string
+          metadata: Json | null
+          paper_uuid: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          interaction_type: string
+          metadata?: Json | null
+          paper_uuid: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          interaction_type?: string
+          metadata?: Json | null
+          paper_uuid?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -195,6 +225,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_preference_clusters: {
+        Row: {
+          cluster_index: number
+          embedding: string
+          id: number
+          interaction_count: number
+          updated_at: string
+          user_id: string
+          weight: number
+        }
+        Insert: {
+          cluster_index: number
+          embedding: string
+          id?: number
+          interaction_count?: number
+          updated_at?: string
+          user_id: string
+          weight?: number
+        }
+        Update: {
+          cluster_index?: number
+          embedding?: string
+          id?: number
+          interaction_count?: number
+          updated_at?: string
+          user_id?: string
+          weight?: number
+        }
+        Relationships: []
       }
       user_requests: {
         Row: {
@@ -234,7 +294,23 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      match_papers_by_embedding: {
+        Args: {
+          exclude_uuids?: string[]
+          match_count?: number
+          query_embedding: string
+        }
+        Returns: {
+          authors: string
+          embedding: string
+          external_popularity_signals: Json
+          finished_at: string
+          paper_uuid: string
+          similarity: number
+          thumbnail_data_url: string
+          title: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

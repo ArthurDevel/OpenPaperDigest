@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 import uuid
 
+
 from shared.openrouter.models import ApiCallCost
 
 
@@ -63,6 +64,8 @@ class ProcessedDocument:
     rewritten_final_markdown: Optional[str] = None
     # Summary generation
     five_minute_summary: Optional[str] = None    # Accessible 5-minute summary
+    # 1536-dim embedding vector from text-embedding-3-small
+    embedding: Optional[list[float]] = None
     # Cost tracking
     step_costs: List[ApiCallCostForStep] = field(default_factory=list)
 

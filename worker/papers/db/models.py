@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text, UniqueConstraint, Float, Boolean, Index, JSON, Date
+from pgvector.sqlalchemy import Vector
 
 from shared.db import Base
 
@@ -43,6 +44,8 @@ class PaperRecord(Base):
     content_hash = Column(String(64), nullable=True)
     # Direct PDF URL for non-arXiv papers
     pdf_url = Column(String(512), nullable=True)
+    # 1536-dim embedding vector from text-embedding-3-small via OpenRouter
+    embedding = Column(Vector(1536), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("paper_uuid", name="uq_papers_paper_uuid"),

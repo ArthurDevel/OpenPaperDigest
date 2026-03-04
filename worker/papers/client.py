@@ -443,6 +443,7 @@ def save_paper(db: Session, processed_content: ProcessedDocument) -> Paper:
         'thumbnail_data_url': result_dict["thumbnail_data_url"],
         'processed_content': json_string,
         'summaries': {"five_minute_summary": processed_content.five_minute_summary},
+        'embedding': processed_content.embedding,
         'finished_at': datetime.utcnow(),
     }
     
