@@ -1,14 +1,17 @@
 """
-Backfill embeddings for existing papers that have no embedding yet.
+Backfill embeddings for all existing papers that have no embedding yet.
 
 One-time Airflow DAG that generates 1536-dim embeddings via OpenRouter for all
 completed papers where embedding IS NULL. Uses the summaries column to get the
 five_minute_summary text; falls back to title-only if summaries is NULL.
 
+Processes ALL papers in batches of 100 (fetched from DB), saving each embedding
+immediately after generation so progress is never lost on crash.
+
 Responsibilities:
-- Find completed papers without embeddings
-- Generate embeddings in batches via OpenRouter
-- Update embedding column per paper with per-paper error handling
+- Loop through all completed papers without embeddings
+- Generate embeddings one at a time via OpenRouter
+- Save each embedding immediately after generation (crash-safe)
 - Generate summary report
 """
 
@@ -29,7 +32,8 @@ from papers.db.models import PaperRecord
 # CONSTANTS
 # ============================================================================
 
-BATCH_SIZE = 100
+# Number of papers to fetch per DB query (not a processing limit)
+FETCH_BATCH_SIZE = 100
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -55,12 +59,12 @@ def database_session():
         session.close()
 
 
-def fetch_papers_without_embeddings(batch_size: int = BATCH_SIZE) -> List[Dict]:
+def fetch_papers_without_embeddings(batch_size: int = FETCH_BATCH_SIZE) -> List[Dict]:
     """
-    Query papers where status='completed' AND embedding IS NULL.
+    Query a batch of papers where status='completed' AND embedding IS NULL.
 
     Args:
-        batch_size: Maximum number of papers to fetch.
+        batch_size: Maximum number of papers to fetch per query.
 
     Returns:
         List[Dict]: List of dicts with paper_uuid, title, and summaries.
@@ -85,55 +89,21 @@ def fetch_papers_without_embeddings(batch_size: int = BATCH_SIZE) -> List[Dict]:
         ]
 
 
-def generate_and_store_embeddings(papers: List[Dict]) -> int:
+def save_embedding(paper_uuid: str, embedding: List[float]) -> None:
     """
-    Generate embeddings for a batch of papers and update the database.
-
-    For each paper, combines title + five_minute_summary (from summaries column)
-    into embedding input. Falls back to title-only if no summary available.
-    Per-paper error handling: logs failures, skips them, continues.
+    Save a single embedding to the database immediately.
+    Each call opens and commits its own transaction so progress is never lost.
 
     Args:
-        papers: List of paper dicts from fetch_papers_without_embeddings.
-
-    Returns:
-        int: Number of papers successfully updated.
+        paper_uuid: The paper to update.
+        embedding: The 1536-dim embedding vector.
     """
-    from paperprocessor.embedding import generate_embedding
-
-    updated = 0
-
-    for paper in papers:
-        paper_uuid = paper["paper_uuid"]
-        title = paper["title"]
-
-        try:
-            # Extract summary from summaries JSON column
-            summaries = paper.get("summaries") or {}
-            summary = summaries.get("five_minute_summary")
-
-            if not title:
-                print(f"  SKIP {paper_uuid}: no title")
-                continue
-
-            # Generate embedding
-            embedding = generate_embedding(title, summary)
-
-            # Store in database
-            with database_session() as session:
-                record = session.query(PaperRecord).filter(
-                    PaperRecord.paper_uuid == paper_uuid
-                ).first()
-
-                if record:
-                    record.embedding = embedding
-                    updated += 1
-
-        except Exception as e:
-            print(f"  FAIL {paper_uuid}: {e}")
-            continue
-
-    return updated
+    with database_session() as session:
+        record = session.query(PaperRecord).filter(
+            PaperRecord.paper_uuid == paper_uuid
+        ).first()
+        if record:
+            record.embedding = embedding
 
 
 # ============================================================================
@@ -150,74 +120,78 @@ def generate_and_store_embeddings(papers: List[Dict]) -> int:
     doc_md="""
     ### Backfill Embeddings DAG
 
-    **ONE-TIME USE DAG**: Generates 1536-dim embeddings via OpenRouter for all
+    **ONE-TIME USE DAG**: Generates 1536-dim embeddings via OpenRouter for ALL
     completed papers that have no embedding yet.
 
-    **Why:** The feed recommendation system needs embeddings for ANN similarity
-    search. Existing papers need embeddings backfilled so they appear in
-    recommendation results.
-
-    **Safety:**
-    - Only processes papers where embedding IS NULL
-    - Processes in batches of 100
-    - Per-paper error handling (logs failures, skips, continues)
-    - Can be re-run safely (idempotent - skips already-embedded papers)
+    Processes all papers by fetching batches of 100 from the DB and looping
+    until none remain. Each embedding is saved immediately after generation
+    (crash-safe). Per-paper error handling logs failures and continues.
     """,
 )
 def backfill_embeddings_dag():
 
     @task
-    def find_papers() -> List[dict]:
+    def process_all_papers() -> Dict[str, int]:
         """
-        Find papers that need embeddings generated.
+        Loop through all papers without embeddings, generate and save each one.
+        Fetches in batches of 100 from DB, saves each embedding immediately.
 
         Returns:
-            List[dict]: Papers with paper_uuid, title, and summaries.
+            Dict with updated/failed/skipped counts.
         """
-        print("Scanning for papers without embeddings...")
-        papers = fetch_papers_without_embeddings(batch_size=BATCH_SIZE)
-        print(f"Found {len(papers)} papers to process")
-        return papers
+        from paperprocessor.embedding import generate_embedding
 
-    @task
-    def process_batch(papers: List[dict]) -> Dict[str, int]:
-        """
-        Generate and store embeddings for a batch of papers.
+        total = 0
+        updated = 0
+        failed = 0
+        skipped = 0
 
-        Args:
-            papers: List of paper dicts to process.
+        while True:
+            papers = fetch_papers_without_embeddings(batch_size=FETCH_BATCH_SIZE)
+            if not papers:
+                break
 
-        Returns:
-            Dict with updated/total counts.
-        """
-        if not papers:
-            print("No papers to process")
-            return {"updated": 0, "total": 0}
+            print(f"Fetched batch of {len(papers)} papers (total so far: {total})")
 
-        print(f"Processing {len(papers)} papers...")
-        updated = generate_and_store_embeddings(papers)
-        return {"updated": updated, "total": len(papers)}
+            for paper in papers:
+                total += 1
+                paper_uuid = paper["paper_uuid"]
+                title = paper["title"]
 
-    @task
-    def generate_report(results: Dict[str, int]) -> None:
-        """
-        Print summary report of the backfill operation.
+                if not title:
+                    print(f"  SKIP {paper_uuid}: no title")
+                    skipped += 1
+                    continue
 
-        Args:
-            results: Counts from process_batch.
-        """
+                try:
+                    summaries = paper.get("summaries") or {}
+                    summary = summaries.get("five_minute_summary")
+
+                    embedding = generate_embedding(title, summary)
+                    save_embedding(paper_uuid, embedding)
+                    updated += 1
+
+                    if updated % 50 == 0:
+                        print(f"  Progress: {updated} papers embedded")
+
+                except Exception as e:
+                    print(f"  FAIL {paper_uuid}: {e}")
+                    failed += 1
+                    continue
+
+        # Final report
         print("\n" + "=" * 50)
         print("BACKFILL EMBEDDINGS REPORT")
         print("=" * 50)
-        print(f"Total papers:  {results['total']}")
-        print(f"Updated:       {results['updated']}")
-        print(f"Failed/Skipped: {results['total'] - results['updated']}")
+        print(f"Total papers:  {total}")
+        print(f"Updated:       {updated}")
+        print(f"Failed:        {failed}")
+        print(f"Skipped:       {skipped}")
         print("=" * 50)
 
-    # Task dependencies
-    papers = find_papers()
-    results = process_batch(papers)
-    generate_report(results)
+        return {"total": total, "updated": updated, "failed": failed, "skipped": skipped}
+
+    process_all_papers()
 
 
 backfill_embeddings_dag()

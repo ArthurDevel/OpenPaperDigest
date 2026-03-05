@@ -21,6 +21,7 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ./worker/.env
+      - ./web/.env.local
     environment:
       - NODE_ENV=production
     ports:
