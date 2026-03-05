@@ -5,6 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from papers.db.models import PaperRecord, PaperSlugRecord
+import papers.storage as storage
 from users.models import UserRow, UserListRow, UserRequestRow
 
 logger = logging.getLogger(__name__)
@@ -39,11 +40,10 @@ async def add_list_entry(db: Session, auth_provider_id: str, paper_uuid: str) ->
     """
     Add a paper to the user's list. Idempotent: returns created=False if already present.
     """
-    from sqlalchemy.orm import defer
     user = db.query(UserRow).filter(UserRow.id == auth_provider_id).first()
     if not user:
         raise ValueError("User not found")
-    paper = db.query(PaperRecord).options(defer(PaperRecord.processed_content)).filter(PaperRecord.paper_uuid == paper_uuid).first()
+    paper = db.query(PaperRecord).filter(PaperRecord.paper_uuid == paper_uuid).first()
     if not paper:
         raise ValueError("Paper not found")
     existing = (
@@ -60,11 +60,10 @@ async def add_list_entry(db: Session, auth_provider_id: str, paper_uuid: str) ->
 
 
 async def remove_list_entry(db: Session, auth_provider_id: str, paper_uuid: str) -> Dict[str, bool]:
-    from sqlalchemy.orm import defer
     user = db.query(UserRow).filter(UserRow.id == auth_provider_id).first()
     if not user:
         raise ValueError("User not found")
-    paper = db.query(PaperRecord).options(defer(PaperRecord.processed_content)).filter(PaperRecord.paper_uuid == paper_uuid).first()
+    paper = db.query(PaperRecord).filter(PaperRecord.paper_uuid == paper_uuid).first()
     if not paper:
         raise ValueError("Paper not found")
     q = (
@@ -77,11 +76,10 @@ async def remove_list_entry(db: Session, auth_provider_id: str, paper_uuid: str)
 
 
 async def is_entry_present(db: Session, auth_provider_id: str, paper_uuid: str) -> Dict[str, bool]:
-    from sqlalchemy.orm import defer
     user = db.query(UserRow).filter(UserRow.id == auth_provider_id).first()
     if not user:
         raise ValueError("User not found")
-    paper = db.query(PaperRecord).options(defer(PaperRecord.processed_content)).filter(PaperRecord.paper_uuid == paper_uuid).first()
+    paper = db.query(PaperRecord).filter(PaperRecord.paper_uuid == paper_uuid).first()
     if not paper:
         return {"exists": False}
     exists = (
@@ -132,7 +130,7 @@ async def list_user_entries(db: Session, auth_provider_id: str) -> List[Dict[str
                 "paper_uuid": p.paper_uuid,
                 "title": getattr(p, "title", None),
                 "authors": getattr(p, "authors", None),
-                "thumbnail_data_url": getattr(p, "thumbnail_data_url", None),
+                "thumbnail_url": storage.get_thumbnail_url(p.paper_uuid),
                 "slug": slugs_by_uuid.get(p.paper_uuid),
                 "created_at": (ul.created_at.isoformat() if getattr(ul, "created_at", None) else None),
             }

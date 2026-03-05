@@ -51,7 +51,7 @@ export type JobDbStatus = {
   title?: string | null;
   authors?: string | null;
   numPages?: number | null;
-  thumbnailDataUrl?: string | null;
+  thumbnailUrl?: string | null;
   processingTimeSeconds?: number | null;
   totalCost?: number | null;
   avgCostPerPage?: number | null;

@@ -96,9 +96,9 @@ export default function UserListPage() {
                   return (
                     <tr key={it.paperUuid} className="border-b border-gray-100 dark:border-gray-800">
                       <td className="p-2 align-top">
-                        {it.thumbnailDataUrl ? (
+                        {it.thumbnailUrl ? (
                           <a href={href}>
-                            <img src={it.thumbnailDataUrl} alt="" className="w-20 h-14 object-cover rounded" />
+                            <img src={it.thumbnailUrl} alt="" className="w-20 h-14 object-cover rounded" />
                           </a>
                         ) : (
                           <div className="w-20 h-14 bg-gray-200 dark:bg-gray-700 rounded" />

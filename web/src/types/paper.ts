@@ -41,8 +41,8 @@ export interface Figure {
   locationPage: number;
   /** AI-generated explanation of the figure */
   explanation: string;
-  /** Base64 data URL of the figure image */
-  imageDataUrl: string;
+  /** Public storage URL of the figure image */
+  imageUrl: string;
   /** Pages that reference this figure */
   referencedOnPages: number[];
   /** Normalized bounding box coordinates */
@@ -59,8 +59,8 @@ export interface Table {
   locationPage: number;
   /** AI-generated explanation of the table */
   explanation: string;
-  /** Base64 data URL of the table image */
-  imageDataUrl: string;
+  /** Public storage URL of the table image */
+  imageUrl: string;
   /** Pages that reference this table */
   referencedOnPages: number[];
   /** Normalized bounding box coordinates */
@@ -94,8 +94,8 @@ export interface Section {
 export interface Page {
   /** Page number (1-indexed) */
   pageNumber: number;
-  /** Base64 data URL of the page image (deprecated) */
-  imageDataUrl?: string;
+  /** URL of the page image (deprecated) */
+  imageUrl?: string;
 }
 
 /**
@@ -175,12 +175,10 @@ export interface Paper {
   totalCost: number | null;
   /** Average cost per page in USD */
   avgCostPerPage: number | null;
-  /** Base64 data URL of thumbnail image */
-  thumbnailDataUrl: string | null;
+  /** Public storage URL of thumbnail image */
+  thumbnailUrl: string | null;
   /** External popularity metrics (JSON) */
   externalPopularitySignals: Record<string, unknown> | null;
-  /** Full processed content as JSON string */
-  processedContent: string | null;
   /** Hash of content for deduplication */
   contentHash: string | null;
   /** Direct URL to PDF file */
@@ -198,11 +196,9 @@ export interface MinimalPaper {
   title: string | null;
   /** Comma-separated author names */
   authors: string | null;
-  /** Base64 data URL of thumbnail image */
-  thumbnailDataUrl: string | null;
   /** URL slug for the paper page */
   slug: string | null;
-  /** URL to thumbnail endpoint (constructed from paperUuid) */
+  /** Public storage URL of thumbnail image */
   thumbnailUrl: string | null;
 }
 
@@ -246,8 +242,8 @@ export interface ProcessedPaperContent {
   authors: string | null;
   /** Full arXiv URL */
   arxivUrl: string | null;
-  /** Base64 data URL of thumbnail */
-  thumbnailDataUrl: string | null;
+  /** Public storage URL of thumbnail */
+  thumbnailUrl: string | null;
   /** AI-generated 5-minute summary */
   fiveMinuteSummary: string | null;
   /** Complete markdown content */
@@ -319,8 +315,8 @@ export interface JobDbStatus {
   authors: string | null;
   /** Number of pages in the PDF */
   numPages: number | null;
-  /** Base64 data URL of thumbnail */
-  thumbnailDataUrl: string | null;
+  /** Public storage URL of thumbnail */
+  thumbnailUrl: string | null;
   /** Processing time in seconds */
   processingTimeSeconds: number | null;
   /** Total processing cost in USD */

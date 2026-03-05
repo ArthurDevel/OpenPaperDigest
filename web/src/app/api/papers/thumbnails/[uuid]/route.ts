@@ -1,19 +1,12 @@
 /**
  * Paper Thumbnail API Route
  *
- * Returns the thumbnail image for a paper.
- * - GET: Fetch thumbnail binary image with aggressive caching
+ * Redirects to a signed Supabase Storage URL for a paper's thumbnail.
+ * - GET: Returns HTTP 302 redirect to signed storage thumbnail URL
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import * as papersService from '@/services/papers.service';
-
-// ============================================================================
-// CONSTANTS
-// ============================================================================
-
-// Cache for 1 year (immutable content)
-const CACHE_CONTROL = 'public, max-age=31536000, immutable';
+import { getPaperThumbnailUrl } from '@/lib/supabase/storage';
 
 // ============================================================================
 // TYPES
@@ -29,14 +22,15 @@ interface ErrorResponse {
 
 /**
  * GET handler for fetching a paper's thumbnail image.
+ * Redirects to a signed Supabase Storage URL.
  * @param request - The incoming Next.js request
  * @param params - Route params containing the paper UUID
- * @returns Binary image response with appropriate Content-Type and caching
+ * @returns HTTP 302 redirect to the signed storage thumbnail URL
  */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ uuid: string }> }
-): Promise<NextResponse<Buffer | ErrorResponse>> {
+): Promise<NextResponse> {
   try {
     const { uuid } = await params;
 
@@ -44,27 +38,13 @@ export async function GET(
       return NextResponse.json({ error: 'Missing UUID parameter' }, { status: 400 });
     }
 
-    const { data, mediaType } = await papersService.getThumbnail(uuid);
-
-    return new NextResponse(new Uint8Array(data), {
-      status: 200,
-      headers: {
-        'Content-Type': mediaType,
-        'Cache-Control': CACHE_CONTROL,
-      },
-    });
-  } catch (error) {
-    // Check for specific error messages from service
-    if (error instanceof Error) {
-      if (error.message.includes('not found')) {
-        return NextResponse.json({ error: 'Paper not found' }, { status: 404 });
-      }
-      if (error.message.includes('no thumbnail')) {
-        return NextResponse.json({ error: 'Paper has no thumbnail' }, { status: 404 });
-      }
+    const thumbnailUrl = await getPaperThumbnailUrl(uuid);
+    if (!thumbnailUrl) {
+      return NextResponse.json({ error: 'Thumbnail not found' }, { status: 404 });
     }
-
-    console.error('Error fetching thumbnail:', error);
+    return NextResponse.redirect(thumbnailUrl, 302);
+  } catch (error) {
+    console.error('Error redirecting to thumbnail:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

@@ -14,6 +14,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { getPaperThumbnailUrls } from '@/lib/supabase/storage';
 import { getPreferenceClusters, cosineSimilarity } from '@/services/interactions.service';
 import type { FeedResponse } from '@/types/recommendation';
 import type { MinimalPaper } from '@/types/paper';
@@ -55,7 +56,6 @@ interface CandidateRow {
   paperUuid: string;
   title: string | null;
   authors: string | null;
-  thumbnailDataUrl: string | null;
   finishedAt: Date;
   embedding: number[];
   externalPopularitySignals: Record<string, unknown> | null;
@@ -91,7 +91,7 @@ export async function getRankedFeed(
   const candidates = await fetchCandidates(excludePaperUuids, preferenceVectors, limit);
 
   // Score and rank
-  const scored = scoreCandidates(candidates, preferenceVectors);
+  const scored = await scoreCandidates(candidates, preferenceVectors);
 
   // Inject diversity
   const diversified = injectDiversity(scored, preferenceVectors);
@@ -105,11 +105,13 @@ export async function getRankedFeed(
   const paperUuids = pageItems.map((sp) => sp.paper.paperUuid);
   const slugMap = await fetchSlugMap(paperUuids);
 
-  // Attach slugs and thumbnailUrls
+  // Batch-fetch signed thumbnail URLs in a single API call
+  const thumbnailMap = await getPaperThumbnailUrls(paperUuids);
+
   const items: MinimalPaper[] = pageItems.map((sp) => ({
     ...sp.paper,
     slug: slugMap.get(sp.paper.paperUuid) ?? null,
-    thumbnailUrl: `/api/papers/thumbnails/${sp.paper.paperUuid}`,
+    thumbnailUrl: thumbnailMap.get(sp.paper.paperUuid) ?? null,
   }));
 
   return { items, page, limit, hasMore };
@@ -195,7 +197,6 @@ async function fetchCandidatesFromANN(
         paper_uuid: string;
         title: string | null;
         authors: string | null;
-        thumbnail_data_url: string | null;
         finished_at: string;
         embedding: string;
         external_popularity_signals: Record<string, unknown> | null;
@@ -215,7 +216,6 @@ async function fetchCandidatesFromANN(
           paperUuid: row.paper_uuid,
           title: row.title,
           authors: row.authors,
-          thumbnailDataUrl: row.thumbnail_data_url,
           finishedAt: new Date(row.finished_at),
           embedding: parseEmbeddingString(row.embedding),
           externalPopularitySignals: row.external_popularity_signals,
@@ -245,7 +245,7 @@ async function fetchColdStartCandidates(
   // Build query
   let query = supabase
     .from('papers')
-    .select('paper_uuid, title, authors, thumbnail_data_url, finished_at, external_popularity_signals')
+    .select('paper_uuid, title, authors, finished_at, external_popularity_signals')
     .eq('status', 'completed')
     .order('finished_at', { ascending: false })
     .limit(fetchCount);
@@ -266,14 +266,12 @@ async function fetchColdStartCandidates(
     paper_uuid: string;
     title: string | null;
     authors: string | null;
-    thumbnail_data_url: string | null;
     finished_at: string;
     external_popularity_signals: Record<string, unknown> | null;
   }[]).map((row) => ({
     paperUuid: row.paper_uuid,
     title: row.title,
     authors: row.authors,
-    thumbnailDataUrl: row.thumbnail_data_url,
     finishedAt: new Date(row.finished_at),
     embedding: [],
     externalPopularitySignals: row.external_popularity_signals,
@@ -288,13 +286,18 @@ async function fetchColdStartCandidates(
  * @param preferenceVectors - User's preference vectors (empty for cold start)
  * @returns Scored and sorted papers
  */
-function scoreCandidates(
+async function scoreCandidates(
   candidates: CandidateRow[],
   preferenceVectors: number[][]
-): ScoredPaper[] {
+): Promise<ScoredPaper[]> {
   const now = Date.now();
 
-  const scored = candidates.map((candidate) => {
+  // Batch-fetch all thumbnail URLs in one API call
+  const thumbnailMap = await getPaperThumbnailUrls(
+    candidates.map((c) => c.paperUuid)
+  );
+
+  const scored: ScoredPaper[] = candidates.map((candidate) => {
     // Recency: exponential decay with 7-day half-life
     const daysSinceFinished = (now - candidate.finishedAt.getTime()) / (1000 * 60 * 60 * 24);
     const recencyScore = Math.exp(-daysSinceFinished * Math.LN2 / RECENCY_HALF_LIFE_DAYS);
@@ -315,9 +318,8 @@ function scoreCandidates(
       paperUuid: candidate.paperUuid,
       title: candidate.title,
       authors: candidate.authors,
-      thumbnailDataUrl: candidate.thumbnailDataUrl,
       slug: null,
-      thumbnailUrl: null,
+      thumbnailUrl: thumbnailMap.get(candidate.paperUuid) ?? null,
     };
 
     return { paper, score, recencyScore, popularityScore, similarityScore } satisfies ScoredPaper;

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy.orm import Session, defer, undefer
+from sqlalchemy.orm import Session
 
 from papers.db.models import PaperRecord, PaperSlugRecord
 
@@ -12,7 +12,7 @@ from papers.db.models import PaperRecord, PaperSlugRecord
 
 ### DATABASE OPERATIONS ###
 
-def get_paper_record(db: Session, paper_uuid: str, by_arxiv_id: bool = False, load_content: bool = False) -> PaperRecord:
+def get_paper_record(db: Session, paper_uuid: str, by_arxiv_id: bool = False) -> PaperRecord:
     """
     Get paper record from database.
 
@@ -20,16 +20,11 @@ def get_paper_record(db: Session, paper_uuid: str, by_arxiv_id: bool = False, lo
         db: Database session
         paper_uuid: Paper UUID or arXiv ID
         by_arxiv_id: If True, search by arXiv ID instead of UUID
-        load_content: If True, load the processed_content column (heavy data)
 
     Raises:
         FileNotFoundError: If paper not found
     """
     query = db.query(PaperRecord)
-
-    # Defer the heavy processed_content column by default
-    if not load_content:
-        query = query.options(defer(PaperRecord.processed_content))
 
     if by_arxiv_id:
         record = query.filter(PaperRecord.arxiv_id == str(paper_uuid)).first()
@@ -53,9 +48,7 @@ def get_paper_by_content_hash(db: Session, content_hash: str) -> Optional[PaperR
     Returns:
         Optional[PaperRecord]: Paper record if found, None otherwise
     """
-    return db.query(PaperRecord).options(
-        defer(PaperRecord.processed_content)
-    ).filter(
+    return db.query(PaperRecord).filter(
         PaperRecord.content_hash == content_hash
     ).first()
 
@@ -106,8 +99,8 @@ def update_paper_record(db: Session, paper_uuid: str, paper_data) -> PaperRecord
 
 
 def list_paper_records(db: Session, statuses: Optional[List[str]], limit: int, offset: int = 0) -> List[PaperRecord]:
-    """List paper records from database (without heavy processed_content column)."""
-    q = db.query(PaperRecord).options(defer(PaperRecord.processed_content))
+    """List paper records from database."""
+    q = db.query(PaperRecord)
     if statuses:
         q = q.filter(PaperRecord.status.in_(statuses))
     q = q.order_by(PaperRecord.finished_at.desc()).limit(max(1, min(limit, 1000))).offset(offset)
@@ -116,7 +109,7 @@ def list_paper_records(db: Session, statuses: Optional[List[str]], limit: int, o
 
 def delete_paper_record(db: Session, paper_uuid: str) -> bool:
     """Delete paper record from database."""
-    record = db.query(PaperRecord).options(defer(PaperRecord.processed_content)).filter(PaperRecord.paper_uuid == str(paper_uuid)).first()
+    record = db.query(PaperRecord).filter(PaperRecord.paper_uuid == str(paper_uuid)).first()
     if not record:
         return False
     

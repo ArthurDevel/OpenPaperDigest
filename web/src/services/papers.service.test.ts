@@ -150,8 +150,16 @@ vi.mock('crypto', () => ({
   randomUUID: vi.fn(() => 'mock-uuid-1234'),
 }));
 
+// Mock storage helpers (async signed URL functions)
+vi.mock('@/lib/supabase/storage', () => ({
+  getPaperThumbnailUrl: vi.fn(async (uuid: string) => `https://storage.test/papers/${uuid}/thumbnail.png`),
+  getPaperFigureUrl: vi.fn(async (_uuid: string, figureId: string) => `https://storage.test/papers/${_uuid}/figures/${figureId}.png`),
+  downloadPaperContent: vi.fn(),
+  downloadPaperMarkdown: vi.fn(),
+  deletePaperAssets: vi.fn(),
+}));
+
 import {
-  getThumbnail,
   getPaperSummary,
   getPaperMarkdown,
   checkArxivExists,
@@ -159,6 +167,7 @@ import {
   listMinimalPapers,
   restartPaper,
 } from './papers.service';
+import { downloadPaperMarkdown } from '@/lib/supabase/storage';
 
 // ============================================================================
 // TESTS
@@ -177,89 +186,7 @@ describe('papers.service', () => {
   });
 
   // --------------------------------------------------------------------------
-  // getThumbnail - Base64 data URL parsing
-  // --------------------------------------------------------------------------
-  describe('getThumbnail', () => {
-    it('parses valid PNG data URL and returns buffer and mediaType', async () => {
-      const pngBase64 = 'iVBORw0KGgo='; // minimal valid base64
-      mockMaybeSingle.mockResolvedValue({
-        data: {
-          thumbnail_data_url: `data:image/png;base64,${pngBase64}`,
-        },
-        error: null,
-      });
-
-      const result = await getThumbnail('test-uuid');
-
-      expect(result.mediaType).toBe('image/png');
-      expect(result.data).toBeInstanceOf(Buffer);
-      expect(result.data.toString('base64')).toBe(pngBase64);
-    });
-
-    it('parses valid JPEG data URL and returns correct mediaType', async () => {
-      const jpegBase64 = '/9j/4AAQ';
-      mockMaybeSingle.mockResolvedValue({
-        data: {
-          thumbnail_data_url: `data:image/jpeg;base64,${jpegBase64}`,
-        },
-        error: null,
-      });
-
-      const result = await getThumbnail('test-uuid');
-
-      expect(result.mediaType).toBe('image/jpeg');
-    });
-
-    it('throws when paper not found', async () => {
-      mockMaybeSingle.mockResolvedValue({ data: null, error: null });
-
-      await expect(getThumbnail('nonexistent')).rejects.toThrow(
-        'Paper not found: nonexistent'
-      );
-    });
-
-    it('throws when paper has no thumbnail', async () => {
-      mockMaybeSingle.mockResolvedValue({
-        data: {
-          thumbnail_data_url: null,
-        },
-        error: null,
-      });
-
-      await expect(getThumbnail('test-uuid')).rejects.toThrow(
-        'Paper has no thumbnail: test-uuid'
-      );
-    });
-
-    it('throws when data URL format is invalid (missing data: prefix)', async () => {
-      mockMaybeSingle.mockResolvedValue({
-        data: {
-          thumbnail_data_url: 'image/png;base64,abc123',
-        },
-        error: null,
-      });
-
-      await expect(getThumbnail('test-uuid')).rejects.toThrow(
-        'Invalid thumbnail data URL format for paper: test-uuid'
-      );
-    });
-
-    it('throws when data URL format is invalid (missing base64)', async () => {
-      mockMaybeSingle.mockResolvedValue({
-        data: {
-          thumbnail_data_url: 'data:image/png,abc123',
-        },
-        error: null,
-      });
-
-      await expect(getThumbnail('test-uuid')).rejects.toThrow(
-        'Invalid thumbnail data URL format for paper: test-uuid'
-      );
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // getPaperSummary - Summary extraction from processedContent
+  // getPaperSummary - Summary extraction from summaries column
   // --------------------------------------------------------------------------
   describe('getPaperSummary', () => {
     it('extracts five_minute_summary from summaries column', async () => {
@@ -281,7 +208,7 @@ describe('papers.service', () => {
       expect(result.paperId).toBe('test-uuid');
       expect(result.title).toBe('Test Paper');
       expect(result.pageCount).toBe(10);
-      expect(result.thumbnailUrl).toBe('/api/papers/thumbnails/test-uuid');
+      expect(result.thumbnailUrl).toBe('https://storage.test/papers/test-uuid/thumbnail.png');
     });
 
     it('returns null fiveMinuteSummary when summaries is null', async () => {
@@ -331,68 +258,27 @@ describe('papers.service', () => {
   });
 
   // --------------------------------------------------------------------------
-  // getPaperMarkdown - Markdown extraction from processedContent
+  // getPaperMarkdown - Markdown from Supabase Storage
   // --------------------------------------------------------------------------
   describe('getPaperMarkdown', () => {
-    it('returns final_markdown from valid processedContent', async () => {
+    it('returns markdown from storage when paper exists', async () => {
       mockMaybeSingle.mockResolvedValue({
-        data: {
-          processed_content: JSON.stringify({
-            final_markdown: '# Paper Title\n\nContent here.',
-          }),
-        },
+        data: { paper_uuid: 'test-uuid' },
         error: null,
       });
+      vi.mocked(downloadPaperMarkdown).mockResolvedValue('# Paper Title\n\nContent here.');
 
       const result = await getPaperMarkdown('test-uuid');
 
       expect(result).toBe('# Paper Title\n\nContent here.');
+      expect(downloadPaperMarkdown).toHaveBeenCalledWith('test-uuid');
     });
 
-    it('returns empty string when final_markdown is not present', async () => {
-      mockMaybeSingle.mockResolvedValue({
-        data: {
-          processed_content: JSON.stringify({ other_field: 'value' }),
-        },
-        error: null,
-      });
-
-      const result = await getPaperMarkdown('test-uuid');
-
-      expect(result).toBe('');
-    });
-
-    it('throws when paper not found', async () => {
+    it('throws when paper not found in DB', async () => {
       mockMaybeSingle.mockResolvedValue({ data: null, error: null });
 
       await expect(getPaperMarkdown('nonexistent')).rejects.toThrow(
         'Paper not found: nonexistent'
-      );
-    });
-
-    it('throws when paper has no processedContent', async () => {
-      mockMaybeSingle.mockResolvedValue({
-        data: {
-          processed_content: null,
-        },
-        error: null,
-      });
-
-      await expect(getPaperMarkdown('test-uuid')).rejects.toThrow(
-        'Paper has no processed content: test-uuid'
-      );
-    });
-
-    it('throws when processedContent has invalid JSON', async () => {
-      mockMaybeSingle.mockResolvedValue({
-        data: {
-          processed_content: 'not valid json {{{',
-        },
-        error: null,
-      });
-
-      await expect(getPaperMarkdown('test-uuid')).rejects.toThrow(
-        'Failed to parse processed content for paper: test-uuid'
       );
     });
   });
@@ -548,9 +434,9 @@ describe('papers.service', () => {
       mockOrder.mockImplementationOnce(() => ({
         range: () => Promise.resolve({
           data: [
-            { paper_uuid: 'uuid-1', title: 'Paper 1', authors: 'Author 1', thumbnail_data_url: null },
-            { paper_uuid: 'uuid-2', title: 'Paper 2', authors: 'Author 2', thumbnail_data_url: 'data:image/png;base64,abc' },
-            { paper_uuid: 'uuid-3', title: 'Paper 3', authors: 'Author 3', thumbnail_data_url: null }, // extra item
+            { paper_uuid: 'uuid-1', title: 'Paper 1', authors: 'Author 1' },
+            { paper_uuid: 'uuid-2', title: 'Paper 2', authors: 'Author 2' },
+            { paper_uuid: 'uuid-3', title: 'Paper 3', authors: 'Author 3' }, // extra item
           ],
           error: null,
         }),
@@ -589,7 +475,7 @@ describe('papers.service', () => {
       // Mock for papers query
       mockOrder.mockImplementationOnce(() => ({
         range: () => Promise.resolve({
-          data: [{ paper_uuid: 'uuid-1', title: 'Paper 1', authors: null, thumbnail_data_url: null }],
+          data: [{ paper_uuid: 'uuid-1', title: 'Paper 1', authors: null }],
           error: null,
         }),
       }));
@@ -609,7 +495,7 @@ describe('papers.service', () => {
       // Mock for papers query
       mockOrder.mockImplementationOnce(() => ({
         range: () => Promise.resolve({
-          data: [{ paper_uuid: 'uuid-1', title: 'Paper 1', authors: null, thumbnail_data_url: null }],
+          data: [{ paper_uuid: 'uuid-1', title: 'Paper 1', authors: null }],
           error: null,
         }),
       }));
@@ -626,7 +512,7 @@ describe('papers.service', () => {
       // Mock for papers query - only 1 item returned (less than limit+1)
       mockOrder.mockImplementationOnce(() => ({
         range: () => Promise.resolve({
-          data: [{ paper_uuid: 'uuid-1', title: 'Paper', authors: null, thumbnail_data_url: null }],
+          data: [{ paper_uuid: 'uuid-1', title: 'Paper', authors: null }],
           error: null,
         }),
       }));
@@ -668,7 +554,6 @@ describe('papers.service', () => {
           title: 'Test Paper',
           authors: 'Author',
           num_pages: 10,
-          thumbnail_data_url: null,
           processing_time_seconds: null,
           total_cost: null,
           avg_cost_per_page: null,
@@ -736,7 +621,6 @@ describe('papers.service', () => {
           title: 'Test Paper',
           authors: 'Author',
           num_pages: 10,
-          thumbnail_data_url: null,
           processing_time_seconds: null,
           total_cost: null,
           avg_cost_per_page: null,
@@ -773,7 +657,6 @@ describe('papers.service', () => {
           title: null,
           authors: null,
           num_pages: null,
-          thumbnail_data_url: null,
           processing_time_seconds: null,
           total_cost: null,
           avg_cost_per_page: null,

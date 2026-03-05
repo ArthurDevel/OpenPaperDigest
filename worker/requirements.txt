@@ -36,5 +36,8 @@ email-validator
 # pgvector support for embedding storage
 pgvector
 
+# Supabase Storage SDK
+supabase>=2.0.0
+
 # Fix protobuf version conflicts
 protobuf==3.20.3

@@ -6,6 +6,11 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
+// NOTE: This file is auto-generated from the Supabase schema.
+// After the storage migration runs and the processed_content / thumbnail_data_url
+// columns are dropped, regenerate this file via:
+//   npx supabase gen types typescript --project-id <project-id> > src/lib/types/database.types.ts
+
 export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
@@ -104,12 +109,10 @@ export type Database = {
           num_pages: number | null
           paper_uuid: string
           pdf_url: string | null
-          processed_content: string | null
           processing_time_seconds: number | null
           started_at: string | null
           status: string
           summaries: Json | null
-          thumbnail_data_url: string | null
           title: string | null
           total_cost: number | null
           updated_at: string
@@ -131,12 +134,10 @@ export type Database = {
           num_pages?: number | null
           paper_uuid: string
           pdf_url?: string | null
-          processed_content?: string | null
           processing_time_seconds?: number | null
           started_at?: string | null
           status: string
           summaries?: Json | null
-          thumbnail_data_url?: string | null
           title?: string | null
           total_cost?: number | null
           updated_at?: string
@@ -158,12 +159,10 @@ export type Database = {
           num_pages?: number | null
           paper_uuid?: string
           pdf_url?: string | null
-          processed_content?: string | null
           processing_time_seconds?: number | null
           started_at?: string | null
           status?: string
           summaries?: Json | null
-          thumbnail_data_url?: string | null
           title?: string | null
           total_cost?: number | null
           updated_at?: string
@@ -307,7 +306,6 @@ export type Database = {
           finished_at: string
           paper_uuid: string
           similarity: number
-          thumbnail_data_url: string
           title: string
         }[]
       }
