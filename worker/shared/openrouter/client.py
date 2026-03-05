@@ -401,10 +401,10 @@ async def get_generation_cost(generation_id: str) -> float:
 
 
 async def get_embeddings(
-    texts: list[str],
+    texts: List[str],
     model: str = "openai/text-embedding-3-small",
-    dimensions: int | None = None,
-) -> list[list[float]]:
+    dimensions: Optional[int] = None,
+) -> List[List[float]]:
     """
     Generate embeddings for a list of texts via the OpenRouter /embeddings endpoint.
 
@@ -414,7 +414,7 @@ async def get_embeddings(
         dimensions: Optional dimension reduction (model-dependent).
 
     Returns:
-        list[list[float]]: One embedding vector per input text, in the same order.
+        List[List[float]]: One embedding vector per input text, in the same order.
     """
     json_payload: Dict[str, Any] = {
         "model": model,

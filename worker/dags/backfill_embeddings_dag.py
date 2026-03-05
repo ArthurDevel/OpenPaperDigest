@@ -55,7 +55,7 @@ def database_session():
         session.close()
 
 
-def fetch_papers_without_embeddings(batch_size: int = BATCH_SIZE) -> list[dict]:
+def fetch_papers_without_embeddings(batch_size: int = BATCH_SIZE) -> List[Dict]:
     """
     Query papers where status='completed' AND embedding IS NULL.
 
@@ -63,7 +63,7 @@ def fetch_papers_without_embeddings(batch_size: int = BATCH_SIZE) -> list[dict]:
         batch_size: Maximum number of papers to fetch.
 
     Returns:
-        list[dict]: List of dicts with paper_uuid, title, and summaries.
+        List[Dict]: List of dicts with paper_uuid, title, and summaries.
     """
     with database_session() as session:
         rows = session.query(
@@ -85,7 +85,7 @@ def fetch_papers_without_embeddings(batch_size: int = BATCH_SIZE) -> list[dict]:
         ]
 
 
-def generate_and_store_embeddings(papers: list[dict]) -> int:
+def generate_and_store_embeddings(papers: List[Dict]) -> int:
     """
     Generate embeddings for a batch of papers and update the database.
 

@@ -151,7 +151,9 @@ async function fetchCandidates(
   limit: number
 ): Promise<CandidateRow[]> {
   if (preferenceVectors.length > 0) {
-    return fetchCandidatesFromANN(excludePaperUuids, preferenceVectors);
+    const annCandidates = await fetchCandidatesFromANN(excludePaperUuids, preferenceVectors);
+    // Fall back to cold start if ANN returns nothing (e.g. no papers have embeddings yet)
+    if (annCandidates.length > 0) return annCandidates;
   }
   return fetchColdStartCandidates(excludePaperUuids, limit);
 }
