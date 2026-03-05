@@ -32,12 +32,8 @@ class PaperRecord(Base):
     processing_time_seconds = Column(Float, nullable=True)
     total_cost = Column(Float, nullable=True)
     avg_cost_per_page = Column(Float, nullable=True)
-    # Base64 data URL of a 400x400 PNG thumbnail cropped from the top square of the first page
-    thumbnail_data_url = Column(Text, nullable=True)
     # External popularity signals stored as JSON
     external_popularity_signals = Column(JSON, nullable=True)
-    # Complete processed paper JSON (replaces file system storage)
-    processed_content = Column(Text, nullable=True)
     # Extracted summaries stored as JSON dict (e.g. {"five_minute_summary": "..."})
     summaries = Column(JSON, nullable=True)
     # PDF content hash for non-arXiv papers (SHA-256)

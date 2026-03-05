@@ -85,7 +85,7 @@ class Paper(BaseModel):
     processing_time_seconds: Optional[float] = None
     total_cost: Optional[float] = None
     avg_cost_per_page: Optional[float] = None
-    thumbnail_data_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
     content_hash: Optional[str] = None
     pdf_url: Optional[str] = None
 
@@ -150,7 +150,6 @@ class Paper(BaseModel):
             processing_time_seconds=self.processing_time_seconds,
             total_cost=self.total_cost,
             avg_cost_per_page=self.avg_cost_per_page,
-            thumbnail_data_url=self.thumbnail_data_url,
             external_popularity_signals=signals_json,
             content_hash=self.content_hash,
             pdf_url=self.pdf_url,

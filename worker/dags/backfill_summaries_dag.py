@@ -1,18 +1,17 @@
 """
-Backfill summaries column from processed_content.
+Backfill summaries column from Supabase Storage metadata.
 
-Extracts five_minute_summary from the processed_content JSON blob and writes
-it into the new summaries JSON column, one paper at a time to avoid OOM.
+Downloads metadata.json from storage for each paper that has no summaries column
+populated, extracts five_minute_summary, and writes it to the summaries column.
 
 Responsibilities:
-- Find papers with processed_content but no summaries
-- Extract five_minute_summary one row at a time
+- Find papers with status=completed but no summaries
+- Download metadata from storage one paper at a time
 - Update summaries column with commit per batch
 - Generate summary report
 """
 
 import sys
-import json
 import pendulum
 from contextlib import contextmanager
 from typing import List, Dict
@@ -24,12 +23,15 @@ sys.path.insert(0, '/opt/airflow')
 
 from shared.db import SessionLocal
 from papers.db.models import PaperRecord
+import papers.storage as storage
+
 
 # ============================================================================
 # CONSTANTS
 # ============================================================================
 
 BATCH_SIZE = 5
+
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -68,16 +70,15 @@ def database_session():
     doc_md="""
     ### Backfill Summaries DAG
 
-    **ONE-TIME USE DAG**: Extracts `five_minute_summary` from the `processed_content`
-    JSON blob into the new `summaries` column for all existing papers.
+    **ONE-TIME USE DAG**: Extracts `five_minute_summary` from storage metadata
+    into the `summaries` column for all existing papers.
 
-    **Why:** The homepage fetches summaries for 20 papers on load. Previously each
-    call read the full ~2MB `processed_content` blob just to extract one field.
-    The new `summaries` column stores only the summary dict (~4KB), making reads fast.
+    **Why:** The homepage fetches summaries for 20 papers on load. The `summaries`
+    column stores only the summary dict (~4KB), making reads fast.
 
     **Safety:**
     - Only processes papers where summaries IS NULL
-    - Processes one paper at a time to avoid OOM (processed_content is ~2MB per row)
+    - Processes one paper at a time to avoid OOM
     - Batch commits every 5 papers
     - Can be re-run safely (skips already-backfilled rows)
     """,
@@ -85,47 +86,46 @@ def database_session():
 def backfill_summaries_dag():
 
     @task
-    def find_papers_to_backfill() -> List[int]:
+    def find_papers_to_backfill() -> List[str]:
         """
-        Find paper IDs that need summaries backfilled.
-        Only fetches IDs to keep memory low.
+        Find paper UUIDs that need summaries backfilled.
+        Only fetches UUIDs to keep memory low.
 
         Returns:
-            List[int]: Paper IDs to process
+            List[str]: Paper UUIDs to process
         """
         print("Scanning for papers without summaries...")
 
         with database_session() as session:
-            rows = session.query(PaperRecord.id).filter(
+            rows = session.query(PaperRecord.paper_uuid).filter(
                 PaperRecord.status == 'completed',
-                PaperRecord.processed_content.isnot(None),
                 PaperRecord.summaries.is_(None),
             ).order_by(PaperRecord.id).all()
 
-            paper_ids = [row[0] for row in rows]
+            paper_uuids = [row[0] for row in rows]
 
-        print(f"Found {len(paper_ids)} papers to backfill")
-        return paper_ids
+        print(f"Found {len(paper_uuids)} papers to backfill")
+        return paper_uuids
 
     @task
-    def backfill_batch(paper_ids: List[int]) -> Dict[str, int]:
+    def backfill_batch(paper_uuids: List[str]) -> Dict[str, int]:
         """
         Backfill summaries one paper at a time in small batches.
 
-        Loads processed_content for a single row, extracts five_minute_summary,
-        writes to summaries column, then moves on. Commits every BATCH_SIZE rows.
+        Downloads metadata.json from storage, extracts five_minute_summary,
+        writes to summaries column. Commits every BATCH_SIZE rows.
 
         Args:
-            paper_ids: List of paper IDs to process
+            paper_uuids: List of paper UUIDs to process
 
         Returns:
             Dict with backfilled/skipped/failed counts
         """
-        if not paper_ids:
+        if not paper_uuids:
             print("No papers to backfill")
             return {"backfilled": 0, "skipped": 0, "failed": 0}
 
-        total = len(paper_ids)
+        total = len(paper_uuids)
         backfilled = 0
         skipped = 0
         failed = 0
@@ -133,36 +133,37 @@ def backfill_summaries_dag():
         print(f"Processing {total} papers in batches of {BATCH_SIZE}...")
 
         for batch_start in range(0, total, BATCH_SIZE):
-            batch = paper_ids[batch_start:batch_start + BATCH_SIZE]
+            batch = paper_uuids[batch_start:batch_start + BATCH_SIZE]
 
             with database_session() as session:
-                for paper_id in batch:
+                for paper_uuid in batch:
                     try:
-                        paper = session.query(PaperRecord).filter(
-                            PaperRecord.id == paper_id
-                        ).first()
+                        # Download metadata from storage
+                        stored = storage.download_paper_content(paper_uuid)
+                        metadata = stored.metadata
+                        # The five_minute_summary may be in metadata or not
+                        # In legacy format it was at the top level of processed_content
+                        # In storage it should be in metadata.json or already in summaries
+                        five_minute_summary = metadata.get("five_minute_summary")
 
-                        if not paper or not paper.processed_content:
+                        if not five_minute_summary:
                             skipped += 1
-                            session.expunge_all()
                             continue
 
-                        content = json.loads(paper.processed_content)
-                        five_minute_summary = content.get("five_minute_summary")
+                        paper = session.query(PaperRecord).filter(
+                            PaperRecord.paper_uuid == paper_uuid
+                        ).first()
 
-                        if five_minute_summary:
-                            paper.summaries = {"five_minute_summary": five_minute_summary}
-                            backfilled += 1
-                        else:
+                        if not paper:
                             skipped += 1
+                            continue
 
-                        # Free memory before next row
-                        session.expunge_all()
+                        paper.summaries = {"five_minute_summary": five_minute_summary}
+                        backfilled += 1
 
-                    except (json.JSONDecodeError, TypeError) as e:
-                        print(f"  SKIP id={paper_id}: {e}")
+                    except Exception as e:
+                        print(f"  SKIP uuid={paper_uuid}: {e}")
                         failed += 1
-                        session.expunge_all()
                         continue
 
             processed = batch_start + len(batch)
@@ -187,8 +188,8 @@ def backfill_summaries_dag():
         print("=" * 50)
 
     # Task dependencies
-    paper_ids = find_papers_to_backfill()
-    results = backfill_batch(paper_ids)
+    paper_uuids = find_papers_to_backfill()
+    results = backfill_batch(paper_uuids)
     generate_report(results)
 
 

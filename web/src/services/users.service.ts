@@ -7,6 +7,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { getPaperThumbnailUrl } from '@/lib/supabase/storage';
 import type {
   CreatedResponse,
   DeletedResponse,
@@ -153,8 +154,7 @@ export async function getList(authProviderId: string): Promise<UserListItem[]> {
       papers (
         paper_uuid,
         title,
-        authors,
-        thumbnail_data_url
+        authors
       )
     `)
     .eq('user_id', authProviderId)
@@ -165,7 +165,7 @@ export async function getList(authProviderId: string): Promise<UserListItem[]> {
   // Type the join result explicitly (Supabase doesn't infer nested selects well)
   const listItems = (data ?? []) as Array<{
     created_at: string;
-    papers: { paper_uuid: string; title: string | null; authors: string | null; thumbnail_data_url: string | null } | null;
+    papers: { paper_uuid: string; title: string | null; authors: string | null } | null;
   }>;
 
   // Get paper_uuids to fetch slugs separately
@@ -193,14 +193,17 @@ export async function getList(authProviderId: string): Promise<UserListItem[]> {
     }
   }
 
-  return listItems.map((item) => ({
-    paperUuid: item.papers?.paper_uuid ?? '',
-    title: item.papers?.title ?? null,
-    authors: item.papers?.authors ?? null,
-    thumbnailDataUrl: item.papers?.thumbnail_data_url ?? null,
-    slug: item.papers?.paper_uuid ? slugMap.get(item.papers.paper_uuid) ?? null : null,
-    createdAt: new Date(item.created_at),
-  }));
+  // Generate signed thumbnail URLs in parallel
+  return Promise.all(
+    listItems.map(async (item) => ({
+      paperUuid: item.papers?.paper_uuid ?? '',
+      title: item.papers?.title ?? null,
+      authors: item.papers?.authors ?? null,
+      thumbnailUrl: item.papers?.paper_uuid ? await getPaperThumbnailUrl(item.papers.paper_uuid) : null,
+      slug: item.papers?.paper_uuid ? slugMap.get(item.papers.paper_uuid) ?? null : null,
+      createdAt: new Date(item.created_at),
+    }))
+  );
 }
 
 /**

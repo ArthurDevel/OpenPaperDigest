@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import base64
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-import json as _json
 import re
 import unicodedata
 import uuid
@@ -17,6 +18,9 @@ from papers.db.client import (
 )
 from papers.db.models import PaperRecord
 from paperprocessor.models import ProcessedDocument
+import papers.storage as storage
+
+logger = logging.getLogger(__name__)
 
 
 ### HELPER FUNCTIONS ###
@@ -123,6 +127,79 @@ def create_paper_slug(db: Session, paper: Paper) -> PaperSlug:
     created_slug_record = create_paper_slug_record(db, new_slug_string, paper.paper_uuid)
     
     return PaperSlug.model_validate(created_slug_record)
+
+
+def _decode_data_url(data_url: str) -> bytes:
+    """Decode a base64 data URL to raw bytes.
+
+    Strips the 'data:<mime>;base64,' prefix and base64-decodes the remainder.
+
+    Args:
+        data_url: Full data URL string (e.g. "data:image/png;base64,iVBOR...")
+
+    Returns:
+        Raw decoded bytes.
+    """
+    _, b64_data = data_url.split(",", 1)
+    return base64.b64decode(b64_data)
+
+
+def _upload_to_storage(paper_uuid: str, result_dict: Dict[str, Any]) -> None:
+    """Upload paper assets to Supabase Storage from the processed result dict.
+
+    Extracts thumbnail, markdown, sections, figures, and metadata from the
+    result dict and uploads them via the storage module.
+
+    Args:
+        paper_uuid: UUID of the paper.
+        result_dict: The fully-built legacy result dict from save_paper().
+    """
+    # Decode thumbnail from base64 data URL to raw PNG bytes
+    thumbnail_data_url = result_dict.get("thumbnail_data_url")
+    if not thumbnail_data_url:
+        raise ValueError("Cannot upload to storage: no thumbnail_data_url in result")
+    thumbnail_bytes = _decode_data_url(thumbnail_data_url)
+
+    # Extract raw OCR markdown
+    final_markdown = result_dict.get("final_markdown", "")
+
+    # Extract sections array
+    sections = result_dict.get("sections", [])
+
+    # Build figures list with decoded image bytes
+    figures = []
+    for fig in result_dict.get("figures", []):
+        image_data_url = fig.get("image_data_url", "")
+        if not image_data_url:
+            continue
+
+        figures.append({
+            "identifier": fig["figure_identifier"],
+            "image_bytes": _decode_data_url(image_data_url),
+            "short_id": fig.get("short_id"),
+            "bounding_box": fig.get("bounding_box"),
+            "location_page": fig.get("location_page"),
+            "referenced_on_pages": fig.get("referenced_on_pages"),
+            "explanation": fig.get("explanation"),
+        })
+
+    # Build metadata dict from usage/cost info
+    metadata = {
+        "usage_summary": result_dict.get("usage_summary", {}),
+        "processing_time_seconds": result_dict.get("processing_time_seconds", 0.0),
+        "num_pages": result_dict.get("num_pages", 0),
+        "total_cost": result_dict.get("total_cost", 0.0),
+        "avg_cost_per_page": result_dict.get("avg_cost_per_page", 0.0),
+    }
+
+    storage.upload_paper_assets(
+        paper_uuid=paper_uuid,
+        thumbnail_bytes=thumbnail_bytes,
+        final_markdown=final_markdown,
+        sections=sections,
+        figures=figures,
+        metadata=metadata,
+    )
 
 
 ### MAIN FUNCTIONS ###
@@ -268,7 +345,7 @@ def list_minimal_papers(db: Session, page: Optional[int] = None, limit: Optional
             "paper_uuid": record.paper_uuid,
             "title": record.title,
             "authors": record.authors,
-            "thumbnail_url": f"/api/papers/thumbnails/{record.paper_uuid}" if record.thumbnail_data_url else None,
+            "thumbnail_url": storage.get_thumbnail_url(record.paper_uuid),
         }
 
         # Add slug if available
@@ -292,18 +369,27 @@ def list_minimal_papers(db: Session, page: Optional[int] = None, limit: Optional
 
 def delete_paper(db: Session, paper_uuid: str) -> bool:
     """
-    Delete a paper from the database.
-    
+    Delete a paper and its storage assets.
+
+    Cleans up Supabase Storage files first (best-effort), then removes the
+    database row and tombstones associated slugs.
+
     Args:
         db: Active database session
         paper_uuid: UUID of paper to delete
-        
+
     Returns:
         bool: True if paper was deleted, False if not found
     """
     row = get_paper_record(db, str(paper_uuid))
     if not row:
         return False
+
+    # Delete storage assets first (best-effort: if this fails, still delete DB row)
+    try:
+        storage.delete_paper_assets(str(paper_uuid))
+    except Exception:
+        logger.warning("Failed to delete storage assets for paper %s, proceeding with DB deletion", paper_uuid)
 
     # Remove DB row
     db.delete(row)
@@ -427,10 +513,10 @@ def save_paper(db: Session, processed_content: ProcessedDocument) -> Paper:
     if result_dict["total_cost"] and result_dict["num_pages"] > 0:
         result_dict["avg_cost_per_page"] = result_dict["total_cost"] / result_dict["num_pages"]
     
-    # Step 3: Convert JSON to string for database storage
-    json_string = _json.dumps(result_dict, ensure_ascii=False)
-    
-    # Step 4: Create or update paper record in database
+    # Step 3: Upload paper assets to Supabase Storage (must succeed)
+    _upload_to_storage(paper_uuid, result_dict)
+
+    # Step 4: Create or update paper record in database (metadata only)
     paper_data = {
         'paper_uuid': paper_uuid,
         'arxiv_id': arxiv_id,
@@ -440,18 +526,16 @@ def save_paper(db: Session, processed_content: ProcessedDocument) -> Paper:
         'num_pages': len(processed_content.pages),
         'total_cost': result_dict["total_cost"],
         'avg_cost_per_page': result_dict["avg_cost_per_page"],
-        'thumbnail_data_url': result_dict["thumbnail_data_url"],
-        'processed_content': json_string,
         'summaries': {"five_minute_summary": processed_content.five_minute_summary},
         'embedding': processed_content.embedding,
         'finished_at': datetime.utcnow(),
     }
-    
+
     if is_update:
         record = update_paper_record(db, paper_uuid, paper_data)
     else:
         record = create_paper_record(db, paper_data)
-    
+
     return Paper.model_validate(record)
 
 
@@ -472,67 +556,47 @@ def get_paper_metadata(db: Session, paper_uuid: str) -> Paper:
 def get_paper(db: Session, paper_uuid: str) -> Paper:
     """
     Get complete paper by UUID.
-    Loads both database metadata and full processing results from database.
-    
+
+    Loads relational metadata from the database and full content
+    (sections, figures metadata) from Supabase Storage.
+
+    Args:
+        db: Active database session.
+        paper_uuid: UUID of the paper to retrieve.
+
     Returns:
-        Paper: Complete paper with metadata and content (pages, sections)
-        
+        Paper: Complete paper with metadata, sections, and thumbnail/figure URLs.
+
     Raises:
-        FileNotFoundError: If paper with UUID not found or no processed content
+        FileNotFoundError: If paper with UUID not found in DB.
+        RuntimeError: If storage download fails (no fallback).
     """
-    # Step 1: Get database record with processed_content loaded
-    record = get_paper_record(db, paper_uuid, load_content=True)
-    
-    # Step 2: Check for processed content in database
-    if not record.processed_content:
-        raise FileNotFoundError(f"No processed content found for paper {paper_uuid}")
-    
-    # Step 3: Parse JSON from database
-    try:
-        result_dict = _json.loads(record.processed_content)
-    except Exception as e:
-        raise RuntimeError(f"Failed to parse processed content for paper {paper_uuid}: {e}")
-    
-    # Step 4: Convert database record to Paper DTO with basic metadata
+    # Step 1: Load relational metadata from database
+    record = get_paper_record(db, paper_uuid)
     paper = Paper.model_validate(record)
-    
-    # Step 5: Convert legacy JSON format to our DTOs
-    
-    # Convert pages from legacy format
-    pages = []
-    for page_data in result_dict.get("pages", []):
-        # Extract base64 from data URL
-        image_data_url = page_data.get("image_data_url", "")
-        if image_data_url.startswith("data:image/png;base64,"):
-            img_base64 = image_data_url[len("data:image/png;base64,"):]
-        else:
-            img_base64 = ""
-        
-        page = Page(
-            page_number=page_data.get("page_number", 0),
-            img_base64=img_base64
-        )
-        pages.append(page)
-    
-    # Convert sections from legacy format
+
+    # Step 2: Download content from Supabase Storage
+    stored = storage.download_paper_content(paper_uuid)
+
+    # Step 3: Convert stored sections to Section DTOs
     sections = []
-    for idx, section_data in enumerate(result_dict.get("sections", [])):
+    for idx, section_data in enumerate(stored.sections):
         section = Section(
             order_index=idx,
-            rewritten_content=section_data["rewritten_content"],  # Required field - fail if missing
-            start_page=section_data.get("start_page"),  # Optional - None if missing
-            end_page=section_data.get("end_page"),  # Optional - None if missing
-            level=section_data.get("level"),  # Optional - None if missing
-            section_title=section_data.get("section_title"),  # Optional - None if missing
-            summary=section_data.get("summary"),  # Optional - None if missing
-            subsections=section_data.get("subsections", [])  # Default to empty list for this one
+            rewritten_content=section_data["rewritten_content"],
+            start_page=section_data.get("start_page"),
+            end_page=section_data.get("end_page"),
+            level=section_data.get("level"),
+            section_title=section_data.get("section_title"),
+            summary=section_data.get("summary"),
+            subsections=section_data.get("subsections", []),
         )
         sections.append(section)
-    
-    # Step 6: Add content to paper DTO
-    paper.pages = pages
+
+    # Step 4: Populate paper DTO with storage data
     paper.sections = sections
-    
+    paper.thumbnail_url = storage.get_thumbnail_url(paper_uuid)
+
     return paper
 
 

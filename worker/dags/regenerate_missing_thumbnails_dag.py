@@ -1,20 +1,33 @@
+"""
+Regenerate missing thumbnails and upload to Supabase Storage.
+
+Finds completed papers that are missing thumbnail.png in storage, downloads
+their PDF from arXiv, generates a thumbnail, and uploads to storage.
+
+Responsibilities:
+- Find completed papers missing thumbnails in storage
+- Download PDF and generate thumbnail from first page
+- Upload thumbnail.png to Supabase Storage
+"""
+
 import sys
 import pendulum
-import json
 from contextlib import contextmanager
 from typing import List, Dict
 
 from airflow.decorators import dag, task
 from sqlalchemy.orm import Session
 
-# Add project root to Python path
 sys.path.insert(0, '/opt/airflow')
 
 from shared.db import SessionLocal
 from papers.db.models import PaperRecord
+import papers.storage as storage
 
 
-### DATABASE HELPERS ###
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
 
 @contextmanager
 def database_session():
@@ -35,7 +48,9 @@ def database_session():
         session.close()
 
 
-### DAG DEFINITION ###
+# ============================================================================
+# DAG DEFINITION
+# ============================================================================
 
 @dag(
     dag_id="regenerate_missing_thumbnails",
@@ -47,125 +62,125 @@ def database_session():
     doc_md="""
     ### Regenerate Missing Thumbnails DAG
 
-    One-time fix to regenerate thumbnails for papers that are missing thumbnail_data_url.
+    One-time fix to regenerate thumbnails for papers missing them in Supabase Storage.
 
     **What it does:**
-    1. Finds all completed papers missing thumbnail_data_url
-    2. Extracts thumbnail from processed_content first page image
-    3. Updates database with thumbnail data
-
-    **Note:** This reads from processed_content which contains the first page image.
+    1. Finds all completed papers missing thumbnail.png in storage
+    2. Downloads PDF from arXiv
+    3. Generates a 400x400 thumbnail from the first page
+    4. Uploads thumbnail.png to storage
     """,
 )
 def regenerate_missing_thumbnails_dag():
 
     @task
-    def find_papers_missing_thumbnails() -> List[str]:
+    def find_papers_missing_thumbnails() -> List[Dict[str, str]]:
         """
-        Find all completed papers missing thumbnails.
+        Find all completed papers missing thumbnails in storage.
 
         Returns:
-            List[str]: List of paper UUIDs
+            List[Dict]: List of dicts with paper_uuid and arxiv_url
         """
-        print("Scanning for papers missing thumbnails...")
+        print("Scanning for papers missing thumbnails in storage...")
 
-        paper_uuids = []
+        papers_to_fix = []
+        bucket = storage._bucket()
 
         with database_session() as session:
-            papers = session.query(PaperRecord).filter(
+            papers = session.query(
+                PaperRecord.paper_uuid,
+                PaperRecord.arxiv_url
+            ).filter(
                 PaperRecord.status == 'completed',
-                PaperRecord.processed_content.isnot(None),
-                (PaperRecord.thumbnail_data_url.is_(None) | (PaperRecord.thumbnail_data_url == ''))
             ).all()
 
-            paper_uuids = [p.paper_uuid for p in papers]
+            print(f"Found {len(papers)} completed papers, checking storage...")
 
-            print(f"Found {len(paper_uuids)} papers missing thumbnails")
+            for paper_uuid, arxiv_url in papers:
+                try:
+                    # Check if thumbnail exists by attempting to download
+                    bucket.download(f"{paper_uuid}/thumbnail.png")
+                except Exception:
+                    # Thumbnail missing in storage
+                    if arxiv_url:
+                        papers_to_fix.append({
+                            'paper_uuid': paper_uuid,
+                            'arxiv_url': arxiv_url,
+                        })
 
-        return paper_uuids
+        print(f"Found {len(papers_to_fix)} papers missing thumbnails")
+        return papers_to_fix
 
 
     @task
-    def regenerate_thumbnails(paper_uuids: List[str]) -> Dict[str, int]:
+    def regenerate_thumbnails(papers_to_fix: List[Dict[str, str]]) -> Dict[str, int]:
         """
-        Regenerate thumbnails from PDF files.
-
-        Downloads PDFs from arXiv, converts first page to image, creates thumbnail.
+        Regenerate thumbnails from PDF files and upload to storage.
 
         Args:
-            paper_uuids: List of paper UUIDs to process
+            papers_to_fix: List of dicts with paper_uuid and arxiv_url
 
         Returns:
             Dict with success/failure counts
         """
         import requests
         import io
-        import base64
         from PIL import Image
         from pdf2image import convert_from_bytes
 
-        if not paper_uuids:
+        if not papers_to_fix:
             print("No papers to process")
             return {'success': 0, 'failed': 0}
 
-        print(f"\nRegenerating thumbnails for {len(paper_uuids)} papers...")
+        print(f"\nRegenerating thumbnails for {len(papers_to_fix)} papers...")
 
         success_count = 0
         failed_count = 0
+        bucket = storage._bucket()
 
-        with database_session() as session:
-            for i, paper_uuid in enumerate(paper_uuids, 1):
-                try:
-                    print(f"[{i}/{len(paper_uuids)}] Processing {paper_uuid}...")
+        for i, paper_info in enumerate(papers_to_fix, 1):
+            paper_uuid = paper_info['paper_uuid']
+            arxiv_url = paper_info['arxiv_url']
 
-                    paper = session.query(PaperRecord).filter(
-                        PaperRecord.paper_uuid == paper_uuid
-                    ).first()
+            try:
+                print(f"[{i}/{len(papers_to_fix)}] Processing {paper_uuid}...")
 
-                    if not paper:
-                        print(f"  Paper not found, skipping")
-                        failed_count += 1
-                        continue
+                # Download PDF from arXiv
+                pdf_url = arxiv_url.replace('/abs/', '/pdf/') + '.pdf'
+                response = requests.get(pdf_url, timeout=30)
+                response.raise_for_status()
 
-                    if not paper.arxiv_url:
-                        print(f"  No arXiv URL, skipping")
-                        failed_count += 1
-                        continue
+                # Convert first page to image
+                images = convert_from_bytes(response.content, first_page=1, last_page=1, dpi=150)
+                first_page_img = images[0]
 
-                    # Download PDF from arXiv
-                    pdf_url = paper.arxiv_url.replace('/abs/', '/pdf/') + '.pdf'
-                    response = requests.get(pdf_url, timeout=30)
-                    response.raise_for_status()
+                # Crop to square from top
+                width, height = first_page_img.size
+                size = min(width, height)
+                cropped = first_page_img.crop((0, 0, size, size))
 
-                    # Convert first page to image
-                    images = convert_from_bytes(response.content, first_page=1, last_page=1, dpi=150)
-                    first_page_img = images[0]
+                # Resize to 400x400
+                thumbnail = cropped.resize((400, 400), Image.Resampling.LANCZOS)
 
-                    # Crop to square from top
-                    width, height = first_page_img.size
-                    size = min(width, height)
-                    cropped = first_page_img.crop((0, 0, size, size))
+                # Convert to PNG bytes
+                buffer = io.BytesIO()
+                thumbnail.save(buffer, format='PNG')
+                thumbnail_bytes = buffer.getvalue()
 
-                    # Resize to 400x400
-                    thumbnail = cropped.resize((400, 400), Image.Resampling.LANCZOS)
+                # Upload to storage
+                bucket.upload(
+                    f"{paper_uuid}/thumbnail.png",
+                    thumbnail_bytes,
+                    {"content-type": "image/png", "upsert": "true"},
+                )
 
-                    # Convert to PNG base64 data URL
-                    buffer = io.BytesIO()
-                    thumbnail.save(buffer, format='PNG')
-                    buffer.seek(0)
-                    encoded = base64.b64encode(buffer.read()).decode('utf-8')
-                    thumbnail_data_url = f'data:image/png;base64,{encoded}'
+                success_count += 1
+                print(f"  Success")
 
-                    # Update database
-                    paper.thumbnail_data_url = thumbnail_data_url
-
-                    success_count += 1
-                    print(f"  Success")
-
-                except Exception as e:
-                    failed_count += 1
-                    print(f"  Failed: {e}")
-                    continue
+            except Exception as e:
+                failed_count += 1
+                print(f"  Failed: {e}")
+                continue
 
         print(f"\nCompleted: {success_count} success, {failed_count} failed")
 
@@ -175,10 +190,8 @@ def regenerate_missing_thumbnails_dag():
         }
 
 
-    # Define task dependencies
-    paper_uuids = find_papers_missing_thumbnails()
-    results = regenerate_thumbnails(paper_uuids)
+    paper_list = find_papers_missing_thumbnails()
+    results = regenerate_thumbnails(paper_list)
 
 
-# Instantiate the DAG
 regenerate_missing_thumbnails_dag()

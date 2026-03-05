@@ -81,28 +81,22 @@ def _calculate_usage_summary(step_costs: List[ApiCallCostForStep]) -> Dict[str, 
 
 def _load_usage_summary_from_json(paper_uuid: str) -> Optional[Dict[str, Any]]:
     """
-    Load usage summary data from database processed_content field.
-    
+    Load usage summary from Supabase Storage metadata.json.
+
     Args:
-        paper_uuid: UUID of paper to load usage summary for
-        
+        paper_uuid: UUID of paper to load usage summary for.
+
     Returns:
-        Optional[Dict]: Usage summary dict or None if not found
+        Usage summary dict, or None if the metadata has no usage_summary key.
+
+    Raises:
+        Exception: If storage download fails (no fallback).
     """
-    try:
-        from papers.db.client import get_paper_record
-        session = SessionLocal()
-        try:
-            record = get_paper_record(session, paper_uuid, load_content=True)
-            if not record or not record.processed_content:
-                return None
-            data = json.loads(record.processed_content)
-            us = data.get('usage_summary')
-            return us if isinstance(us, dict) else None
-        finally:
-            session.close()
-    except Exception:
-        return None
+    import papers.storage as storage
+
+    stored = storage.download_paper_content(paper_uuid)
+    us = stored.metadata.get("usage_summary")
+    return us if isinstance(us, dict) else None
 
 
 def get_processing_metrics_for_user(paper_uuid: str, auth_provider_id: str) -> Dict[str, Any]:

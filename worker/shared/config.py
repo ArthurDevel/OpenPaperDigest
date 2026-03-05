@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 from pathlib import Path
@@ -11,6 +12,8 @@ class Settings(BaseSettings):
 
     OPENROUTER_API_KEY: str
     DATABASE_URL: str
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_SERVICE_KEY: Optional[str] = None
 
 settings = Settings()
 

@@ -22,8 +22,8 @@ export interface UserListItem {
   title: string | null;
   /** Comma-separated author names */
   authors: string | null;
-  /** Base64 data URL of thumbnail image */
-  thumbnailDataUrl: string | null;
+  /** Public storage URL of thumbnail image */
+  thumbnailUrl: string | null;
   /** URL slug for the paper page */
   slug: string | null;
   /** When the paper was added to the list */

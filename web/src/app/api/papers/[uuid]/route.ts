@@ -40,9 +40,14 @@ export async function GET(
     const result = await papersService.getPaperJson(uuid);
     return NextResponse.json(result);
   } catch (error) {
-    // Check for specific error messages from service
-    if (error instanceof Error && error.message.includes('not found')) {
-      return NextResponse.json({ error: 'Paper not found' }, { status: 404 });
+    // Check for specific error messages from service / storage
+    if (error instanceof Error) {
+      if (error.message.includes('not found')) {
+        return NextResponse.json({ error: 'Paper not found' }, { status: 404 });
+      }
+      if (error.message.includes('Failed to download')) {
+        return NextResponse.json({ error: 'Paper content not found in storage' }, { status: 404 });
+      }
     }
 
     console.error('Error fetching paper JSON:', error);

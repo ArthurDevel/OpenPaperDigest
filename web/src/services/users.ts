@@ -21,7 +21,7 @@ export type UserListItem = {
   paperUuid: string;
   title?: string | null;
   authors?: string | null;
-  thumbnailDataUrl?: string | null;
+  thumbnailUrl?: string | null;
   slug?: string | null;
   createdAt?: string | null;
 };

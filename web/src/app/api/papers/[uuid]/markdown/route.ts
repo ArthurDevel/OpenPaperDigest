@@ -1,12 +1,12 @@
 /**
  * Paper Markdown API Route
  *
- * Returns the raw markdown content for a paper.
+ * Returns the raw markdown content for a paper from Supabase Storage.
  * - GET: Fetch paper markdown by UUID
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import * as papersService from '@/services/papers.service';
+import { downloadPaperMarkdown } from '@/lib/supabase/storage';
 
 // ============================================================================
 // TYPES
@@ -22,6 +22,7 @@ interface ErrorResponse {
 
 /**
  * GET handler for fetching a paper's markdown content.
+ * Downloads content.md from Supabase Storage.
  * @param request - The incoming Next.js request
  * @param params - Route params containing the paper UUID
  * @returns Plain text response with markdown content
@@ -37,7 +38,7 @@ export async function GET(
       return NextResponse.json({ error: 'Missing UUID parameter' }, { status: 400 });
     }
 
-    const markdown = await papersService.getPaperMarkdown(uuid);
+    const markdown = await downloadPaperMarkdown(uuid);
 
     return new NextResponse(markdown, {
       status: 200,
@@ -46,14 +47,8 @@ export async function GET(
       },
     });
   } catch (error) {
-    // Check for specific error messages from service
-    if (error instanceof Error) {
-      if (error.message.includes('not found')) {
-        return NextResponse.json({ error: 'Paper not found' }, { status: 404 });
-      }
-      if (error.message.includes('no processed content')) {
-        return NextResponse.json({ error: 'Paper has no processed content' }, { status: 404 });
-      }
+    if (error instanceof Error && error.message.includes('Failed to download')) {
+      return NextResponse.json({ error: 'Paper content not found in storage' }, { status: 404 });
     }
 
     console.error('Error fetching paper markdown:', error);

@@ -4,13 +4,20 @@
  * Provides business logic for paper-related operations.
  * - CRUD operations for papers (list, get by uuid/slug, summary, content)
  * - arXiv paper checking and enqueuing
- * - Thumbnail retrieval and base64 decoding
+ * - Paper content retrieval from Supabase Storage
  * - Paper JSON import functionality
  */
 
 import { createClient } from '@/lib/supabase/server';
 import { normalizeId } from '@/lib/arxiv';
 import * as slugsService from '@/services/slugs.service';
+import {
+  getPaperThumbnailUrl,
+  getPaperFigureUrl,
+  downloadPaperContent,
+  downloadPaperMarkdown,
+  deletePaperAssets,
+} from '@/lib/supabase/storage';
 import type {
   Paper,
   MinimalPaper,
@@ -54,17 +61,16 @@ export async function listMinimalPapers(
   const offset = (page - 1) * limit;
 
   // Fetch limit+1 to detect hasMore without expensive count query
-  // Only select minimal fields needed (rows are ~2MB each due to processed_content blob)
   const { data: papersData, error: papersError } = await supabase
     .from('papers')
-    .select('paper_uuid, title, authors, thumbnail_data_url')
+    .select('paper_uuid, title, authors')
     .eq('status', 'completed')
     .order('finished_at', { ascending: false })
     .range(offset, offset + limit);
 
   if (papersError) throw new Error(papersError.message);
 
-  type MinimalPaperRow = Pick<Tables<'papers'>, 'paper_uuid' | 'title' | 'authors' | 'thumbnail_data_url'>;
+  type MinimalPaperRow = Pick<Tables<'papers'>, 'paper_uuid' | 'title' | 'authors'>;
   const allPapers = (papersData ?? []) as MinimalPaperRow[];
   const hasMore = allPapers.length > limit;
   const papers = hasMore ? allPapers.slice(0, limit) : allPapers;
@@ -93,14 +99,16 @@ export async function listMinimalPapers(
     }
   }
 
-  const items: MinimalPaper[] = papers.map((paper) => ({
-    paperUuid: paper.paper_uuid,
-    title: paper.title,
-    authors: paper.authors,
-    thumbnailDataUrl: paper.thumbnail_data_url,
-    slug: slugMap.get(paper.paper_uuid) ?? null,
-    thumbnailUrl: `/api/papers/thumbnails/${paper.paper_uuid}`,
-  }));
+  // Generate signed thumbnail URLs in parallel
+  const items: MinimalPaper[] = await Promise.all(
+    papers.map(async (paper) => ({
+      paperUuid: paper.paper_uuid,
+      title: paper.title,
+      authors: paper.authors,
+      slug: slugMap.get(paper.paper_uuid) ?? null,
+      thumbnailUrl: await getPaperThumbnailUrl(paper.paper_uuid),
+    }))
+  );
 
   return {
     items,
@@ -132,7 +140,7 @@ export async function getPaperByUuid(uuid: string): Promise<Paper | null> {
     return null;
   }
 
-  return mapDbRowToApiPaper(paper);
+  return await mapDbRowToApiPaper(paper);
 }
 
 /**
@@ -190,52 +198,45 @@ export async function getPaperSummary(uuid: string): Promise<PaperSummary> {
     arxivUrl: paper.arxiv_url,
     fiveMinuteSummary,
     pageCount: paper.num_pages ?? 0,
-    thumbnailUrl: `/api/papers/thumbnails/${paper.paper_uuid}`,
+    thumbnailUrl: await getPaperThumbnailUrl(paper.paper_uuid),
   };
 }
 
 /**
- * Get the raw markdown content for a paper.
+ * Get the raw markdown content for a paper from Supabase Storage.
  * @param uuid - The paper UUID
  * @returns Markdown string or throws if not found
  */
 export async function getPaperMarkdown(uuid: string): Promise<string> {
   const supabase = await createClient();
 
+  // Verify paper exists in DB
   const { data, error } = await supabase
     .from('papers')
-    .select('processed_content')
+    .select('paper_uuid')
     .eq('paper_uuid', uuid)
     .maybeSingle();
 
   if (error) throw new Error(error.message);
 
-  const paper = data as Tables<'papers'> | null;
-
-  if (!paper) {
+  if (!data) {
     throw new Error(`Paper not found: ${uuid}`);
   }
 
-  if (!paper.processed_content) {
-    throw new Error(`Paper has no processed content: ${uuid}`);
-  }
-
-  try {
-    const content = JSON.parse(paper.processed_content);
-    return content.final_markdown ?? '';
-  } catch {
-    throw new Error(`Failed to parse processed content for paper: ${uuid}`);
-  }
+  return downloadPaperMarkdown(uuid);
 }
 
 /**
  * Get the full processed content JSON for a paper.
+ * Fetches metadata from DB and content from Supabase Storage.
+ * Figures use public storage URLs instead of base64.
  * @param uuid - The paper UUID
- * @returns Parsed JSON object or throws if not found
+ * @returns Assembled paper content object or throws if not found
  */
 export async function getPaperJson(uuid: string): Promise<Record<string, unknown>> {
   const supabase = await createClient();
 
+  // Fetch paper metadata from DB
   const { data, error } = await supabase
     .from('papers')
     .select(`
@@ -243,8 +244,6 @@ export async function getPaperJson(uuid: string): Promise<Record<string, unknown
       title,
       authors,
       arxiv_url,
-      thumbnail_data_url,
-      processed_content,
       processing_time_seconds
     `)
     .eq('paper_uuid', uuid)
@@ -258,25 +257,29 @@ export async function getPaperJson(uuid: string): Promise<Record<string, unknown
     throw new Error(`Paper not found: ${uuid}`);
   }
 
-  // Parse the processed content if available
-  let parsedContent: Record<string, unknown> = {};
-  if (paper.processed_content) {
-    try {
-      parsedContent = JSON.parse(paper.processed_content);
-    } catch {
-      throw new Error(`Failed to parse processed content for paper: ${uuid}`);
-    }
-  }
+  // Download content from Supabase Storage
+  const storedContent = await downloadPaperContent(uuid);
 
-  // Return combined data with paper metadata
+  // Build figure objects with signed storage URLs in parallel
+  const figures = await Promise.all(
+    storedContent.figures.map(async (fig) => ({
+      ...fig,
+      imageUrl: await getPaperFigureUrl(uuid, fig.identifier as string),
+    }))
+  );
+
+  // Return combined data with paper metadata and storage content
   return {
     paperId: paper.paper_uuid,
     title: paper.title,
     authors: paper.authors,
     arxivUrl: paper.arxiv_url,
-    thumbnailDataUrl: paper.thumbnail_data_url,
+    thumbnailUrl: await getPaperThumbnailUrl(uuid),
     processingTimeSeconds: paper.processing_time_seconds,
-    ...parsedContent,
+    final_markdown: storedContent.finalMarkdown,
+    sections: storedContent.sections,
+    figures,
+    usage_summary: storedContent.metadata,
   };
 }
 
@@ -408,49 +411,9 @@ export async function enqueueArxiv(url: string): Promise<EnqueueArxivResponse> {
 }
 
 /**
- * Get thumbnail image bytes from a paper's base64 data URL.
- * @param uuid - The paper UUID
- * @returns Buffer and media type for the thumbnail
- */
-export async function getThumbnail(
-  uuid: string
-): Promise<{ data: Buffer; mediaType: string }> {
-  const supabase = await createClient();
-
-  const { data: paperData, error } = await supabase
-    .from('papers')
-    .select('thumbnail_data_url')
-    .eq('paper_uuid', uuid)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-
-  const paper = paperData as Tables<'papers'> | null;
-
-  if (!paper) {
-    throw new Error(`Paper not found: ${uuid}`);
-  }
-
-  if (!paper.thumbnail_data_url) {
-    throw new Error(`Paper has no thumbnail: ${uuid}`);
-  }
-
-  // Parse the data URL format: data:image/png;base64,<data>
-  const dataUrlMatch = /^data:([^;]+);base64,(.+)$/.exec(paper.thumbnail_data_url);
-  if (!dataUrlMatch) {
-    throw new Error(`Invalid thumbnail data URL format for paper: ${uuid}`);
-  }
-
-  const mediaType = dataUrlMatch[1];
-  const base64Data = dataUrlMatch[2];
-  const data = Buffer.from(base64Data, 'base64');
-
-  return { data, mediaType };
-}
-
-/**
  * Import a paper JSON and write it to the paperjsons directory.
  * Creates or updates the paper record in the database.
+ * Content is stored in Supabase Storage (uploaded by the worker during processing).
  * @param paper - Paper JSON object with paper_uuid and other fields
  * @returns Job status information
  */
@@ -485,11 +448,13 @@ export async function importPaperJson(
 
   const now = new Date().toISOString();
 
-  // Extract five_minute_summary into summaries column
-  const processedContent = paper.processed_content as Record<string, unknown> | undefined;
-  const fiveMinuteSummary = processedContent?.five_minute_summary as string | undefined;
+  // Extract five_minute_summary into summaries column (may be nested under processed_content in legacy import JSONs)
+  const importContent = paper.processed_content as Record<string, unknown> | undefined;
+  const fiveMinuteSummary = importContent?.five_minute_summary as string | undefined;
   const summaries = fiveMinuteSummary ? { five_minute_summary: fiveMinuteSummary } : null;
 
+  // Note: processed_content and thumbnail_data_url are no longer written to DB.
+  // The worker uploads content to Supabase Storage during processing.
   const updateData: TablesUpdate<'papers'> = {
     arxiv_id: (paper.arxiv_id as string) ?? null,
     arxiv_version: (paper.arxiv_version as string) ?? null,
@@ -498,10 +463,6 @@ export async function importPaperJson(
     authors: (paper.authors as string) ?? null,
     status: 'completed',
     num_pages: (paper.num_pages as number) ?? null,
-    thumbnail_data_url: (paper.thumbnail_data_url as string) ?? null,
-    processed_content: paper.processed_content
-      ? JSON.stringify(paper.processed_content)
-      : null,
     summaries,
     finished_at: now,
     updated_at: now,
@@ -533,10 +494,6 @@ export async function importPaperJson(
       title: (paper.title as string) ?? null,
       authors: (paper.authors as string) ?? null,
       num_pages: (paper.num_pages as number) ?? null,
-      thumbnail_data_url: (paper.thumbnail_data_url as string) ?? null,
-      processed_content: paper.processed_content
-        ? JSON.stringify(paper.processed_content)
-        : null,
       summaries,
       finished_at: now,
       updated_at: now,
@@ -553,7 +510,7 @@ export async function importPaperJson(
     dbPaper = data as Tables<'papers'>;
   }
 
-  return mapDbRowToJobDbStatus(dbPaper);
+  return await mapDbRowToJobDbStatus(dbPaper);
 }
 
 // ============================================================================
@@ -610,30 +567,34 @@ export async function listAllPapers(
 
   const papers = (papersData ?? []) as Tables<'papers'>[];
 
-  return papers.map((paper) => ({
-    paperUuid: paper.paper_uuid,
-    status: paper.status as PaperStatus,
-    errorMessage: paper.error_message,
-    createdAt: new Date(paper.created_at),
-    updatedAt: new Date(paper.updated_at),
-    startedAt: paper.started_at ? new Date(paper.started_at) : null,
-    finishedAt: paper.finished_at ? new Date(paper.finished_at) : null,
-    arxivId: paper.arxiv_id,
-    arxivVersion: paper.arxiv_version,
-    arxivUrl: paper.arxiv_url,
-    title: paper.title,
-    authors: paper.authors,
-    numPages: paper.num_pages,
-    thumbnailDataUrl: null, // Not included in admin list for performance
-    processingTimeSeconds: paper.processing_time_seconds,
-    totalCost: paper.total_cost,
-    avgCostPerPage: paper.avg_cost_per_page,
-  }));
+  // Generate signed thumbnail URLs in parallel
+  return Promise.all(
+    papers.map(async (paper) => ({
+      paperUuid: paper.paper_uuid,
+      status: paper.status as PaperStatus,
+      errorMessage: paper.error_message,
+      createdAt: new Date(paper.created_at),
+      updatedAt: new Date(paper.updated_at),
+      startedAt: paper.started_at ? new Date(paper.started_at) : null,
+      finishedAt: paper.finished_at ? new Date(paper.finished_at) : null,
+      arxivId: paper.arxiv_id,
+      arxivVersion: paper.arxiv_version,
+      arxivUrl: paper.arxiv_url,
+      title: paper.title,
+      authors: paper.authors,
+      numPages: paper.num_pages,
+      thumbnailUrl: await getPaperThumbnailUrl(paper.paper_uuid),
+      processingTimeSeconds: paper.processing_time_seconds,
+      totalCost: paper.total_cost,
+      avgCostPerPage: paper.avg_cost_per_page,
+    }))
+  );
 }
 
 /**
  * Delete a paper by UUID.
- * Removes the paper record and associated slugs from the database.
+ * Removes storage assets and the paper record + associated slugs from the database.
+ * Storage deletion is best-effort: if it fails, DB deletion still proceeds.
  * @param uuid - The paper UUID to delete
  * @returns True if paper was deleted, false if not found
  */
@@ -652,6 +613,13 @@ export async function deletePaper(uuid: string): Promise<boolean> {
 
   if (!paper) {
     return false;
+  }
+
+  // Delete storage assets first (best-effort -- don't block DB deletion)
+  try {
+    await deletePaperAssets(uuid);
+  } catch (storageError) {
+    console.error(`Failed to delete storage assets for paper ${uuid}:`, storageError);
   }
 
   // Delete associated slugs first (foreign key constraint)
@@ -728,7 +696,6 @@ export async function restartPaper(uuid: string): Promise<JobDbStatus> {
       title,
       authors,
       num_pages,
-      thumbnail_data_url,
       processing_time_seconds,
       total_cost,
       avg_cost_per_page
@@ -753,7 +720,7 @@ export async function restartPaper(uuid: string): Promise<JobDbStatus> {
     title: updated.title,
     authors: updated.authors,
     numPages: updated.num_pages,
-    thumbnailDataUrl: updated.thumbnail_data_url,
+    thumbnailUrl: await getPaperThumbnailUrl(updated.paper_uuid),
     processingTimeSeconds: updated.processing_time_seconds,
     totalCost: updated.total_cost,
     avgCostPerPage: updated.avg_cost_per_page,
@@ -983,7 +950,7 @@ export async function getCumulativeDailyStats(): Promise<CumulativeDailyItem[]> 
  * @param paper - Database paper row
  * @returns API Paper object
  */
-function mapDbRowToApiPaper(paper: Tables<'papers'>): Paper {
+async function mapDbRowToApiPaper(paper: Tables<'papers'>): Promise<Paper> {
   return {
     paperUuid: paper.paper_uuid,
     arxivId: paper.arxiv_id,
@@ -1002,12 +969,11 @@ function mapDbRowToApiPaper(paper: Tables<'papers'>): Paper {
     processingTimeSeconds: paper.processing_time_seconds,
     totalCost: paper.total_cost,
     avgCostPerPage: paper.avg_cost_per_page,
-    thumbnailDataUrl: paper.thumbnail_data_url,
+    thumbnailUrl: await getPaperThumbnailUrl(paper.paper_uuid),
     externalPopularitySignals: paper.external_popularity_signals as Record<
       string,
       unknown
     > | null,
-    processedContent: paper.processed_content,
     contentHash: paper.content_hash,
     pdfUrl: paper.pdf_url,
   };
@@ -1018,7 +984,7 @@ function mapDbRowToApiPaper(paper: Tables<'papers'>): Paper {
  * @param paper - Database paper row
  * @returns JobDbStatus object
  */
-function mapDbRowToJobDbStatus(paper: Tables<'papers'>): JobDbStatus {
+async function mapDbRowToJobDbStatus(paper: Tables<'papers'>): Promise<JobDbStatus> {
   return {
     paperUuid: paper.paper_uuid,
     status: paper.status as PaperStatus,
@@ -1033,7 +999,7 @@ function mapDbRowToJobDbStatus(paper: Tables<'papers'>): JobDbStatus {
     title: paper.title,
     authors: paper.authors,
     numPages: paper.num_pages,
-    thumbnailDataUrl: paper.thumbnail_data_url,
+    thumbnailUrl: await getPaperThumbnailUrl(paper.paper_uuid),
     processingTimeSeconds: paper.processing_time_seconds,
     totalCost: paper.total_cost,
     avgCostPerPage: paper.avg_cost_per_page,
