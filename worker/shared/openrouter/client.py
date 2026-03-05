@@ -400,6 +400,43 @@ async def get_generation_cost(generation_id: str) -> float:
             raise
 
 
+async def get_embeddings(
+    texts: List[str],
+    model: str = "openai/text-embedding-3-small",
+    dimensions: Optional[int] = None,
+) -> List[List[float]]:
+    """
+    Generate embeddings for a list of texts via the OpenRouter /embeddings endpoint.
+
+    Args:
+        texts: List of text strings to embed.
+        model: Embedding model identifier on OpenRouter.
+        dimensions: Optional dimension reduction (model-dependent).
+
+    Returns:
+        List[List[float]]: One embedding vector per input text, in the same order.
+    """
+    json_payload: Dict[str, Any] = {
+        "model": model,
+        "input": texts,
+    }
+    if dimensions is not None:
+        json_payload["dimensions"] = dimensions
+
+    async with httpx.AsyncClient(base_url=BASE_URL, headers=_HEADERS, timeout=TIMEOUT_SECONDS) as client:
+        try:
+            response = await client.post("/embeddings", json=json_payload)
+            response.raise_for_status()
+            data = response.json()
+
+            # Sort by index to guarantee input order
+            embedding_objects = sorted(data.get("data", []), key=lambda x: x["index"])
+            return [obj["embedding"] for obj in embedding_objects]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTPStatusError calling OpenRouter embeddings: {e}")
+            raise
+
+
 async def get_models() -> List[Dict[str, Any]]:
     """
     Returns the list of available models from OpenRouter.
