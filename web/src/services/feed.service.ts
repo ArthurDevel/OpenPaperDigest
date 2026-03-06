@@ -2,20 +2,21 @@
  * Feed Service
  *
  * Server-side feed ranking service that produces a personalized paper feed.
- * Uses similarity-driven candidate retrieval via pgvector ANN search, then scores
- * candidates with a weighted blend of similarity, popularity, and recency.
+ * Uses similarity-driven candidate retrieval via pgvector ANN search, combined
+ * with an exploration pool for topic discovery. Scores candidates with a weighted
+ * blend of similarity (with cluster-weight boost), popularity, and recency.
  *
  * Responsibilities:
- * - Build preference vectors from user clusters
- * - Fetch candidates via ANN similarity search (or recency fallback for cold start)
- * - Score candidates with weighted formula
- * - Inject diversity every 5th position
+ * - Build preference vectors from user clusters (raw embeddings, normalized weights)
+ * - Fetch candidates via ANN similarity search + exploration pool
+ * - Score candidates with cluster-weight-boosted similarity + popularity + recency
+ * - Inject diversity (cluster balancing + exploration interleaving)
  * - Return paginated FeedResponse with slug lookups
  */
 
 import { createClient } from '@/lib/supabase/server';
 import { getPaperThumbnailUrls } from '@/lib/supabase/storage';
-import { getPreferenceClusters, cosineSimilarity } from '@/services/interactions.service';
+import { getPreferenceClusters } from '@/services/interactions.service';
 import type { FeedResponse } from '@/types/recommendation';
 import type { MinimalPaper } from '@/types/paper';
 
@@ -24,13 +25,13 @@ import type { MinimalPaper } from '@/types/paper';
 // ============================================================================
 
 /** Weight for semantic similarity in the scoring formula */
-const SIMILARITY_WEIGHT = 0.5;
+const SIMILARITY_WEIGHT = 0.33;
 
 /** Weight for popularity signals in the scoring formula */
-const POPULARITY_WEIGHT = 0.3;
+const POPULARITY_WEIGHT = 0.34;
 
 /** Weight for recency in the scoring formula */
-const RECENCY_WEIGHT = 0.2;
+const RECENCY_WEIGHT = 0.33;
 
 /** Half-life in days for the recency exponential decay */
 const RECENCY_HALF_LIFE_DAYS = 7;
@@ -38,9 +39,23 @@ const RECENCY_HALF_LIFE_DAYS = 7;
 /** Number of ANN candidates to fetch per preference cluster */
 const CANDIDATES_PER_CLUSTER = 50;
 
+/** Fraction of feed candidates reserved for exploration (topic discovery) */
+const EXPLORATION_RATIO = 0.2;
+
+/** Max boost from cluster weight on similarity score. Dominant cluster (weight ~0.6)
+ *  gets similarity multiplied by ~1.18, minor cluster (weight ~0.1) by ~1.03. */
+const CLUSTER_WEIGHT_BOOST = 0.3;
+
 // ============================================================================
 // TYPES
 // ============================================================================
+
+/** A user preference cluster with raw embedding and normalized weight */
+interface PreferenceVector {
+  embedding: number[];
+  weight: number;
+  clusterIndex: number;
+}
 
 /** A paper with all computed scoring components */
 interface ScoredPaper {
@@ -49,6 +64,8 @@ interface ScoredPaper {
   recencyScore: number;
   popularityScore: number;
   similarityScore: number;
+  sourceClusterIndex: number | null;
+  isExploration: boolean;
 }
 
 /** Raw row from the match_papers_by_embedding RPC or cold-start query */
@@ -60,6 +77,7 @@ interface CandidateRow {
   embedding: number[];
   externalPopularitySignals: Record<string, unknown> | null;
   similarity: number;
+  sourceClusterIndex: number | null;
 }
 
 // ============================================================================
@@ -122,62 +140,77 @@ export async function getRankedFeed(
 // ============================================================================
 
 /**
- * Fetches the user's preference clusters and returns their weighted embedding vectors.
- * Returns empty array if no clusters exist (cold start).
+ * Fetches the user's preference clusters and returns raw embeddings with normalized weights.
+ * Weights are normalized to sum to 1 so no single cluster dominates ANN search.
  * @param userId - Supabase auth user ID
- * @returns Array of embedding vectors (weighted by cluster weight)
+ * @returns Array of preference vectors with raw embeddings and normalized weights
  */
-async function buildPreferenceVectors(userId: string): Promise<number[][]> {
+async function buildPreferenceVectors(userId: string): Promise<PreferenceVector[]> {
   const clusters = await getPreferenceClusters(userId);
   if (clusters.length === 0) return [];
 
-  // Weight each embedding by cluster weight
-  return clusters.map((cluster) => {
-    const weight = cluster.weight;
-    return cluster.embedding.map((val) => val * weight);
-  });
+  const totalWeight = clusters.reduce((sum, c) => sum + c.weight, 0);
+
+  return clusters.map((cluster) => ({
+    embedding: cluster.embedding,
+    weight: totalWeight > 0 ? cluster.weight / totalWeight : 1 / clusters.length,
+    clusterIndex: cluster.clusterIndex,
+  }));
 }
 
 /**
  * Fetches candidate papers for ranking.
- * With preference vectors: uses ANN similarity search per cluster.
+ * With preference vectors: fetches ANN candidates + exploration candidates.
  * Without (cold start): falls back to most recent papers.
  * @param excludePaperUuids - Paper UUIDs to exclude from results
- * @param preferenceVectors - Weighted preference embeddings
+ * @param preferenceVectors - Preference vectors with raw embeddings
  * @param limit - Desired page size (cold-start fetches limit*3)
- * @returns Array of candidate rows
+ * @returns Array of candidate rows (ANN + exploration mixed)
  */
 async function fetchCandidates(
   excludePaperUuids: string[],
-  preferenceVectors: number[][],
+  preferenceVectors: PreferenceVector[],
   limit: number
 ): Promise<CandidateRow[]> {
   if (preferenceVectors.length > 0) {
     const annCandidates = await fetchCandidatesFromANN(excludePaperUuids, preferenceVectors);
+
     // Fall back to cold start if ANN returns nothing (e.g. no papers have embeddings yet)
-    if (annCandidates.length > 0) return annCandidates;
+    if (annCandidates.length === 0) {
+      return fetchColdStartCandidates(excludePaperUuids, limit);
+    }
+
+    // Fetch exploration candidates (recent papers outside ANN results)
+    const explorationCount = Math.ceil(limit * EXPLORATION_RATIO);
+    const annUuids = annCandidates.map((c) => c.paperUuid);
+    const explorationCandidates = await fetchExplorationCandidates(
+      [...excludePaperUuids, ...annUuids],
+      explorationCount
+    );
+
+    return [...annCandidates, ...explorationCandidates];
   }
   return fetchColdStartCandidates(excludePaperUuids, limit);
 }
 
 /**
  * Fetches candidates via ANN similarity search for each preference vector.
+ * Uses raw (unscaled) embeddings and tags each candidate with its source cluster.
  * Deduplicates results across clusters (keeps highest similarity).
  * @param excludePaperUuids - Paper UUIDs to exclude
- * @param preferenceVectors - Weighted preference embeddings
- * @returns Deduplicated candidate rows
+ * @param preferenceVectors - Preference vectors with raw embeddings
+ * @returns Deduplicated candidate rows tagged with sourceClusterIndex
  */
 async function fetchCandidatesFromANN(
   excludePaperUuids: string[],
-  preferenceVectors: number[][]
+  preferenceVectors: PreferenceVector[]
 ): Promise<CandidateRow[]> {
   const supabase = await createClient();
 
-  // Query each cluster in parallel
+  // Query each cluster in parallel using raw embeddings
   const clusterResults = await Promise.all(
-    preferenceVectors.map(async (vector) => {
-      // Format embedding as Postgres vector string
-      const vectorString = `[${vector.join(',')}]`;
+    preferenceVectors.map(async (pv) => {
+      const vectorString = `[${pv.embedding.join(',')}]`;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase.rpc as any)(
@@ -193,22 +226,25 @@ async function fetchCandidatesFromANN(
         throw new Error(`match_papers_by_embedding RPC failed: ${error.message}`);
       }
 
-      return (data ?? []) as {
-        paper_uuid: string;
-        title: string | null;
-        authors: string | null;
-        finished_at: string;
-        embedding: string;
-        external_popularity_signals: Record<string, unknown> | null;
-        similarity: number;
-      }[];
+      return {
+        clusterIndex: pv.clusterIndex,
+        rows: (data ?? []) as {
+          paper_uuid: string;
+          title: string | null;
+          authors: string | null;
+          finished_at: string;
+          embedding: string;
+          external_popularity_signals: Record<string, unknown> | null;
+          similarity: number;
+        }[],
+      };
     })
   );
 
   // Deduplicate across clusters, keeping highest similarity
   const candidateMap = new Map<string, CandidateRow>();
 
-  for (const rows of clusterResults) {
+  for (const { clusterIndex, rows } of clusterResults) {
     for (const row of rows) {
       const existing = candidateMap.get(row.paper_uuid);
       if (!existing || row.similarity > existing.similarity) {
@@ -220,6 +256,7 @@ async function fetchCandidatesFromANN(
           embedding: parseEmbeddingString(row.embedding),
           externalPopularitySignals: row.external_popularity_signals,
           similarity: row.similarity,
+          sourceClusterIndex: clusterIndex,
         });
       }
     }
@@ -276,19 +313,70 @@ async function fetchColdStartCandidates(
     embedding: [],
     externalPopularitySignals: row.external_popularity_signals,
     similarity: 0,
+    sourceClusterIndex: null,
+  }));
+}
+
+/**
+ * Fetches exploration candidates for serendipitous topic discovery.
+ * Returns recent completed papers outside the user's known interests.
+ * @param excludePaperUuids - Paper UUIDs to exclude (already shown + ANN results)
+ * @param count - Number of exploration candidates to fetch
+ * @returns Candidate rows with similarity=0 and sourceClusterIndex=null
+ */
+async function fetchExplorationCandidates(
+  excludePaperUuids: string[],
+  count: number
+): Promise<CandidateRow[]> {
+  const supabase = await createClient();
+
+  let query = supabase
+    .from('papers')
+    .select('paper_uuid, title, authors, finished_at, external_popularity_signals')
+    .eq('status', 'completed')
+    .order('finished_at', { ascending: false })
+    .limit(count);
+
+  if (excludePaperUuids.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    query = (query as any).not('paper_uuid', 'in', `(${excludePaperUuids.join(',')})`);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(`Exploration candidate fetch failed: ${error.message}`);
+  }
+
+  return ((data ?? []) as {
+    paper_uuid: string;
+    title: string | null;
+    authors: string | null;
+    finished_at: string;
+    external_popularity_signals: Record<string, unknown> | null;
+  }[]).map((row) => ({
+    paperUuid: row.paper_uuid,
+    title: row.title,
+    authors: row.authors,
+    finishedAt: new Date(row.finished_at),
+    embedding: [],
+    externalPopularitySignals: row.external_popularity_signals,
+    similarity: 0,
+    sourceClusterIndex: null,
   }));
 }
 
 /**
  * Scores candidates with the weighted blend of similarity, popularity, and recency.
- * Returns sorted array (highest score first).
+ * ANN candidates get a cluster-weight boost on similarity. Exploration candidates
+ * score on popularity and recency only.
  * @param candidates - Candidate rows to score
  * @param preferenceVectors - User's preference vectors (empty for cold start)
  * @returns Scored and sorted papers
  */
 async function scoreCandidates(
   candidates: CandidateRow[],
-  preferenceVectors: number[][]
+  preferenceVectors: PreferenceVector[]
 ): Promise<ScoredPaper[]> {
   const now = Date.now();
 
@@ -296,6 +384,12 @@ async function scoreCandidates(
   const thumbnailMap = await getPaperThumbnailUrls(
     candidates.map((c) => c.paperUuid)
   );
+
+  // Build a lookup from clusterIndex -> normalized weight for cluster-weight boost
+  const clusterWeightMap = new Map<number, number>();
+  for (const pv of preferenceVectors) {
+    clusterWeightMap.set(pv.clusterIndex, pv.weight);
+  }
 
   const scored: ScoredPaper[] = candidates.map((candidate) => {
     // Recency: exponential decay with 7-day half-life
@@ -305,8 +399,14 @@ async function scoreCandidates(
     // Popularity: from external_popularity_signals
     const popularityScore = computePopularityScore(candidate.externalPopularitySignals);
 
-    // Similarity: pre-computed from ANN query (0 for cold start)
-    const similarityScore = candidate.similarity;
+    // Similarity: apply cluster-weight boost for ANN candidates, 0 for exploration
+    const isExploration = candidate.sourceClusterIndex === null && candidate.similarity === 0
+      && preferenceVectors.length > 0;
+    let similarityScore = candidate.similarity;
+    if (candidate.sourceClusterIndex !== null) {
+      const clusterWeight = clusterWeightMap.get(candidate.sourceClusterIndex) ?? 0;
+      similarityScore = candidate.similarity * (1 + CLUSTER_WEIGHT_BOOST * clusterWeight);
+    }
 
     // Weighted blend
     const score =
@@ -322,7 +422,11 @@ async function scoreCandidates(
       thumbnailUrl: thumbnailMap.get(candidate.paperUuid) ?? null,
     };
 
-    return { paper, score, recencyScore, popularityScore, similarityScore } satisfies ScoredPaper;
+    return {
+      paper, score, recencyScore, popularityScore, similarityScore,
+      sourceClusterIndex: candidate.sourceClusterIndex,
+      isExploration,
+    } satisfies ScoredPaper;
   });
 
   // Sort descending by score
@@ -332,18 +436,16 @@ async function scoreCandidates(
 }
 
 /**
- * Injects diversity into the ranked feed by placing a paper from outside the
- * top similarity cluster at every 5th position (index 4, 9, 14...).
- * - 0 preference vectors: no-op
- * - 1 preference vector: picks lowest similarity at those positions
- * - 2+ vectors: picks highest-scoring paper from outside top similarity cluster
+ * Injects diversity into the ranked feed using sourceClusterIndex and exploration papers.
+ * Pass 1: At every 5th position, swap in a paper from a non-dominant cluster.
+ * Pass 2: Interleave exploration papers at regular intervals.
  * @param rankedPapers - Score-sorted papers
  * @param preferenceVectors - User's preference vectors
  * @returns Papers with diversity injected
  */
 function injectDiversity(
   rankedPapers: ScoredPaper[],
-  preferenceVectors: number[][]
+  preferenceVectors: PreferenceVector[]
 ): ScoredPaper[] {
   if (preferenceVectors.length === 0 || rankedPapers.length === 0) {
     return rankedPapers;
@@ -351,59 +453,16 @@ function injectDiversity(
 
   const result = [...rankedPapers];
 
-  // Determine the "top cluster" -- the cluster with the highest weight (first vector
-  // since buildPreferenceVectors preserves cluster order and weight is baked in)
-  // For simplicity with 1 vector, we use similarity score directly.
-
-  if (preferenceVectors.length === 1) {
-    // With 1 vector: at every 5th position, pick the lowest-similarity paper
-    // that hasn't been placed yet
-    const used = new Set<number>();
-    for (let pos = 4; pos < result.length; pos += 5) {
-      // Find the paper with lowest similarity that isn't already at a diversity slot
-      let bestIdx = -1;
-      let lowestSim = Infinity;
-
-      for (let i = pos + 1; i < result.length; i++) {
-        if (!used.has(i) && result[i].similarityScore < lowestSim) {
-          lowestSim = result[i].similarityScore;
-          bestIdx = i;
-        }
-      }
-
-      if (bestIdx !== -1) {
-        // Swap the diversity pick into position
-        used.add(pos);
-        const picked = result.splice(bestIdx, 1)[0];
-        result.splice(pos, 0, picked);
-      }
-    }
-  } else {
-    // With 2+ vectors: identify which cluster each paper is most similar to,
-    // then at every 5th position, insert the highest-scoring paper from
-    // outside the dominant cluster
-
-    // Find dominant cluster (the one most papers are closest to)
-    const clusterAssignments = result.map((sp) => {
-      if (sp.paper.paperUuid && sp.similarityScore > 0) {
-        // We don't have per-candidate embeddings for ANN results easily,
-        // so use the similarity score as a proxy. Higher similarity = closer to
-        // whichever cluster returned it. We approximate by finding the cluster
-        // whose weighted vector is most similar to a rough direction.
-        // Since we already have cosineSimilarity available, we can compute it
-        // against each preference vector if the candidate has an embedding.
-        // For ANN results, the embedding is available.
-        return findClosestCluster(sp, preferenceVectors);
-      }
-      return 0;
-    });
-
-    // Find the most common cluster (dominant)
+  // Pass 1: cluster diversity -- swap non-dominant cluster papers into every 5th position
+  if (preferenceVectors.length >= 2) {
+    // Find dominant cluster (most papers assigned to it)
     const clusterCounts = new Map<number, number>();
-    for (const idx of clusterAssignments) {
-      clusterCounts.set(idx, (clusterCounts.get(idx) ?? 0) + 1);
+    for (const sp of result) {
+      if (sp.sourceClusterIndex !== null) {
+        clusterCounts.set(sp.sourceClusterIndex, (clusterCounts.get(sp.sourceClusterIndex) ?? 0) + 1);
+      }
     }
-    let dominantCluster = 0;
+    let dominantCluster = preferenceVectors[0].clusterIndex;
     let maxCount = 0;
     for (const [cluster, count] of clusterCounts) {
       if (count > maxCount) {
@@ -412,14 +471,16 @@ function injectDiversity(
       }
     }
 
-    // At every 5th position, insert the highest-scoring paper from a non-dominant cluster
     const used = new Set<number>();
     for (let pos = 4; pos < result.length; pos += 5) {
       let bestIdx = -1;
       let bestScore = -Infinity;
 
       for (let i = pos + 1; i < result.length; i++) {
-        if (!used.has(i) && clusterAssignments[i] !== dominantCluster && result[i].score > bestScore) {
+        if (!used.has(i)
+          && result[i].sourceClusterIndex !== null
+          && result[i].sourceClusterIndex !== dominantCluster
+          && result[i].score > bestScore) {
           bestScore = result[i].score;
           bestIdx = i;
         }
@@ -427,42 +488,44 @@ function injectDiversity(
 
       if (bestIdx !== -1) {
         used.add(pos);
-        const pickedAssignment = clusterAssignments.splice(bestIdx, 1)[0];
         const picked = result.splice(bestIdx, 1)[0];
         result.splice(pos, 0, picked);
-        clusterAssignments.splice(pos, 0, pickedAssignment);
       }
     }
   }
 
-  return result;
-}
-
-/**
- * Finds which preference cluster a scored paper is closest to.
- * Uses cosine similarity between the candidate's embedding and each preference vector.
- * @param sp - Scored paper with embedding data
- * @param preferenceVectors - Array of preference embeddings
- * @returns Index of the closest cluster
- */
-function findClosestCluster(sp: ScoredPaper, preferenceVectors: number[][]): number {
-  // If the paper came from ANN search, we need its embedding to compare against clusters.
-  // The embedding was stored in CandidateRow but is not in MinimalPaper.
-  // Since we lose the embedding after scoring, we fall back to a simpler heuristic:
-  // use the similarity score as a proxy. Papers with high similarity are likely
-  // from the first (strongest) cluster.
-  // For a more accurate approach, we could carry the embedding through, but that
-  // would mean modifying ScoredPaper. Keep it simple for now.
-
-  // Heuristic: if similarity is above median, assign to cluster 0 (strongest).
-  // Otherwise distribute round-robin among other clusters.
-  // This is a reasonable approximation since the strongest cluster generates
-  // the most candidates.
-  if (sp.similarityScore > 0.5) {
-    return 0;
+  // Pass 2: interleave exploration papers at regular intervals
+  const explorationPapers: ScoredPaper[] = [];
+  const nonExploration: ScoredPaper[] = [];
+  for (const sp of result) {
+    if (sp.isExploration) {
+      explorationPapers.push(sp);
+    } else {
+      nonExploration.push(sp);
+    }
   }
-  // Distribute among non-dominant clusters
-  return 1 + Math.floor(Math.random() * (preferenceVectors.length - 1));
+
+  if (explorationPapers.length === 0) return result;
+
+  // Insert one exploration paper every ~5 positions
+  const interval = Math.max(3, Math.floor(nonExploration.length / explorationPapers.length));
+  const final: ScoredPaper[] = [];
+  let explIdx = 0;
+  for (let i = 0; i < nonExploration.length; i++) {
+    final.push(nonExploration[i]);
+    // After every `interval` non-exploration papers, insert an exploration paper
+    if ((i + 1) % interval === 0 && explIdx < explorationPapers.length) {
+      final.push(explorationPapers[explIdx]);
+      explIdx++;
+    }
+  }
+  // Append any remaining exploration papers at the end
+  while (explIdx < explorationPapers.length) {
+    final.push(explorationPapers[explIdx]);
+    explIdx++;
+  }
+
+  return final;
 }
 
 /**
