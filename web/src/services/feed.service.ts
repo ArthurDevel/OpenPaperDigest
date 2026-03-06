@@ -501,7 +501,7 @@ function computePopularityScore(
  * @param paperUuids - Array of paper UUIDs to look up slugs for
  * @returns Map from paper_uuid to slug string
  */
-async function fetchSlugMap(paperUuids: string[]): Promise<Map<string, string>> {
+export async function fetchSlugMap(paperUuids: string[]): Promise<Map<string, string>> {
   if (paperUuids.length === 0) return new Map();
 
   const supabase = await createClient();
