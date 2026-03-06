@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import React, { useState } from 'react';
-import { Github, User as UserIcon, X, Menu } from 'lucide-react';
+import { Github, Search, User as UserIcon, X, Menu } from 'lucide-react';
 import { useSession } from '@/services/auth';
 import ThemeToggle from './ThemeToggle';
 
@@ -55,6 +55,12 @@ export default function NavBar({ className = '' }: NavBarProps) {
           <li>
             <Link href="/" className="text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
               Papers Feed
+            </Link>
+          </li>
+          <li>
+            <Link href="/search" className="text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors flex items-center gap-1">
+              <Search size={14} />
+              Search
             </Link>
           </li>
           {/*<li>
@@ -134,6 +140,14 @@ export default function NavBar({ className = '' }: NavBarProps) {
                 className="block py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
               >
                 Papers Feed
+              </Link>
+              <Link
+                href="/search"
+                onClick={closeMobileMenu}
+                className="flex items-center justify-center gap-2 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+              >
+                <Search size={16} />
+                <span>Search</span>
               </Link>
               <Link
                 href="https://github.com/ArthurDevel/papersummarizertool"
