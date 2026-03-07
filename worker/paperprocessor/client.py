@@ -211,9 +211,8 @@ async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None)
         logger.info("Step 3b: Formatting inline image references.")
         await format_images(document)
 
-        # Step 4: Generate 5-minute summary from original OCR content - modifies document in place
-        logger.info("Step 4: Generating 5-minute summary.")
-        await generate_five_minute_summary(document)
+        # Step 4: Summary generation (disabled - now generated on-demand via web API)
+        # await generate_five_minute_summary(document)
 
         logger.info("Paper processing pipeline v2 finished (simplified).")
         return document

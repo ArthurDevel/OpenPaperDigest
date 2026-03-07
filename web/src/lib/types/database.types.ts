@@ -6,11 +6,6 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-// NOTE: This file is auto-generated from the Supabase schema.
-// After the storage migration runs and the processed_content / thumbnail_data_url
-// columns are dropped, regenerate this file via:
-//   npx supabase gen types typescript --project-id <project-id> > src/lib/types/database.types.ts
-
 export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
@@ -30,6 +25,81 @@ export type Database = {
           version_num?: string
         }
         Relationships: []
+      }
+      authors: {
+        Row: {
+          affiliations: Json | null
+          citation_count: number | null
+          created_at: string
+          h_index: number | null
+          homepage: string | null
+          id: number
+          name: string
+          paper_count: number | null
+          s2_author_id: string
+          stats_updated_at: string | null
+        }
+        Insert: {
+          affiliations?: Json | null
+          citation_count?: number | null
+          created_at?: string
+          h_index?: number | null
+          homepage?: string | null
+          id?: number
+          name: string
+          paper_count?: number | null
+          s2_author_id: string
+          stats_updated_at?: string | null
+        }
+        Update: {
+          affiliations?: Json | null
+          citation_count?: number | null
+          created_at?: string
+          h_index?: number | null
+          homepage?: string | null
+          id?: number
+          name?: string
+          paper_count?: number | null
+          s2_author_id?: string
+          stats_updated_at?: string | null
+        }
+        Relationships: []
+      }
+      paper_authors: {
+        Row: {
+          author_id: number
+          author_order: number
+          id: number
+          paper_id: number
+        }
+        Insert: {
+          author_id: number
+          author_order: number
+          id?: number
+          paper_id: number
+        }
+        Update: {
+          author_id?: number
+          author_order?: number
+          id?: number
+          paper_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paper_authors_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "authors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_authors_paper_id_fkey"
+            columns: ["paper_id"]
+            isOneToOne: false
+            referencedRelation: "papers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       paper_slugs: {
         Row: {
@@ -93,6 +163,7 @@ export type Database = {
       }
       papers: {
         Row: {
+          abstract: string | null
           arxiv_id: string | null
           arxiv_url: string | null
           arxiv_version: string | null
@@ -118,6 +189,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          abstract?: string | null
           arxiv_id?: string | null
           arxiv_url?: string | null
           arxiv_version?: string | null
@@ -143,6 +215,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          abstract?: string | null
           arxiv_id?: string | null
           arxiv_url?: string | null
           arxiv_version?: string | null
@@ -307,6 +380,12 @@ export type Database = {
           paper_uuid: string
           similarity: number
           title: string
+        }[]
+      }
+      set_paper_summary_if_null: {
+        Args: { p_paper_uuid: string; p_summary: string }
+        Returns: {
+          was_set: boolean
         }[]
       }
     }

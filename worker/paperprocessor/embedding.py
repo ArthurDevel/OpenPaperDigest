@@ -5,7 +5,7 @@ Uses the text-embedding-3-small model (1536 dimensions) through the existing
 OpenRouter integration. No local model needed.
 
 Responsibilities:
-- Combine title and summary into a single embedding input text
+- Combine title and abstract into a single embedding input text
 - Call the OpenRouter embeddings endpoint
 - Return a single embedding vector for the paper
 """
@@ -24,23 +24,23 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 
-def generate_embedding(title: str, summary: Optional[str] = None) -> List[float]:
+def generate_embedding(title: str, abstract: Optional[str] = None) -> List[float]:
     """
-    Generate a 1536-dimensional embedding for a paper from its title and summary.
+    Generate a 1536-dimensional embedding for a paper from its title and abstract.
 
-    Combines title + summary into a single text and calls OpenRouter's
-    text-embedding-3-small model. Falls back to title-only if summary is None.
+    Combines title + abstract into a single text and calls OpenRouter's
+    text-embedding-3-small model. Falls back to title-only if abstract is None.
 
     Args:
         title: Paper title (required).
-        summary: Optional paper summary text (e.g. five_minute_summary).
+        abstract: Optional paper abstract text.
 
     Returns:
         list[float]: 1536-dimensional embedding vector.
     """
-    # Build the input text from title and optional summary
-    if summary:
-        text = f"{title}\n\n{summary}"
+    # Build the input text from title and optional abstract
+    if abstract:
+        text = f"{title}\n\n{abstract}"
     else:
         text = title
 

@@ -17,7 +17,7 @@
 /**
  * Possible processing states for a paper.
  */
-export type PaperStatus = 'not_started' | 'processing' | 'completed' | 'failed';
+export type PaperStatus = 'not_started' | 'processing' | 'completed' | 'partially_completed' | 'failed';
 
 // ============================================================================
 // INTERFACES - Paper Content Types

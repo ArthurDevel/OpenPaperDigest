@@ -74,8 +74,9 @@ def fetch_papers_without_embeddings(batch_size: int = FETCH_BATCH_SIZE) -> List[
             PaperRecord.paper_uuid,
             PaperRecord.title,
             PaperRecord.summaries,
+            PaperRecord.abstract,
         ).filter(
-            PaperRecord.status == 'completed',
+            PaperRecord.status.in_(['completed', 'partially_completed']),
             PaperRecord.embedding.is_(None),
         ).order_by(PaperRecord.id).limit(batch_size).all()
 
@@ -84,6 +85,7 @@ def fetch_papers_without_embeddings(batch_size: int = FETCH_BATCH_SIZE) -> List[
                 "paper_uuid": row.paper_uuid,
                 "title": row.title,
                 "summaries": row.summaries,
+                "abstract": row.abstract,
             }
             for row in rows
         ]
@@ -164,10 +166,9 @@ def backfill_embeddings_dag():
                     continue
 
                 try:
-                    summaries = paper.get("summaries") or {}
-                    summary = summaries.get("five_minute_summary")
+                    abstract = paper.get("abstract")
 
-                    embedding = generate_embedding(title, summary)
+                    embedding = generate_embedding(title, abstract)
                     save_embedding(paper_uuid, embedding)
                     updated += 1
 

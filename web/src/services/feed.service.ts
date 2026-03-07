@@ -283,7 +283,7 @@ async function fetchColdStartCandidates(
   let query = supabase
     .from('papers')
     .select('paper_uuid, title, authors, finished_at, external_popularity_signals')
-    .eq('status', 'completed')
+    .in('status', ['completed', 'partially_completed'])
     .order('finished_at', { ascending: false })
     .limit(fetchCount);
 
@@ -333,7 +333,7 @@ async function fetchExplorationCandidates(
   let query = supabase
     .from('papers')
     .select('paper_uuid, title, authors, finished_at, external_popularity_signals')
-    .eq('status', 'completed')
+    .in('status', ['completed', 'partially_completed'])
     .order('finished_at', { ascending: false })
     .limit(count);
 

@@ -7,7 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { ExternalLink, Share, Check } from 'lucide-react';
+import { ExternalLink, Share, Check, Loader2, Sparkles, RefreshCw } from 'lucide-react';
 import AddToListButtonMobile from '../../../components/AddToListButtonMobile';
 import CopyMarkdownButton from '../../../components/CopyMarkdownButton';
 import PaperCard from '../../../components/PaperCard';
@@ -35,6 +35,9 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
   const [paperSummaries, setPaperSummaries] = useState<Map<string, PaperSummary>>(new Map());
   const [loadingSummaries, setLoadingSummaries] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [generatedSummary, setGeneratedSummary] = useState<string | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const observerTarget = useRef<HTMLDivElement>(null);
 
@@ -159,6 +162,33 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
     }
   };
 
+  // Generate summary on demand for papers without one
+  const handleGenerateSummary = async () => {
+    setIsGeneratingSummary(true);
+    setGenerateError(null);
+
+    try {
+      const response = await fetch(`/api/papers/${initialPaperData.paperId}/generate-summary`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate summary');
+      }
+
+      const data = await response.json();
+      setGeneratedSummary(data.summary);
+    } catch (err) {
+      setGenerateError(err instanceof Error ? err.message : 'Failed to generate summary');
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
+
+  // The effective summary is either the initial one or the freshly generated one
+  const effectiveSummary = initialPaperData.fiveMinuteSummary || generatedSummary;
+
   return (
     <main className="w-full">
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -207,7 +237,7 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
               </div>
 
               {/* Five minute summary */}
-              {initialPaperData.fiveMinuteSummary && (
+              {effectiveSummary ? (
                 <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
                   <div className="mb-2 flex items-center gap-2">
                     <span className="inline-block px-2 py-0.5 text-xs font-medium rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
@@ -219,13 +249,13 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
                       remarkPlugins={[remarkGfm, remarkMath]}
                       rehypePlugins={[rehypeKatex]}
                     >
-                      {preprocessBacktickedMath(initialPaperData.fiveMinuteSummary)}
+                      {preprocessBacktickedMath(effectiveSummary)}
                     </ReactMarkdown>
                   </div>
 
                   {/* Action buttons - bottom right corner */}
                   <div className="mt-4 flex items-center justify-end gap-2">
-                    <CopyMarkdownButton paperUuid={initialPaperData.paperId} fiveMinuteSummary={initialPaperData.fiveMinuteSummary} />
+                    <CopyMarkdownButton paperUuid={initialPaperData.paperId} fiveMinuteSummary={effectiveSummary} />
                     <AddToListButtonMobile paperId={initialPaperData.paperId} />
                     <button
                       onClick={handleShare}
@@ -243,6 +273,39 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
                       )}
                     </button>
                   </div>
+                </div>
+              ) : isGeneratingSummary ? (
+                <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-6 border border-gray-200 dark:border-gray-700 flex flex-col items-center justify-center gap-3">
+                  <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Generating summary... This usually takes about 10 seconds.
+                  </p>
+                </div>
+              ) : generateError ? (
+                <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-4 border border-red-200 dark:border-red-800 flex items-center justify-between gap-3">
+                  <p className="text-sm text-red-700 dark:text-red-300">
+                    Failed to generate summary. Try again?
+                  </p>
+                  <button
+                    onClick={handleGenerateSummary}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 text-xs font-medium transition-colors"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-6 border border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center gap-3">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
+                    This paper doesn't have a summary yet.
+                  </p>
+                  <button
+                    onClick={handleGenerateSummary}
+                    className="flex items-center gap-2 px-4 py-2 rounded-md bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Generate Summary (~10s)
+                  </button>
                 </div>
               )}
             </div>

@@ -160,6 +160,10 @@ async def _download_and_process_paper(job: JobInfo) -> ProcessedDocument:
     processed_document.paper_uuid = job.paper_uuid
     processed_document.arxiv_id = job.arxiv_id
 
+    # Set abstract from arXiv metadata if available
+    if job.arxiv_id and hasattr(pdf_data, 'metadata') and pdf_data.metadata:
+        processed_document.abstract = pdf_data.metadata.summary
+
     return processed_document
 
 
