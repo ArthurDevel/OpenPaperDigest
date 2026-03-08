@@ -26,9 +26,13 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 S2_API_BASE = 'https://api.semanticscholar.org/graph/v1'
-RATE_LIMIT_DELAY = 4.0  # seconds between requests (free tier: 100 req / 5 min, need >= 3s)
-MAX_RETRIES = 3
-RETRY_BASE_DELAY = 10.0  # seconds, doubles each retry on 429
+
+# NOTE: The free-tier rate limit (100 req / 5 min) is shared globally across
+# ALL unauthenticated users, so adding a long delay between our requests
+# doesn't actually help — other users consume the budget too. Instead we
+# retry quickly (1s) on 429 until we get through.
+RETRY_DELAY = 1.0   # seconds between retries on 429
+MAX_RETRIES = 10     # enough attempts to ride out short contention windows
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -44,15 +48,11 @@ def _get_headers() -> dict:
     return headers
 
 
-def _rate_limit() -> None:
-    """Sleep to respect Semantic Scholar rate limits."""
-    time.sleep(RATE_LIMIT_DELAY)
-
-
 def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
     """
     Make an HTTP request with retry on 429 (rate limit) responses.
-    Uses exponential backoff starting at RETRY_BASE_DELAY seconds.
+    Retries every RETRY_DELAY seconds — the free-tier limit is shared
+    globally so there's no point backing off exponentially.
 
     @param method: HTTP method ('get' or 'post')
     @param url: Request URL
@@ -64,9 +64,8 @@ def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
         if response.status_code != 429:
             response.raise_for_status()
             return response
-        delay = RETRY_BASE_DELAY * (2 ** attempt)
-        logger.warning(f"S2 rate limited (429), retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})")
-        time.sleep(delay)
+        logger.warning(f"S2 rate limited (429), retrying in {RETRY_DELAY}s (attempt {attempt + 1}/{MAX_RETRIES})")
+        time.sleep(RETRY_DELAY)
 
     # Final attempt, let it raise
     response = getattr(requests, method)(url, **kwargs)
@@ -102,8 +101,6 @@ def fetch_paper_authors(arxiv_id: str) -> S2PaperAuthors:
             name=author_data.get('name', 'Unknown'),
         ))
 
-    _rate_limit()
-
     return S2PaperAuthors(
         s2_paper_id=data.get('paperId', ''),
         arxiv_id=arxiv_id,
@@ -123,8 +120,6 @@ def fetch_author_stats(s2_author_id: str) -> S2Author:
 
     response = _request_with_retry('get', url, headers=_get_headers(), params=params, timeout=30)
     data = response.json()
-
-    _rate_limit()
 
     return S2Author(
         s2_author_id=s2_author_id,
@@ -157,8 +152,6 @@ def fetch_paper_authors_batch(arxiv_ids: List[str]) -> List[S2PaperAuthors]:
         timeout=60,
     )
     results = response.json()
-
-    _rate_limit()
 
     paper_authors_list = []
     for i, paper_data in enumerate(results):
