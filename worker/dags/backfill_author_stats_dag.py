@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 
 from airflow.decorators import dag, task
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, '/opt/airflow')
@@ -107,8 +108,20 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
     print(f"  S2 returned {len(batch_results)} results, processing DB upserts...")
 
     # Use a single session for the whole batch to avoid connection overhead per paper.
-    # Flush periodically so the in-session cache stays queryable for dedup checks.
-    with database_session() as session:
+    # On connection failure (OperationalError), close and get a fresh session.
+    session: Session = SessionLocal()
+
+    def _reconnect() -> Session:
+        nonlocal session
+        try:
+            session.close()
+        except Exception:
+            pass
+        print("  Reconnecting to database...")
+        session = SessionLocal()
+        return session
+
+    try:
         for i, s2_result in enumerate(batch_results):
             paper = arxiv_to_paper.get(s2_result.arxiv_id)
             if not paper:
@@ -154,10 +167,18 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
                             author_order=order,
                         ))
                         authors_linked += 1
+
+                session.commit()
+            except OperationalError as e:
+                print(f"  FAIL paper {paper['arxiv_id']} (connection lost): {e}")
+                session = _reconnect()
+                papers_failed += 1
             except Exception as e:
                 print(f"  FAIL paper {paper['arxiv_id']}: {e}")
                 session.rollback()
                 papers_failed += 1
+    finally:
+        session.close()
 
     return {
         "authors_linked": authors_linked,
