@@ -2,12 +2,12 @@
 Backfill author data from Semantic Scholar for all existing papers.
 
 One-time Airflow DAG that populates the `authors` and `paper_authors` tables.
-For each paper with an arxiv_id, fetches author IDs from Semantic Scholar,
-creates/upserts author records, and links them via the junction table.
+Uses the S2 batch endpoint (/paper/batch, up to 500 papers per request) to
+minimize API calls and avoid rate limits.
 
 Responsibilities:
 - Find papers without author links in paper_authors
-- Fetch author IDs from Semantic Scholar API
+- Batch-fetch author IDs from Semantic Scholar API (1 request per batch)
 - Upsert author records
 - Create paper_authors junction rows
 - Refresh author stats (h-index, citation count, paper count)
@@ -17,11 +17,10 @@ import sys
 import pendulum
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from airflow.decorators import dag, task
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 sys.path.insert(0, '/opt/airflow')
 
@@ -32,7 +31,8 @@ from papers.db.models import PaperRecord, AuthorRecord, PaperAuthorRecord
 # CONSTANTS
 # ============================================================================
 
-FETCH_BATCH_SIZE = 50
+# S2 batch endpoint accepts up to 500 IDs per request
+BATCH_SIZE = 500
 STALE_DAYS = 7  # refresh author stats older than this
 
 # ============================================================================
@@ -59,7 +59,7 @@ def database_session():
         session.close()
 
 
-def fetch_papers_without_author_links(batch_size: int = FETCH_BATCH_SIZE) -> List[Dict]:
+def fetch_papers_without_author_links(batch_size: int = BATCH_SIZE) -> List[Dict]:
     """
     Query papers with arxiv_id that have no entries in paper_authors.
 
@@ -67,7 +67,6 @@ def fetch_papers_without_author_links(batch_size: int = FETCH_BATCH_SIZE) -> Lis
     @returns List of dicts with paper id, paper_uuid, and arxiv_id
     """
     with database_session() as session:
-        # Find papers that have no rows in paper_authors
         rows = session.query(
             PaperRecord.id,
             PaperRecord.paper_uuid,
@@ -85,54 +84,73 @@ def fetch_papers_without_author_links(batch_size: int = FETCH_BATCH_SIZE) -> Lis
         ]
 
 
-def link_paper_authors(paper: Dict) -> Dict:
+def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
     """
-    Fetch author IDs from Semantic Scholar and create DB records.
+    Batch-fetch author IDs from Semantic Scholar and create DB records.
+    Uses /paper/batch endpoint (1 API call for up to 500 papers).
 
-    @param paper: Dict with id, paper_uuid, arxiv_id
-    @returns Dict with counts of authors_linked and authors_created
+    @param papers: List of dicts with id, paper_uuid, arxiv_id
+    @returns Dict with counts of authors_linked, authors_created, papers_failed
     """
-    from shared.semantic_scholar.client import fetch_paper_authors
+    from shared.semantic_scholar.client import fetch_paper_authors_batch
 
-    s2_result = fetch_paper_authors(paper["arxiv_id"])
+    arxiv_ids = [p["arxiv_id"] for p in papers]
+    arxiv_to_paper = {p["arxiv_id"]: p for p in papers}
+
+    # Single batch API call
+    batch_results = fetch_paper_authors_batch(arxiv_ids)
 
     authors_linked = 0
     authors_created = 0
+    papers_failed = 0
 
-    with database_session() as session:
-        for order, s2_author in enumerate(s2_result.authors, start=1):
-            # Upsert author: create if new s2_author_id, skip if exists
-            existing = session.query(AuthorRecord).filter(
-                AuthorRecord.s2_author_id == s2_author.s2_author_id
-            ).first()
+    for s2_result in batch_results:
+        paper = arxiv_to_paper.get(s2_result.arxiv_id)
+        if not paper:
+            continue
 
-            if existing:
-                author_id = existing.id
-            else:
-                new_author = AuthorRecord(
-                    s2_author_id=s2_author.s2_author_id,
-                    name=s2_author.name,
-                )
-                session.add(new_author)
-                session.flush()
-                author_id = new_author.id
-                authors_created += 1
+        try:
+            with database_session() as session:
+                for order, s2_author in enumerate(s2_result.authors, start=1):
+                    # Upsert author: create if new s2_author_id, skip if exists
+                    existing = session.query(AuthorRecord).filter(
+                        AuthorRecord.s2_author_id == s2_author.s2_author_id
+                    ).first()
 
-            # Create junction row (skip if already exists)
-            existing_link = session.query(PaperAuthorRecord).filter(
-                PaperAuthorRecord.paper_id == paper["id"],
-                PaperAuthorRecord.author_id == author_id,
-            ).first()
+                    if existing:
+                        author_id = existing.id
+                    else:
+                        new_author = AuthorRecord(
+                            s2_author_id=s2_author.s2_author_id,
+                            name=s2_author.name,
+                        )
+                        session.add(new_author)
+                        session.flush()
+                        author_id = new_author.id
+                        authors_created += 1
 
-            if not existing_link:
-                session.add(PaperAuthorRecord(
-                    paper_id=paper["id"],
-                    author_id=author_id,
-                    author_order=order,
-                ))
-                authors_linked += 1
+                    # Create junction row (skip if already exists)
+                    existing_link = session.query(PaperAuthorRecord).filter(
+                        PaperAuthorRecord.paper_id == paper["id"],
+                        PaperAuthorRecord.author_id == author_id,
+                    ).first()
 
-    return {"authors_linked": authors_linked, "authors_created": authors_created}
+                    if not existing_link:
+                        session.add(PaperAuthorRecord(
+                            paper_id=paper["id"],
+                            author_id=author_id,
+                            author_order=order,
+                        ))
+                        authors_linked += 1
+        except Exception as e:
+            print(f"  FAIL paper {paper['arxiv_id']}: {e}")
+            papers_failed += 1
+
+    return {
+        "authors_linked": authors_linked,
+        "authors_created": authors_created,
+        "papers_failed": papers_failed,
+    }
 
 
 def refresh_author_stats(stale_days: int = STALE_DAYS) -> Dict[str, int]:
@@ -195,7 +213,8 @@ def refresh_author_stats(stale_days: int = STALE_DAYS) -> Dict[str, int]:
     ### Backfill Author Stats DAG
 
     **ONE-TIME USE DAG**: Populates the `authors` and `paper_authors` tables
-    for all existing papers using the Semantic Scholar API.
+    for all existing papers using the Semantic Scholar batch API.
+    Uses /paper/batch (up to 500 papers per request) to minimize API calls.
     """,
 )
 def backfill_author_stats_dag():
@@ -203,7 +222,7 @@ def backfill_author_stats_dag():
     @task
     def process_all_papers() -> Dict[str, int]:
         """
-        Link authors for all papers, then refresh stats.
+        Batch-link authors for all papers, then refresh stats.
 
         @returns Dict with total counts
         """
@@ -212,26 +231,21 @@ def backfill_author_stats_dag():
         total_created = 0
         total_failed = 0
 
-        # Phase 1: Link paper authors
+        # Phase 1: Link paper authors using batch endpoint
         while True:
-            papers = fetch_papers_without_author_links(batch_size=FETCH_BATCH_SIZE)
+            papers = fetch_papers_without_author_links(batch_size=BATCH_SIZE)
             if not papers:
                 break
 
+            total_papers += len(papers)
             print(f"Fetched batch of {len(papers)} papers (total so far: {total_papers})")
 
-            for paper in papers:
-                total_papers += 1
-                try:
-                    result = link_paper_authors(paper)
-                    total_linked += result["authors_linked"]
-                    total_created += result["authors_created"]
-                except Exception as e:
-                    print(f"  FAIL paper {paper['arxiv_id']}: {e}")
-                    total_failed += 1
+            result = link_batch_authors(papers)
+            total_linked += result["authors_linked"]
+            total_created += result["authors_created"]
+            total_failed += result["papers_failed"]
 
-                if total_papers % 50 == 0:
-                    print(f"  Progress: {total_papers} papers processed")
+            print(f"  Linked {result['authors_linked']} authors, created {result['authors_created']} new")
 
         # Phase 2: Refresh author stats
         print("\nRefreshing author stats...")

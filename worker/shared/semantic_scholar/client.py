@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 S2_API_BASE = 'https://api.semanticscholar.org/graph/v1'
-RATE_LIMIT_DELAY = 1.0  # seconds between requests (safe for API key tier)
+RATE_LIMIT_DELAY = 4.0  # seconds between requests (free tier: 100 req / 5 min, need >= 3s)
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 10.0  # seconds, doubles each retry on 429
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -47,6 +49,31 @@ def _rate_limit() -> None:
     time.sleep(RATE_LIMIT_DELAY)
 
 
+def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
+    """
+    Make an HTTP request with retry on 429 (rate limit) responses.
+    Uses exponential backoff starting at RETRY_BASE_DELAY seconds.
+
+    @param method: HTTP method ('get' or 'post')
+    @param url: Request URL
+    @param kwargs: Additional arguments passed to requests.get/post
+    @returns Response object
+    """
+    for attempt in range(MAX_RETRIES):
+        response = getattr(requests, method)(url, **kwargs)
+        if response.status_code != 429:
+            response.raise_for_status()
+            return response
+        delay = RETRY_BASE_DELAY * (2 ** attempt)
+        logger.warning(f"S2 rate limited (429), retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})")
+        time.sleep(delay)
+
+    # Final attempt, let it raise
+    response = getattr(requests, method)(url, **kwargs)
+    response.raise_for_status()
+    return response
+
+
 # ============================================================================
 # MAIN ENTRYPOINTS
 # ============================================================================
@@ -62,8 +89,7 @@ def fetch_paper_authors(arxiv_id: str) -> S2PaperAuthors:
     url = f'{S2_API_BASE}/paper/ARXIV:{arxiv_id}'
     params = {'fields': 'authors,authors.authorId,authors.name'}
 
-    response = requests.get(url, headers=_get_headers(), params=params, timeout=30)
-    response.raise_for_status()
+    response = _request_with_retry('get', url, headers=_get_headers(), params=params, timeout=30)
     data = response.json()
 
     authors = []
@@ -95,8 +121,7 @@ def fetch_author_stats(s2_author_id: str) -> S2Author:
     url = f'{S2_API_BASE}/author/{s2_author_id}'
     params = {'fields': 'name,affiliations,homepage,paperCount,citationCount,hIndex'}
 
-    response = requests.get(url, headers=_get_headers(), params=params, timeout=30)
-    response.raise_for_status()
+    response = _request_with_retry('get', url, headers=_get_headers(), params=params, timeout=30)
     data = response.json()
 
     _rate_limit()
@@ -124,14 +149,13 @@ def fetch_paper_authors_batch(arxiv_ids: List[str]) -> List[S2PaperAuthors]:
 
     paper_ids = [f'ARXIV:{aid}' for aid in arxiv_ids]
 
-    response = requests.post(
-        url,
+    response = _request_with_retry(
+        'post', url,
         headers=_get_headers(),
         params=params,
         json={'ids': paper_ids},
         timeout=60,
     )
-    response.raise_for_status()
     results = response.json()
 
     _rate_limit()

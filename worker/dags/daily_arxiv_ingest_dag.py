@@ -38,7 +38,6 @@ ARXIV_API_BASE = 'http://export.arxiv.org/api/query'
 ARXIV_CATEGORY = 'cs.*'
 MAX_RESULTS_PER_QUERY = 200
 ARXIV_API_DELAY = 3.0  # seconds between paginated arXiv API calls
-S2_LINK_DELAY = 1.0    # seconds between Semantic Scholar calls
 
 
 # ============================================================================
@@ -153,58 +152,69 @@ def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dic
     return all_papers
 
 
-def link_authors_for_paper(paper_db_id: int, arxiv_id: str) -> int:
+def link_authors_batch(paper_records: List[Dict]) -> Dict[str, int]:
     """
-    Fetch author IDs from Semantic Scholar and link them to the paper.
+    Batch-fetch author IDs from Semantic Scholar and link them to papers.
+    Uses /paper/batch endpoint (1 API call for up to 500 papers).
     Best-effort: failures are logged but don't block ingestion.
 
-    @param paper_db_id: Database primary key of the paper
-    @param arxiv_id: arXiv identifier for S2 lookup
-    @returns Number of authors linked
+    @param paper_records: List of dicts with id (DB pk) and arxiv_id
+    @returns Dict with authors_linked and authors_created counts
     """
-    from shared.semantic_scholar.client import fetch_paper_authors
+    from shared.semantic_scholar.client import fetch_paper_authors_batch
+
+    arxiv_ids = [p["arxiv_id"] for p in paper_records]
+    arxiv_to_paper = {p["arxiv_id"]: p for p in paper_records}
 
     try:
-        s2_result = fetch_paper_authors(arxiv_id)
+        batch_results = fetch_paper_authors_batch(arxiv_ids)
     except Exception as e:
-        print(f"    S2 lookup failed for {arxiv_id}: {e}")
-        return 0
+        print(f"    S2 batch lookup failed: {e}")
+        return {"authors_linked": 0, "authors_created": 0}
 
-    linked = 0
+    authors_linked = 0
+    authors_created = 0
 
-    with database_session() as session:
-        for order, s2_author in enumerate(s2_result.authors, start=1):
-            # Upsert author record
-            existing = session.query(AuthorRecord).filter(
-                AuthorRecord.s2_author_id == s2_author.s2_author_id
-            ).first()
+    for s2_result in batch_results:
+        paper = arxiv_to_paper.get(s2_result.arxiv_id)
+        if not paper:
+            continue
 
-            if existing:
-                author_id = existing.id
-            else:
-                new_author = AuthorRecord(
-                    s2_author_id=s2_author.s2_author_id,
-                    name=s2_author.name,
-                )
-                session.add(new_author)
-                session.flush()
-                author_id = new_author.id
+        try:
+            with database_session() as session:
+                for order, s2_author in enumerate(s2_result.authors, start=1):
+                    existing = session.query(AuthorRecord).filter(
+                        AuthorRecord.s2_author_id == s2_author.s2_author_id
+                    ).first()
 
-            # Create junction row (skip duplicates)
-            existing_link = session.query(PaperAuthorRecord).filter(
-                PaperAuthorRecord.paper_id == paper_db_id,
-                PaperAuthorRecord.author_id == author_id,
-            ).first()
+                    if existing:
+                        author_id = existing.id
+                    else:
+                        new_author = AuthorRecord(
+                            s2_author_id=s2_author.s2_author_id,
+                            name=s2_author.name,
+                        )
+                        session.add(new_author)
+                        session.flush()
+                        author_id = new_author.id
+                        authors_created += 1
 
-            if not existing_link:
-                session.add(PaperAuthorRecord(
-                    paper_id=paper_db_id,
-                    author_id=author_id,
-                    author_order=order,
-                ))
-                linked += 1
+                    existing_link = session.query(PaperAuthorRecord).filter(
+                        PaperAuthorRecord.paper_id == paper["id"],
+                        PaperAuthorRecord.author_id == author_id,
+                    ).first()
 
-    return linked
+                    if not existing_link:
+                        session.add(PaperAuthorRecord(
+                            paper_id=paper["id"],
+                            author_id=author_id,
+                            author_order=order,
+                        ))
+                        authors_linked += 1
+        except Exception as e:
+            print(f"    FAIL paper {paper['arxiv_id']}: {e}")
+
+    return {"authors_linked": authors_linked, "authors_created": authors_created}
 
 
 # ============================================================================
@@ -280,27 +290,26 @@ def daily_arxiv_ingest_dag():
                     failed += 1
                     continue
 
-        # Link authors in a separate pass (best-effort, outside the main transaction)
-        print('\nLinking authors via Semantic Scholar...')
-        for paper in papers:
-            arxiv_id = paper['arxiv_id']
-            if not arxiv_id:
-                continue
+        # Link authors in a separate pass using batch endpoint (best-effort)
+        print('\nLinking authors via Semantic Scholar (batch)...')
+        arxiv_ids_to_link = [p['arxiv_id'] for p in papers if p.get('arxiv_id')]
+        paper_records_for_linking = []
 
-            # Look up the DB record to get the primary key
-            try:
-                with database_session() as session:
-                    record = session.query(PaperRecord).filter(
-                        PaperRecord.arxiv_id == arxiv_id
-                    ).first()
-                    if not record:
-                        continue
-                    paper_db_id = record.id
+        with database_session() as session:
+            for arxiv_id in arxiv_ids_to_link:
+                record = session.query(PaperRecord).filter(
+                    PaperRecord.arxiv_id == arxiv_id
+                ).first()
+                if record:
+                    paper_records_for_linking.append({
+                        "id": record.id,
+                        "arxiv_id": arxiv_id,
+                    })
 
-                linked = link_authors_for_paper(paper_db_id, arxiv_id)
-                authors_linked_total += linked
-            except Exception as e:
-                print(f'  Author link failed for {arxiv_id}: {e}')
+        if paper_records_for_linking:
+            link_result = link_authors_batch(paper_records_for_linking)
+            authors_linked_total = link_result["authors_linked"]
+            print(f'  Linked {link_result["authors_linked"]} authors, created {link_result["authors_created"]} new')
 
         # Report
         print('\n' + '=' * 50)
