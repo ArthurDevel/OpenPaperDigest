@@ -182,6 +182,7 @@ def link_authors_batch(paper_records: List[Dict]) -> Dict[str, int]:
 
         try:
             with database_session() as session:
+                seen_author_ids = set()  # S2 can return duplicate authors per paper
                 for order, s2_author in enumerate(s2_result.authors, start=1):
                     existing = session.query(AuthorRecord).filter(
                         AuthorRecord.s2_author_id == s2_author.s2_author_id
@@ -198,6 +199,10 @@ def link_authors_batch(paper_records: List[Dict]) -> Dict[str, int]:
                         session.flush()
                         author_id = new_author.id
                         authors_created += 1
+
+                    if author_id in seen_author_ids:
+                        continue
+                    seen_author_ids.add(author_id)
 
                     existing_link = session.query(PaperAuthorRecord).filter(
                         PaperAuthorRecord.paper_id == paper["id"],
