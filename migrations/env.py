@@ -20,7 +20,7 @@ load_dotenv(env_path)
 # Import Base and models for autogenerate
 from shared.db import Base
 # Import all models so they register with Base.metadata
-from papers.db.models import PaperRecord, PaperSlugRecord, PaperStatusHistory
+from papers.db.models import PaperRecord, PaperSlugRecord, PaperStatusHistory, AuthorRecord, PaperAuthorRecord
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

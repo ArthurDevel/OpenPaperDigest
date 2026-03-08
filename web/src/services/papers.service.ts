@@ -64,7 +64,7 @@ export async function listMinimalPapers(
   const { data: papersData, error: papersError } = await supabase
     .from('papers')
     .select('paper_uuid, title, authors')
-    .eq('status', 'completed')
+    .in('status', ['completed', 'partially_completed'])
     .order('finished_at', { ascending: false })
     .range(offset, offset + limit);
 
@@ -294,7 +294,7 @@ export async function countPapersSince(since: Date): Promise<number> {
   const { count, error } = await supabase
     .from('papers')
     .select('*', { count: 'exact', head: true })
-    .eq('status', 'completed')
+    .in('status', ['completed', 'partially_completed'])
     .gte('finished_at', since.toISOString());
 
   if (error) throw new Error(error.message);
@@ -324,7 +324,7 @@ export async function checkArxivExists(arxivIdOrUrl: string): Promise<CheckArxiv
 
   const paper = paperData as Tables<'papers'> | null;
 
-  if (!paper || paper.status !== 'completed') {
+  if (!paper || !['completed', 'partially_completed'].includes(paper.status)) {
     return { exists: false, viewerUrl: null };
   }
 
@@ -903,7 +903,7 @@ export async function getCumulativeDailyStats(): Promise<CumulativeDailyItem[]> 
         .from('papers')
         .select('*', { count: 'exact', head: true })
         .lte('created_at', endOfDayStr)
-        .eq('status', 'completed')
+        .in('status', ['completed', 'partially_completed'])
         .lte('finished_at', endOfDayStr),
       supabase
         .from('papers')

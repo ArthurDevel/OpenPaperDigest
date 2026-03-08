@@ -210,6 +210,7 @@ def create_paper(
     pdf_url: Optional[str] = None,
     title: Optional[str] = None,
     authors: Optional[str] = None,
+    abstract: Optional[str] = None,
     external_popularity_signals: Optional[List[ExternalPopularitySignal]] = None,
     initiated_by_user_id: Optional[str] = None
 ) -> Paper:
@@ -288,6 +289,12 @@ def create_paper(
     # Step 4: Persist to database using internal layer
     create_paper_record(db, paper_dto)
 
+    # Step 5: Store abstract if provided
+    if abstract:
+        record = get_paper_record(db, paper_dto.paper_uuid)
+        record.abstract = abstract
+        db.flush()
+
     return paper_dto
 
 
@@ -318,13 +325,13 @@ def list_minimal_papers(db: Session, page: Optional[int] = None, limit: Optional
         offset = (page - 1) * limit
 
         # Get total count of completed papers
-        total_count = db.query(PaperRecord).filter(PaperRecord.status == "completed").count()
+        total_count = db.query(PaperRecord).filter(PaperRecord.status.in_(["completed", "partially_completed"])).count()
 
         # Query paginated papers
-        completed_papers = list_paper_records(db, statuses=["completed"], limit=limit, offset=offset)
+        completed_papers = list_paper_records(db, statuses=["completed", "partially_completed"], limit=limit, offset=offset)
     else:
         # Legacy behavior: return all papers
-        completed_papers = list_paper_records(db, statuses=["completed"], limit=1000)
+        completed_papers = list_paper_records(db, statuses=["completed", "partially_completed"], limit=1000)
 
     # Step 2: Build slug mapping (latest non-tombstone per paper_uuid)
     slug_records = get_all_paper_slugs(db, non_tombstone_only=True)
@@ -522,12 +529,13 @@ def save_paper(db: Session, processed_content: ProcessedDocument) -> Paper:
         'arxiv_id': arxiv_id,
         'title': processed_content.title,
         'authors': processed_content.authors,
-        'status': 'completed',
+        'status': 'completed' if processed_content.five_minute_summary else 'partially_completed',
         'num_pages': len(processed_content.pages),
         'total_cost': result_dict["total_cost"],
         'avg_cost_per_page': result_dict["avg_cost_per_page"],
         'summaries': {"five_minute_summary": processed_content.five_minute_summary},
         'embedding': processed_content.embedding,
+        'abstract': processed_content.abstract,
         'finished_at': datetime.utcnow(),
     }
 

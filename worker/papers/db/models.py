@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text, UniqueConstraint, Float, Boolean, Index, JSON, Date
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Float, Boolean, Index, JSON, Date
 from pgvector.sqlalchemy import Vector
 
 from shared.db import Base
@@ -42,6 +42,7 @@ class PaperRecord(Base):
     pdf_url = Column(String(512), nullable=True)
     # 1536-dim embedding vector from text-embedding-3-small via OpenRouter
     embedding = Column(Vector(1536), nullable=True)
+    abstract = Column(Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("paper_uuid", name="uq_papers_paper_uuid"),
@@ -63,6 +64,38 @@ class PaperSlugRecord(Base):
     # Tombstone preserves the slug after deletion of the paper
     tombstone = Column(Boolean, nullable=False, default=False)
     deleted_at = Column(DateTime, nullable=True)
+
+
+class AuthorRecord(Base):
+    """SQLAlchemy model for authors table (Semantic Scholar data)."""
+    __tablename__ = "authors"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    s2_author_id = Column(String(64), unique=True, nullable=False)
+    name = Column(String(512), nullable=False)
+    affiliations = Column(JSON, nullable=True)
+    homepage = Column(String(512), nullable=True)
+    paper_count = Column(Integer, nullable=True)
+    citation_count = Column(Integer, nullable=True)
+    h_index = Column(Integer, nullable=True)
+    stats_updated_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class PaperAuthorRecord(Base):
+    """SQLAlchemy model for paper_authors junction table."""
+    __tablename__ = "paper_authors"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    paper_id = Column(BigInteger, ForeignKey("papers.id"), nullable=False)
+    author_id = Column(BigInteger, ForeignKey("authors.id"), nullable=False)
+    author_order = Column(Integer, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("paper_id", "author_id", name="uq_paper_authors"),
+        Index("ix_paper_authors_paper_id", "paper_id"),
+        Index("ix_paper_authors_author_id", "author_id"),
+    )
 
 
 class PaperStatusHistory(Base):
