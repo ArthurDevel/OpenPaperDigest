@@ -104,10 +104,15 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
     authors_created = 0
     papers_failed = 0
 
-    for s2_result in batch_results:
+    print(f"  S2 returned {len(batch_results)} results, processing DB upserts...")
+
+    for i, s2_result in enumerate(batch_results):
         paper = arxiv_to_paper.get(s2_result.arxiv_id)
         if not paper:
             continue
+
+        if (i + 1) % 50 == 0:
+            print(f"  Progress: {i + 1}/{len(batch_results)} papers processed ({authors_linked} linked, {authors_created} created)")
 
         try:
             with database_session() as session:
@@ -179,7 +184,12 @@ def refresh_author_stats(stale_days: int = STALE_DAYS) -> Dict[str, int]:
 
         author_ids = [(a.id, a.s2_author_id) for a in stale_authors]
 
-    for author_db_id, s2_id in author_ids:
+    print(f"  Found {len(author_ids)} authors needing stats refresh")
+
+    for idx, (author_db_id, s2_id) in enumerate(author_ids):
+        if (idx + 1) % 50 == 0:
+            print(f"  Stats progress: {idx + 1}/{len(author_ids)} ({refreshed} refreshed, {failed} failed)")
+
         try:
             stats = fetch_author_stats(s2_id)
             with database_session() as session:
