@@ -20,7 +20,6 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 
 from airflow.decorators import dag, task
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, '/opt/airflow')
@@ -107,30 +106,19 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
 
     print(f"  S2 returned {len(batch_results)} results, processing DB upserts...")
 
-    # Use a single session for the whole batch to avoid connection overhead per paper.
-    # On connection failure (OperationalError), close and get a fresh session.
-    session: Session = SessionLocal()
+    # One session per paper: pool_pre_ping=True on the engine handles stale
+    # connections transparently, so each database_session() is resilient to
+    # transient DNS/connection failures without manual reconnect logic.
+    for i, s2_result in enumerate(batch_results):
+        paper = arxiv_to_paper.get(s2_result.arxiv_id)
+        if not paper:
+            continue
 
-    def _reconnect() -> Session:
-        nonlocal session
+        if (i + 1) % 50 == 0:
+            print(f"  Progress: {i + 1}/{len(batch_results)} papers processed ({authors_linked} linked, {authors_created} created)")
+
         try:
-            session.close()
-        except Exception:
-            pass
-        print("  Reconnecting to database...")
-        session = SessionLocal()
-        return session
-
-    try:
-        for i, s2_result in enumerate(batch_results):
-            paper = arxiv_to_paper.get(s2_result.arxiv_id)
-            if not paper:
-                continue
-
-            if (i + 1) % 50 == 0:
-                print(f"  Progress: {i + 1}/{len(batch_results)} papers processed ({authors_linked} linked, {authors_created} created)")
-
-            try:
+            with database_session() as session:
                 seen_author_ids = set()  # S2 can return duplicate authors per paper
                 for order, s2_author in enumerate(s2_result.authors, start=1):
                     # Upsert author: create if new s2_author_id, skip if exists
@@ -167,18 +155,9 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
                             author_order=order,
                         ))
                         authors_linked += 1
-
-                session.commit()
-            except OperationalError as e:
-                print(f"  FAIL paper {paper['arxiv_id']} (connection lost): {e}")
-                session = _reconnect()
-                papers_failed += 1
-            except Exception as e:
-                print(f"  FAIL paper {paper['arxiv_id']}: {e}")
-                session.rollback()
-                papers_failed += 1
-    finally:
-        session.close()
+        except Exception as e:
+            print(f"  FAIL paper {paper['arxiv_id']}: {e}")
+            papers_failed += 1
 
     return {
         "authors_linked": authors_linked,

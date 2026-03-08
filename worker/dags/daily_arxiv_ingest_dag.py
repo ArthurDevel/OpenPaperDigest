@@ -21,7 +21,6 @@ from datetime import datetime
 from typing import List, Dict, Optional
 
 from airflow.decorators import dag, task
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, '/opt/airflow')
@@ -176,25 +175,16 @@ def link_authors_batch(paper_records: List[Dict]) -> Dict[str, int]:
     authors_linked = 0
     authors_created = 0
 
-    session: Session = SessionLocal()
+    # One session per paper: pool_pre_ping=True on the engine handles stale
+    # connections transparently, so each database_session() is resilient to
+    # transient DNS/connection failures without manual reconnect logic.
+    for s2_result in batch_results:
+        paper = arxiv_to_paper.get(s2_result.arxiv_id)
+        if not paper:
+            continue
 
-    def _reconnect() -> Session:
-        nonlocal session
         try:
-            session.close()
-        except Exception:
-            pass
-        print("    Reconnecting to database...")
-        session = SessionLocal()
-        return session
-
-    try:
-        for s2_result in batch_results:
-            paper = arxiv_to_paper.get(s2_result.arxiv_id)
-            if not paper:
-                continue
-
-            try:
+            with database_session() as session:
                 seen_author_ids = set()  # S2 can return duplicate authors per paper
                 for order, s2_author in enumerate(s2_result.authors, start=1):
                     existing = session.query(AuthorRecord).filter(
@@ -229,16 +219,8 @@ def link_authors_batch(paper_records: List[Dict]) -> Dict[str, int]:
                             author_order=order,
                         ))
                         authors_linked += 1
-
-                session.commit()
-            except OperationalError as e:
-                print(f"    FAIL paper {paper['arxiv_id']} (connection lost): {e}")
-                session = _reconnect()
-            except Exception as e:
-                print(f"    FAIL paper {paper['arxiv_id']}: {e}")
-                session.rollback()
-    finally:
-        session.close()
+        except Exception as e:
+            print(f"    FAIL paper {paper['arxiv_id']}: {e}")
 
     return {"authors_linked": authors_linked, "authors_created": authors_created}
 
