@@ -98,7 +98,12 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
     arxiv_to_paper = {p["arxiv_id"]: p for p in papers}
 
     # Single batch API call
-    batch_results = fetch_paper_authors_batch(arxiv_ids)
+    print(f"  Sending {len(arxiv_ids)} IDs to S2 batch: {arxiv_ids[:5]}{'...' if len(arxiv_ids) > 5 else ''}")
+    try:
+        batch_results = fetch_paper_authors_batch(arxiv_ids)
+    except Exception as e:
+        print(f"  S2 batch call failed: {e}")
+        return {"authors_linked": 0, "authors_created": 0, "papers_failed": len(papers)}
 
     authors_linked = 0
     authors_created = 0
