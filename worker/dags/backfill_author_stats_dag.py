@@ -106,16 +106,18 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
 
     print(f"  S2 returned {len(batch_results)} results, processing DB upserts...")
 
-    for i, s2_result in enumerate(batch_results):
-        paper = arxiv_to_paper.get(s2_result.arxiv_id)
-        if not paper:
-            continue
+    # Use a single session for the whole batch to avoid connection overhead per paper.
+    # Flush periodically so the in-session cache stays queryable for dedup checks.
+    with database_session() as session:
+        for i, s2_result in enumerate(batch_results):
+            paper = arxiv_to_paper.get(s2_result.arxiv_id)
+            if not paper:
+                continue
 
-        if (i + 1) % 50 == 0:
-            print(f"  Progress: {i + 1}/{len(batch_results)} papers processed ({authors_linked} linked, {authors_created} created)")
+            if (i + 1) % 50 == 0:
+                print(f"  Progress: {i + 1}/{len(batch_results)} papers processed ({authors_linked} linked, {authors_created} created)")
 
-        try:
-            with database_session() as session:
+            try:
                 seen_author_ids = set()  # S2 can return duplicate authors per paper
                 for order, s2_author in enumerate(s2_result.authors, start=1):
                     # Upsert author: create if new s2_author_id, skip if exists
@@ -152,9 +154,10 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
                             author_order=order,
                         ))
                         authors_linked += 1
-        except Exception as e:
-            print(f"  FAIL paper {paper['arxiv_id']}: {e}")
-            papers_failed += 1
+            except Exception as e:
+                print(f"  FAIL paper {paper['arxiv_id']}: {e}")
+                session.rollback()
+                papers_failed += 1
 
     return {
         "authors_linked": authors_linked,

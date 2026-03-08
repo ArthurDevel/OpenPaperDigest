@@ -175,13 +175,13 @@ def link_authors_batch(paper_records: List[Dict]) -> Dict[str, int]:
     authors_linked = 0
     authors_created = 0
 
-    for s2_result in batch_results:
-        paper = arxiv_to_paper.get(s2_result.arxiv_id)
-        if not paper:
-            continue
+    with database_session() as session:
+        for s2_result in batch_results:
+            paper = arxiv_to_paper.get(s2_result.arxiv_id)
+            if not paper:
+                continue
 
-        try:
-            with database_session() as session:
+            try:
                 seen_author_ids = set()  # S2 can return duplicate authors per paper
                 for order, s2_author in enumerate(s2_result.authors, start=1):
                     existing = session.query(AuthorRecord).filter(
@@ -216,8 +216,9 @@ def link_authors_batch(paper_records: List[Dict]) -> Dict[str, int]:
                             author_order=order,
                         ))
                         authors_linked += 1
-        except Exception as e:
-            print(f"    FAIL paper {paper['arxiv_id']}: {e}")
+            except Exception as e:
+                print(f"    FAIL paper {paper['arxiv_id']}: {e}")
+                session.rollback()
 
     return {"authors_linked": authors_linked, "authors_created": authors_created}
 
