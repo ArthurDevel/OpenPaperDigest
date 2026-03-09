@@ -59,15 +59,16 @@ def database_session():
         session.close()
 
 
-def fetch_papers_without_author_links(batch_size: int = BATCH_SIZE) -> List[Dict]:
+def fetch_papers_without_author_links(batch_size: int = BATCH_SIZE, exclude_ids: set = None) -> List[Dict]:
     """
     Query papers with arxiv_id that have no entries in paper_authors.
 
     @param batch_size: Maximum number of papers to fetch
+    @param exclude_ids: Paper IDs to skip (already attempted, even if failed)
     @returns List of dicts with paper id, paper_uuid, and arxiv_id
     """
     with database_session() as session:
-        rows = session.query(
+        query = session.query(
             PaperRecord.id,
             PaperRecord.paper_uuid,
             PaperRecord.arxiv_id,
@@ -76,7 +77,10 @@ def fetch_papers_without_author_links(batch_size: int = BATCH_SIZE) -> List[Dict
             ~PaperRecord.id.in_(
                 session.query(PaperAuthorRecord.paper_id).distinct()
             ),
-        ).order_by(PaperRecord.id).limit(batch_size).all()
+        )
+        if exclude_ids:
+            query = query.filter(~PaperRecord.id.in_(exclude_ids))
+        rows = query.order_by(PaperRecord.id).limit(batch_size).all()
 
         return [
             {"id": row.id, "paper_uuid": row.paper_uuid, "arxiv_id": row.arxiv_id}
@@ -253,12 +257,17 @@ def backfill_author_stats_dag():
         total_linked = 0
         total_created = 0
         total_failed = 0
+        attempted_paper_ids: set = set()  # Track all attempted papers to avoid infinite loops
 
         # Phase 1: Link paper authors using batch endpoint
         while True:
-            papers = fetch_papers_without_author_links(batch_size=BATCH_SIZE)
+            papers = fetch_papers_without_author_links(batch_size=BATCH_SIZE, exclude_ids=attempted_paper_ids)
             if not papers:
                 break
+
+            # Mark these papers as attempted before processing
+            for p in papers:
+                attempted_paper_ids.add(p["id"])
 
             total_papers += len(papers)
             print(f"Fetched batch of {len(papers)} papers (total so far: {total_papers})")
