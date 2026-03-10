@@ -29,8 +29,8 @@ from users.client import set_requests_processed
 # ============================================================================
 
 MAX_PDF_PAGES = 70
-MAX_PAPERS_PER_RUN = 10
-MAX_PARALLEL_TASKS = 10
+MAX_PAPERS_PER_RUN = 50
+MAX_PARALLEL_TASKS = 2
 
 
 # ============================================================================
