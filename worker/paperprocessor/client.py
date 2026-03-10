@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import base64
 import io
 import time
@@ -8,7 +9,7 @@ from typing import Optional, Dict, Any, List
 
 from paperprocessor.models import ProcessedDocument, ProcessedPage, ApiCallCostForStep
 from paperprocessor.internals.pdf_to_image import convert_pdf_to_images
-from paperprocessor.internals.mistral_ocr import extract_markdown_from_pages
+from paperprocessor.internals.mistral_ocr import call_mistral_ocr, apply_ocr_results
 from paperprocessor.internals.metadata_extractor import extract_metadata
 from paperprocessor.internals.header_formatter import format_headers, format_images
 from paperprocessor.internals.summary_generator import generate_five_minute_summary
@@ -158,29 +159,34 @@ def get_processing_metrics_for_admin(paper_uuid: str) -> Dict[str, Any]:
 async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None) -> ProcessedDocument:
         """
         Simplified 4-step pipeline:
-        1. OCR → markdown per page
+        1. OCR → markdown per page (runs in parallel with image conversion)
         2. Extract metadata
         3. Format headers and images
         4. Generate summary from original content
         """
         logger.info("Paper processing pipeline v2 started (simplified).")
 
-        # Create ProcessedDocument DTO with PDF base64
         pdf_base64 = base64.b64encode(pdf_contents).decode('utf-8')
 
-        logger.info("Converting PDF to images for page image storage...")
+        # Run Mistral OCR and image conversion in parallel.
+        # OCR uses the raw PDF — it doesn't need the page images.
+        # Images are only needed for storage and coordinate transformation after OCR.
+        logger.info("Step 1: OCR + image conversion (parallel).")
+
+        async def _run_ocr():
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, call_mistral_ocr, pdf_base64)
+
+        ocr_task = asyncio.create_task(_run_ocr())
         images = await convert_pdf_to_images(pdf_contents)
 
         # Create ProcessedPages with base64 encoded images
         pages = []
         for i, image in enumerate(images):
             page_num = i + 1
-
-            # Convert PIL Image to base64
             buffered = io.BytesIO()
             image.save(buffered, format="PNG")
             img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-
             page = ProcessedPage(
                 page_number=page_num,
                 img_base64=img_base64,
@@ -194,9 +200,9 @@ async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None)
             pages=pages
         )
 
-        # Step 1: OCR pages to markdown - populates ocr_markdown
-        logger.info("Step 1: OCR pages to markdown.")
-        await extract_markdown_from_pages(document)
+        # Wait for OCR to finish and apply results to pages
+        ocr_response = await ocr_task
+        apply_ocr_results(document, ocr_response)
 
         # Step 2: Extract metadata (title, authors) - modifies document in place
         logger.info("Step 2: Extracting metadata.")

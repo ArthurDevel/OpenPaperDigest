@@ -2,7 +2,6 @@ import httpx
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-import asyncio
 import json
 import re
 import os
@@ -117,21 +116,14 @@ async def get_llm_response(messages: List[Dict[str, Any]], model: str) -> LLMCal
             response_text = (first_message or {}).get("content") if first_message else None
             generation_id = data.get("id")
 
-            total_cost: Optional[float] = None
-            if generation_id:
-                try:
-                    total_cost = await get_generation_cost(generation_id)
-                except Exception as ce:
-                    logger.error(f"Failed to retrieve cost for generation {generation_id}: {ce}")
-
             end_time = datetime.utcnow()
-            
-            # Create cost info object (pure cost data only) (pure cost data only)
+
+            # Read cost directly from usage (OpenRouter includes it in the response)
             cost_info = ApiCallCost(
                 prompt_tokens=usage.get("prompt_tokens"),
                 completion_tokens=usage.get("completion_tokens"),
                 total_tokens=usage.get("total_tokens"),
-                total_cost=total_cost
+                total_cost=usage.get("cost"),
             )
 
             return LLMCallResult(
@@ -218,21 +210,14 @@ async def get_multimodal_json_response(system_prompt: str, user_prompt_parts: Li
                     logger.error("Error parsing JSON from OpenRouter response: %s", e)
                     parsed = {}
 
-            total_cost: Optional[float] = None
-            if generation_id:
-                try:
-                    total_cost = await get_generation_cost(generation_id)
-                except Exception as ce:
-                    logger.error(f"Failed to retrieve cost for generation {generation_id}: {ce}")
-
             end_time = datetime.utcnow()
-            
-            # Create cost info object (pure cost data only)
+
+            # Read cost directly from usage (OpenRouter includes it in the response)
             cost_info = ApiCallCost(
                 prompt_tokens=usage.get("prompt_tokens"),
                 completion_tokens=usage.get("completion_tokens"),
                 total_tokens=usage.get("total_tokens"),
-                total_cost=total_cost
+                total_cost=usage.get("cost"),
             )
 
             return LLMJsonCallResult(
@@ -324,21 +309,14 @@ async def get_json_response(system_prompt: str, user_prompt: str, model: str) ->
                     logger.error("Error parsing JSON from OpenRouter response: %s", e)
                     parsed = {}
 
-            total_cost: Optional[float] = None
-            if generation_id:
-                try:
-                    total_cost = await get_generation_cost(generation_id)
-                except Exception as ce:
-                    logger.error(f"Failed to retrieve cost for generation {generation_id}: {ce}")
-
             end_time = datetime.utcnow()
-            
-            # Create cost info object (pure cost data only)
+
+            # Read cost directly from usage (OpenRouter includes it in the response)
             cost_info = ApiCallCost(
                 prompt_tokens=usage.get("prompt_tokens"),
                 completion_tokens=usage.get("completion_tokens"),
                 total_tokens=usage.get("total_tokens"),
-                total_cost=total_cost
+                total_cost=usage.get("cost"),
             )
 
             return LLMJsonCallResult(
@@ -379,25 +357,6 @@ async def get_json_response(system_prompt: str, user_prompt: str, model: str) ->
                 parsed_json={},
             )
 
-
-async def get_generation_cost(generation_id: str) -> float:
-    """
-    Retrieves the cost of a specific generation from OpenRouter.
-    """
-    # Add a small delay to allow for the generation stats to be processed.
-    await asyncio.sleep(2)
-    async with httpx.AsyncClient(base_url=BASE_URL, headers=_HEADERS, timeout=TIMEOUT_SECONDS) as client:
-        try:
-            response = await client.get(f"/generation?id={generation_id}")
-            response.raise_for_status()
-            data = response.json()
-            logger.info(f"Received cost data for generation {generation_id}: {json.dumps(data)}")
-            generation_data = data.get("data", {})
-            return generation_data.get("total_cost", 0.0)
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTPStatusError getting generation cost for id {generation_id}: {e}")
-            logger.error(f"Response: {e.response.text}")
-            raise
 
 
 async def get_embeddings(
