@@ -37,30 +37,34 @@ def extract_base64_from_data_url(data_url: str) -> str:
     return data_url
 
 
-async def extract_markdown_from_pages(document: ProcessedDocument) -> None:
+def call_mistral_ocr(pdf_base64: str):
     """
-    Step 1: Use Mistral OCR to get the markdown of each page.
-    Insert <<page>> tags. For the images, convert to base64 and insert reference tags.
-    Uses the PDF base64 from ProcessedDocument.
-    Modifies the document pages in place.
+    Send raw PDF to Mistral OCR API and return the response.
+    This is the network-bound part that can run concurrently with image conversion.
+
+    @param pdf_base64: Base64-encoded PDF content
+    @returns Raw Mistral OCR response object
     """
-    logger.info("Extracting markdown from pages using Mistral OCR...")
-    
-    # Step 1: Setup Mistral client
-    client = create_mistral_client()
-    document_spec = create_document_spec(document.pdf_base64)
-    
-    # Step 2: Call Mistral OCR API
     logger.info("Calling Mistral OCR API...")
-    ocr_response = client.ocr.process(
+    client = create_mistral_client()
+    document_spec = create_document_spec(pdf_base64)
+    return client.ocr.process(
         model=MODEL,
         document=document_spec,
         include_image_base64=True
     )
-    
-    # Step 3: Process each page from OCR response
+
+
+def apply_ocr_results(document: ProcessedDocument, ocr_response) -> None:
+    """
+    Apply Mistral OCR results to a ProcessedDocument that already has pages with dimensions.
+    Sets ocr_markdown and extracts images with coordinate transformation.
+
+    @param document: ProcessedDocument with pages (must have width/height set)
+    @param ocr_response: Raw Mistral OCR response from call_mistral_ocr
+    """
     logger.info(f"Processing {len(ocr_response.pages)} pages from OCR response")
-    
+
     for ocr_page in ocr_response.pages:
         page_index = ocr_page.index
         page_markdown = ocr_page.markdown
@@ -140,3 +144,14 @@ async def extract_markdown_from_pages(document: ProcessedDocument) -> None:
         logger.info(f"Page {page_index + 1}: OCR complete, found {len(ocr_images)} images")
     
     logger.info(f"Mistral OCR processing complete for {len(document.pages)} pages")
+
+
+async def extract_markdown_from_pages(document: ProcessedDocument) -> None:
+    """
+    Convenience wrapper: calls Mistral OCR and applies results in one step.
+    Used by DAGs that don't need parallelization.
+
+    @param document: ProcessedDocument with pdf_base64 and pages
+    """
+    ocr_response = call_mistral_ocr(document.pdf_base64)
+    apply_ocr_results(document, ocr_response)
