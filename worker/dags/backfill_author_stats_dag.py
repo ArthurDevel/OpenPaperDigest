@@ -59,15 +59,16 @@ def database_session():
         session.close()
 
 
-def fetch_papers_without_author_links(batch_size: int = BATCH_SIZE) -> List[Dict]:
+def fetch_papers_without_author_links(batch_size: int = BATCH_SIZE, exclude_ids: set = None) -> List[Dict]:
     """
     Query papers with arxiv_id that have no entries in paper_authors.
 
     @param batch_size: Maximum number of papers to fetch
+    @param exclude_ids: Paper IDs to skip (already attempted, even if failed)
     @returns List of dicts with paper id, paper_uuid, and arxiv_id
     """
     with database_session() as session:
-        rows = session.query(
+        query = session.query(
             PaperRecord.id,
             PaperRecord.paper_uuid,
             PaperRecord.arxiv_id,
@@ -76,7 +77,10 @@ def fetch_papers_without_author_links(batch_size: int = BATCH_SIZE) -> List[Dict
             ~PaperRecord.id.in_(
                 session.query(PaperAuthorRecord.paper_id).distinct()
             ),
-        ).order_by(PaperRecord.id).limit(batch_size).all()
+        )
+        if exclude_ids:
+            query = query.filter(~PaperRecord.id.in_(exclude_ids))
+        rows = query.order_by(PaperRecord.id).limit(batch_size).all()
 
         return [
             {"id": row.id, "paper_uuid": row.paper_uuid, "arxiv_id": row.arxiv_id}
@@ -98,7 +102,12 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
     arxiv_to_paper = {p["arxiv_id"]: p for p in papers}
 
     # Single batch API call
-    batch_results = fetch_paper_authors_batch(arxiv_ids)
+    print(f"  Sending {len(arxiv_ids)} IDs to S2 batch: {arxiv_ids[:5]}{'...' if len(arxiv_ids) > 5 else ''}")
+    try:
+        batch_results = fetch_paper_authors_batch(arxiv_ids)
+    except Exception as e:
+        print(f"  S2 batch call failed: {e}")
+        return {"authors_linked": 0, "authors_created": 0, "papers_failed": len(papers)}
 
     authors_linked = 0
     authors_created = 0
@@ -106,18 +115,19 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
 
     print(f"  S2 returned {len(batch_results)} results, processing DB upserts...")
 
-    # Use a single session for the whole batch to avoid connection overhead per paper.
-    # Flush periodically so the in-session cache stays queryable for dedup checks.
-    with database_session() as session:
-        for i, s2_result in enumerate(batch_results):
-            paper = arxiv_to_paper.get(s2_result.arxiv_id)
-            if not paper:
-                continue
+    # One session per paper: pool_pre_ping=True on the engine handles stale
+    # connections transparently, so each database_session() is resilient to
+    # transient DNS/connection failures without manual reconnect logic.
+    for i, s2_result in enumerate(batch_results):
+        paper = arxiv_to_paper.get(s2_result.arxiv_id)
+        if not paper:
+            continue
 
-            if (i + 1) % 50 == 0:
-                print(f"  Progress: {i + 1}/{len(batch_results)} papers processed ({authors_linked} linked, {authors_created} created)")
+        if (i + 1) % 50 == 0:
+            print(f"  Progress: {i + 1}/{len(batch_results)} papers processed ({authors_linked} linked, {authors_created} created)")
 
-            try:
+        try:
+            with database_session() as session:
                 seen_author_ids = set()  # S2 can return duplicate authors per paper
                 for order, s2_author in enumerate(s2_result.authors, start=1):
                     # Upsert author: create if new s2_author_id, skip if exists
@@ -154,10 +164,9 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
                             author_order=order,
                         ))
                         authors_linked += 1
-            except Exception as e:
-                print(f"  FAIL paper {paper['arxiv_id']}: {e}")
-                session.rollback()
-                papers_failed += 1
+        except Exception as e:
+            print(f"  FAIL paper {paper['arxiv_id']}: {e}")
+            papers_failed += 1
 
     return {
         "authors_linked": authors_linked,
@@ -248,12 +257,17 @@ def backfill_author_stats_dag():
         total_linked = 0
         total_created = 0
         total_failed = 0
+        attempted_paper_ids: set = set()  # Track all attempted papers to avoid infinite loops
 
         # Phase 1: Link paper authors using batch endpoint
         while True:
-            papers = fetch_papers_without_author_links(batch_size=BATCH_SIZE)
+            papers = fetch_papers_without_author_links(batch_size=BATCH_SIZE, exclude_ids=attempted_paper_ids)
             if not papers:
                 break
+
+            # Mark these papers as attempted before processing
+            for p in papers:
+                attempted_paper_ids.add(p["id"])
 
             total_papers += len(papers)
             print(f"Fetched batch of {len(papers)} papers (total so far: {total_papers})")

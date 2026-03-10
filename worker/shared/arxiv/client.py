@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Endpoints and networking defaults
 ARXIV_HOST = "https://arxiv.org"
-ARXIV_EXPORT_HOST = "http://export.arxiv.org"
+ARXIV_EXPORT_HOST = "https://export.arxiv.org"
 TIMEOUT_SECONDS = 60
 DEFAULT_HEADERS = {
     "User-Agent": "papersummarizer/0.1 (+https://arxiv.org)",

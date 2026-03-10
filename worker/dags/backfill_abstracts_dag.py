@@ -82,15 +82,28 @@ def fetch_papers_without_abstract(batch_size: int = FETCH_BATCH_SIZE) -> List[Di
 def fetch_abstract_from_arxiv(arxiv_id: str) -> Optional[str]:
     """
     Call arXiv API to get the abstract/summary text for a paper.
+    Retries on 429 (rate limit) with increasing backoff.
 
     @param arxiv_id: arXiv paper identifier
     @returns Abstract text, or None if not found
     """
     import asyncio
+    import httpx
     from shared.arxiv.client import fetch_metadata
-    metadata = asyncio.run(fetch_metadata(arxiv_id))
-    time.sleep(ARXIV_API_DELAY)
-    return metadata.summary if metadata else None
+
+    max_retries = 3
+    for attempt in range(max_retries + 1):
+        try:
+            metadata = asyncio.run(fetch_metadata(arxiv_id))
+            time.sleep(ARXIV_API_DELAY)
+            return metadata.summary if metadata else None
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429 and attempt < max_retries:
+                wait = ARXIV_API_DELAY * (attempt + 2)  # 6s, 9s, 12s
+                print(f"  429 rate-limited for {arxiv_id}, waiting {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+            else:
+                raise
 
 
 def save_abstract(paper_uuid: str, abstract: str) -> None:
