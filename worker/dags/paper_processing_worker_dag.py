@@ -17,7 +17,7 @@ sys.path.insert(0, '/opt/airflow')
 from shared.db import SessionLocal
 from papers.models import Paper
 from papers.client import save_paper, create_paper_slug
-from papers.db.models import PaperRecord
+from papers.db.models import PaperRecord, AuthorRecord, PaperAuthorRecord
 from shared.arxiv.client import fetch_pdf_for_processing
 from paperprocessor.client import process_paper_pdf
 from paperprocessor.models import ProcessedDocument
@@ -104,6 +104,74 @@ def database_session():
         raise
     finally:
         session.close()
+
+
+# ============================================================================
+# AUTHOR LINKING
+# ============================================================================
+
+
+def _link_authors_for_paper(arxiv_id: str) -> None:
+    """
+    Link authors from Semantic Scholar for a single arXiv paper.
+    Best-effort: logs errors but does not raise.
+
+    @param arxiv_id: arXiv identifier to look up in S2
+    """
+    from shared.semantic_scholar.client import fetch_paper_authors
+
+    try:
+        s2_result = fetch_paper_authors(arxiv_id)
+    except Exception as e:
+        print(f"  S2 author lookup failed for {arxiv_id}: {e}")
+        return
+
+    if not s2_result.authors:
+        return
+
+    with database_session() as session:
+        record = session.query(PaperRecord).filter(
+            PaperRecord.arxiv_id == arxiv_id
+        ).first()
+        if not record:
+            return
+
+        seen_author_ids = set()
+        authors_linked = 0
+        for order, s2_author in enumerate(s2_result.authors, start=1):
+            existing = session.query(AuthorRecord).filter(
+                AuthorRecord.s2_author_id == s2_author.s2_author_id
+            ).first()
+
+            if existing:
+                author_id = existing.id
+            else:
+                new_author = AuthorRecord(
+                    s2_author_id=s2_author.s2_author_id,
+                    name=s2_author.name,
+                )
+                session.add(new_author)
+                session.flush()
+                author_id = new_author.id
+
+            if author_id in seen_author_ids:
+                continue
+            seen_author_ids.add(author_id)
+
+            existing_link = session.query(PaperAuthorRecord).filter(
+                PaperAuthorRecord.paper_id == record.id,
+                PaperAuthorRecord.author_id == author_id,
+            ).first()
+
+            if not existing_link:
+                session.add(PaperAuthorRecord(
+                    paper_id=record.id,
+                    author_id=author_id,
+                    author_order=order,
+                ))
+                authors_linked += 1
+
+        print(f"  Linked {authors_linked} authors for {arxiv_id}")
 
 
 # ============================================================================
@@ -293,6 +361,10 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
             session.flush()  # Ensure slug is committed before marking requests
             await set_requests_processed(session, saved_paper.arxiv_id, paper_slug_dto.slug)
         
+        # Step 3: Link authors via Semantic Scholar (best-effort, non-blocking)
+        if job.arxiv_id:
+            _link_authors_for_paper(job.arxiv_id)
+
         processing_time = (datetime.utcnow() - processing_start).total_seconds()
         print(f"Successfully completed job {job.id} in {processing_time:.1f} seconds")
         
