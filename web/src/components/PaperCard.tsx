@@ -139,7 +139,7 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
       </button>
 
       {/* Summary Preview or Expanded Content */}
-      {isLoadingSummary || isGeneratingSummary || (isExpanded && progress > 0) ? (
+      {!summary?.fiveMinuteSummary && (isLoadingSummary || isGeneratingSummary || (isExpanded && progress > 0)) ? (
         <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-4">
           {summary?.abstractSummary && (
             <div className="mb-3">
