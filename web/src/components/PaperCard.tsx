@@ -163,14 +163,12 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
         isExpanded ? (
           // Fully expanded
           <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900/50 relative">
-            <div className="mb-3 flex items-center gap-2">
-              <span className="inline-block px-2 py-0.5 text-xs font-medium rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
-                5-Minute Summary
-              </span>
-              {paper.scoreBreakdown && (
-                <ScoreBreakdownBadge breakdown={paper.scoreBreakdown} />
-              )}
-              {summary.arxivUrl && (
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="inline-block px-2 py-0.5 text-xs font-medium rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
+                  5-Minute Summary
+                </span>
+                {summary.arxivUrl && (
                 <a
                   href={summary.arxivUrl}
                   target="_blank"
@@ -183,6 +181,10 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
                   </svg>
                   arXiv
                 </a>
+              )}
+              </div>
+              {paper.scoreBreakdown && (
+                <ScoreBreakdownBadge breakdown={paper.scoreBreakdown} />
               )}
             </div>
             <div ref={readingTrackerRef} className="prose prose-sm dark:prose-invert max-w-none">

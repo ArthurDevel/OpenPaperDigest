@@ -271,7 +271,7 @@ export default function ScoreBreakdownBadge({ breakdown }: { breakdown: ScoreBre
         {breakdown.isExploration ? (
           <span className="text-purple-600 dark:text-purple-400">explore</span>
         ) : (
-          <span>{breakdown.score.toFixed(2)}</span>
+          <span>Ranking ({breakdown.score.toFixed(2)})</span>
         )}
       </button>
 
