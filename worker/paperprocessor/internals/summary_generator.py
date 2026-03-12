@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 ### CONSTANTS ###
 SUMMARY_MODEL = "google/gemini-2.5-pro"
-ABSTRACT_SUMMARY_MODEL = "google/gemini-2.5-flash"
+ABSTRACT_SUMMARY_MODEL = "google/gemini-3.1-flash-lite-preview"
 ABSTRACT_SUMMARY_MAX_INPUT_WORDS = 1000
 
 

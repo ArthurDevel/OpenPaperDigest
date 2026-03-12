@@ -6,8 +6,8 @@ node_modules/
 .turbo/
 
 # Environment files (use build args or runtime env)
+# NOTE: .env.local is NOT ignored — Next.js needs NEXT_PUBLIC_* vars at build time
 .env
-.env.local
 .env.production
 
 # Development

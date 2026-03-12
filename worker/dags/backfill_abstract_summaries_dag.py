@@ -16,11 +16,11 @@ Responsibilities:
 import sys
 import asyncio
 import pendulum
-from contextlib import contextmanager
 from typing import List, Dict, Optional
 
 from airflow.decorators import dag, task
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import text
 
 sys.path.insert(0, '/opt/airflow')
@@ -34,63 +34,41 @@ from papers.db.models import PaperRecord
 
 FETCH_BATCH_SIZE = 100
 ABSTRACT_SUMMARY_MAX_INPUT_WORDS = 1000
-
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
+CONCURRENCY = 20
 
 
-@contextmanager
-def database_session():
-    """
-    Create a database session with automatic commit/rollback handling.
-
-    Yields:
-        Session: SQLAlchemy session for database operations
-    """
-    session: Session = SessionLocal()
-    try:
-        yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-
-
-def fetch_papers_without_abstract_summary(batch_size: int = FETCH_BATCH_SIZE) -> List[Dict]:
+def fetch_papers_without_abstract_summary(session: Session, batch_size: int = FETCH_BATCH_SIZE) -> List[Dict]:
     """
     Query completed/partially_completed papers where summaries JSON has no abstract_summary.
 
+    @param session: SQLAlchemy session to use
     @param batch_size: Maximum number of papers to fetch per query
     @returns List of dicts with paper_uuid, abstract, and summaries
     """
-    with database_session() as session:
-        # Use raw SQL to filter on JSONB key absence
-        rows = session.execute(
-            text("""
-                SELECT paper_uuid, abstract, summaries
-                FROM papers
-                WHERE status IN ('completed', 'partially_completed')
-                AND (
-                    summaries IS NULL
-                    OR summaries->>'abstract_summary' IS NULL
-                )
-                ORDER BY id
-                LIMIT :batch_size
-            """),
-            {"batch_size": batch_size}
-        ).fetchall()
+    # Use raw SQL to filter on JSONB key absence
+    rows = session.execute(
+        text("""
+            SELECT paper_uuid, abstract, summaries
+            FROM papers
+            WHERE status IN ('completed', 'partially_completed')
+            AND (
+                summaries IS NULL
+                OR summaries->>'abstract_summary' IS NULL
+            )
+            ORDER BY id DESC
+            LIMIT :batch_size
+        """),
+        {"batch_size": batch_size}
+    ).fetchall()
 
-        return [
-            {
-                "paper_uuid": row[0],
-                "abstract": row[1],
-                "summaries": row[2],
-            }
-            for row in rows
-        ]
+    return [
+        {
+            "paper_uuid": row[0],
+            "abstract": row[1],
+            "summaries": row[2],
+        }
+        for row in rows
+    ]
 
 
 def get_markdown_for_paper(paper_uuid: str) -> Optional[str]:
@@ -137,7 +115,7 @@ async def generate_abstract_summary_text(input_text: str) -> str:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": input_text},
         ],
-        model="google/gemini-2.5-flash",
+        model="google/gemini-3.1-flash-lite-preview",
     )
 
     summary_text = getattr(result, "response_text", None)
@@ -147,22 +125,25 @@ async def generate_abstract_summary_text(input_text: str) -> str:
     return summary_text.strip()
 
 
-def save_abstract_summary(paper_uuid: str, abstract_summary: str) -> None:
+def save_abstract_summary(session: Session, paper_uuid: str, abstract_summary: str) -> None:
     """
     Update the summaries JSON column to include abstract_summary.
     Merges with existing summaries (preserves five_minute_summary if present).
+    Commits immediately to ensure crash-safety.
 
+    @param session: SQLAlchemy session to use
     @param paper_uuid: Paper UUID to update
     @param abstract_summary: Generated abstract summary text
     """
-    with database_session() as session:
-        record = session.query(PaperRecord).filter(
-            PaperRecord.paper_uuid == paper_uuid
-        ).first()
-        if record:
-            existing = record.summaries or {}
-            existing["abstract_summary"] = abstract_summary
-            record.summaries = existing
+    record = session.query(PaperRecord).filter(
+        PaperRecord.paper_uuid == paper_uuid
+    ).first()
+    if record:
+        existing = dict(record.summaries or {})
+        existing["abstract_summary"] = abstract_summary
+        record.summaries = existing
+        flag_modified(record, "summaries")
+        session.commit()
 
 
 # ============================================================================
@@ -193,24 +174,17 @@ def backfill_abstract_summaries_dag():
     @task
     def process_all_papers() -> Dict[str, int]:
         """
-        Loop through all papers without abstract summaries, generate and save each one.
+        Loop through all papers without abstract summaries, generate and save concurrently.
+        Processes up to CONCURRENCY papers in parallel per batch.
 
         @returns Dict with total/updated/failed/skipped counts
         """
-        total = 0
-        updated = 0
-        failed = 0
-        skipped = 0
 
-        while True:
-            papers = fetch_papers_without_abstract_summary(batch_size=FETCH_BATCH_SIZE)
-            if not papers:
-                break
-
-            print(f"Fetched batch of {len(papers)} papers (total so far: {total})")
-
-            for paper in papers:
-                total += 1
+        async def process_single_paper(
+            semaphore: asyncio.Semaphore, session: Session, paper: Dict, counters: Dict[str, int]
+        ) -> None:
+            """Process a single paper with semaphore-based concurrency control."""
+            async with semaphore:
                 paper_uuid = paper["paper_uuid"]
                 abstract = paper["abstract"]
 
@@ -221,31 +195,51 @@ def backfill_abstract_summaries_dag():
 
                 if not input_text:
                     print(f"  SKIP {paper_uuid}: no abstract and no markdown available")
-                    skipped += 1
-                    continue
+                    counters["skipped"] += 1
+                    return
 
                 try:
-                    summary = asyncio.run(generate_abstract_summary_text(input_text))
-                    save_abstract_summary(paper_uuid, summary)
-                    updated += 1
+                    summary = await generate_abstract_summary_text(input_text)
+                    save_abstract_summary(session, paper_uuid, summary)
+                    counters["updated"] += 1
                 except Exception as e:
                     print(f"  FAIL {paper_uuid}: {e}")
-                    failed += 1
-                    continue
+                    counters["failed"] += 1
 
-                if updated % 50 == 0 and updated > 0:
-                    print(f"  Progress: {updated} abstract summaries saved")
+                if counters["updated"] % 50 == 0 and counters["updated"] > 0:
+                    print(f"  Progress: {counters['updated']} abstract summaries saved")
 
-        print("\n" + "=" * 50)
-        print("BACKFILL ABSTRACT SUMMARIES REPORT")
-        print("=" * 50)
-        print(f"Total papers:  {total}")
-        print(f"Updated:       {updated}")
-        print(f"Failed:        {failed}")
-        print(f"Skipped:       {skipped}")
-        print("=" * 50)
+        async def run() -> Dict[str, int]:
+            counters = {"total": 0, "updated": 0, "failed": 0, "skipped": 0}
+            semaphore = asyncio.Semaphore(CONCURRENCY)
+            session: Session = SessionLocal()
 
-        return {"total": total, "updated": updated, "failed": failed, "skipped": skipped}
+            try:
+                while True:
+                    papers = fetch_papers_without_abstract_summary(session, batch_size=FETCH_BATCH_SIZE)
+                    if not papers:
+                        break
+
+                    counters["total"] += len(papers)
+                    print(f"Fetched batch of {len(papers)} papers (total so far: {counters['total']})")
+
+                    tasks = [process_single_paper(semaphore, session, paper, counters) for paper in papers]
+                    await asyncio.gather(*tasks)
+            finally:
+                session.close()
+
+            print("\n" + "=" * 50)
+            print("BACKFILL ABSTRACT SUMMARIES REPORT")
+            print("=" * 50)
+            print(f"Total papers:  {counters['total']}")
+            print(f"Updated:       {counters['updated']}")
+            print(f"Failed:        {counters['failed']}")
+            print(f"Skipped:       {counters['skipped']}")
+            print("=" * 50)
+
+            return counters
+
+        return asyncio.run(run())
 
     process_all_papers()
 
