@@ -13,6 +13,7 @@ from paperprocessor.internals.mistral_ocr import call_mistral_ocr, apply_ocr_res
 from paperprocessor.internals.metadata_extractor import extract_metadata
 from paperprocessor.internals.header_formatter import format_headers, format_images
 from paperprocessor.internals.summary_generator import generate_five_minute_summary, generate_abstract_summary
+from paperprocessor.embedding import generate_embedding
 from shared.db import SessionLocal
 from papers.client import get_paper_metadata
 
@@ -223,6 +224,10 @@ async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None)
         # Step 5: Generate abstract summary (cheap, fast - from abstract or first 1000 words)
         logger.info("Step 5: Generating abstract summary.")
         await generate_abstract_summary(document)
+
+        # Step 6: Generate embedding for similarity search
+        logger.info("Step 6: Generating embedding.")
+        document.embedding = generate_embedding(document.title, document.abstract)
 
         logger.info("Paper processing pipeline v2 finished (simplified).")
         return document
