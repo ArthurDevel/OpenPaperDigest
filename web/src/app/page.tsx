@@ -54,6 +54,8 @@ const PaperCardWithTracking = ({
   paper,
   isExpanded,
   isLoadingSummary,
+  isGeneratingSummary,
+  generateSummaryError,
   summary,
   onToggleExpand,
   onLoadSummary,
@@ -62,6 +64,8 @@ const PaperCardWithTracking = ({
   paper: MinimalPaperItem;
   isExpanded: boolean;
   isLoadingSummary: boolean;
+  isGeneratingSummary?: boolean;
+  generateSummaryError?: boolean;
   summary?: PaperSummaryResponse;
   onToggleExpand: (paperUuid: string) => void;
   onLoadSummary?: (paperUuid: string) => void;
@@ -81,6 +85,8 @@ const PaperCardWithTracking = ({
       paper={paper}
       isExpanded={isExpanded}
       isLoadingSummary={isLoadingSummary}
+      isGeneratingSummary={isGeneratingSummary}
+      generateSummaryError={generateSummaryError}
       summary={summary}
       onToggleExpand={onToggleExpand}
       onLoadSummary={onLoadSummary}
@@ -102,6 +108,8 @@ export default function ScrollingPapersPage() {
   const [expandedPaperIds, setExpandedPaperIds] = useState<Set<string>>(new Set());
   const [paperSummaries, setPaperSummaries] = useState<Map<string, PaperSummaryResponse>>(new Map());
   const [loadingSummaries, setLoadingSummaries] = useState<Set<string>>(new Set());
+  const [generatingSummaries, setGeneratingSummaries] = useState<Set<string>>(new Set());
+  const [generateErrors, setGenerateErrors] = useState<Set<string>>(new Set());
   const [pendingScrollAdjustment, setPendingScrollAdjustment] = useState<{ elementId: string; offsetFromTop: number } | null>(null);
 
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -205,8 +213,14 @@ export default function ScrollingPapersPage() {
       if (!paperSummaries.has(paperUuid) && !loadingSummaries.has(paperUuid)) {
         loadPaperSummary(paperUuid);
       }
+
+      // Auto-generate summary if it's null and not already generating
+      const existing = paperSummaries.get(paperUuid);
+      if (existing && !existing.fiveMinuteSummary && !generatingSummaries.has(paperUuid)) {
+        generateSummaryForCard(paperUuid);
+      }
     }
-  }, [expandedPaperIds, paperSummaries, loadingSummaries, trackExpand]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [expandedPaperIds, paperSummaries, loadingSummaries, generatingSummaries, trackExpand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Loads the summary for a specific paper
@@ -222,6 +236,49 @@ export default function ScrollingPapersPage() {
       console.error('Failed to load summary:', e);
     } finally {
       setLoadingSummaries(prev => {
+        const next = new Set(prev);
+        next.delete(paperUuid);
+        return next;
+      });
+    }
+  };
+
+  /**
+   * Generates a summary on-demand for a paper card that has no summary yet.
+   * @param paperUuid - The UUID of the paper to generate a summary for
+   */
+  const generateSummaryForCard = async (paperUuid: string): Promise<void> => {
+    if (generatingSummaries.has(paperUuid)) return;
+
+    setGeneratingSummaries(prev => new Set(prev).add(paperUuid));
+
+    try {
+      const response = await fetch(`/api/papers/${paperUuid}/generate-summary`, {
+        method: 'POST',
+      });
+      if (!response.ok) throw new Error('Failed to generate summary');
+      const data = await response.json();
+
+      setPaperSummaries(prev => {
+        const next = new Map(prev);
+        const existing = next.get(paperUuid);
+        if (existing) {
+          next.set(paperUuid, { ...existing, fiveMinuteSummary: data.summary });
+        }
+        return next;
+      });
+
+      // Clear any previous error for this paper
+      setGenerateErrors(prev => {
+        const next = new Set(prev);
+        next.delete(paperUuid);
+        return next;
+      });
+    } catch (e) {
+      console.error('Failed to generate summary:', e);
+      setGenerateErrors(prev => new Set(prev).add(paperUuid));
+    } finally {
+      setGeneratingSummaries(prev => {
         const next = new Set(prev);
         next.delete(paperUuid);
         return next;
@@ -300,6 +357,8 @@ export default function ScrollingPapersPage() {
             const isExpanded = expandedPaperIds.has(paper.paperUuid);
             const summary = paperSummaries.get(paper.paperUuid);
             const isLoadingSummary = loadingSummaries.has(paper.paperUuid);
+            const isGenerating = generatingSummaries.has(paper.paperUuid);
+            const hasGenerateError = generateErrors.has(paper.paperUuid);
 
             return (
               <PaperCardWithTracking
@@ -307,6 +366,8 @@ export default function ScrollingPapersPage() {
                 paper={paper}
                 isExpanded={isExpanded}
                 isLoadingSummary={isLoadingSummary}
+                isGeneratingSummary={isGenerating}
+                generateSummaryError={hasGenerateError}
                 summary={summary}
                 onToggleExpand={toggleExpanded}
                 onLoadSummary={loadPaperSummary}
