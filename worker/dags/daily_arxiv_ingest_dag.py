@@ -225,6 +225,48 @@ def link_authors_batch(paper_records: List[Dict]) -> Dict[str, int]:
     return {"authors_linked": authors_linked, "authors_created": authors_created}
 
 
+def update_paper_signals(paper_records: List[Dict]) -> int:
+    """
+    Compute max_author_h_index for the given papers and write into signals JSONB.
+    Uses whatever h-index data is already available for linked authors.
+
+    @param paper_records: List of dicts with id (DB pk)
+    @returns Number of papers updated
+    """
+    from sqlalchemy import func
+
+    if not paper_records:
+        return 0
+
+    paper_ids = [p["id"] for p in paper_records]
+    updated = 0
+
+    with database_session() as session:
+        rows = session.query(
+            PaperAuthorRecord.paper_id,
+            func.max(AuthorRecord.h_index).label("max_h_index"),
+        ).join(
+            AuthorRecord, PaperAuthorRecord.author_id == AuthorRecord.id
+        ).filter(
+            PaperAuthorRecord.paper_id.in_(paper_ids),
+            AuthorRecord.h_index.isnot(None),
+        ).group_by(
+            PaperAuthorRecord.paper_id
+        ).all()
+
+        for row in rows:
+            paper = session.query(PaperRecord).filter(
+                PaperRecord.id == row.paper_id
+            ).first()
+            if paper:
+                existing_signals = paper.signals or {}
+                existing_signals["max_author_h_index"] = row.max_h_index
+                paper.signals = existing_signals
+                updated += 1
+
+    return updated
+
+
 # ============================================================================
 # DAG DEFINITION
 # ============================================================================
@@ -319,6 +361,10 @@ def daily_arxiv_ingest_dag():
             authors_linked_total = link_result["authors_linked"]
             print(f'  Linked {link_result["authors_linked"]} authors, created {link_result["authors_created"]} new')
 
+        # Update paper signals with max author h-index for newly ingested papers
+        print('\nUpdating paper signals (max_author_h_index)...')
+        signals_updated = update_paper_signals(paper_records_for_linking)
+
         # Report
         print('\n' + '=' * 50)
         print('DAILY ARXIV INGEST REPORT')
@@ -328,6 +374,7 @@ def daily_arxiv_ingest_dag():
         print(f'Skipped (existing):  {skipped}')
         print(f'Failed:              {failed}')
         print(f'Authors linked:      {authors_linked_total}')
+        print(f'Signals updated:     {signals_updated}')
         print('=' * 50)
 
         return {
@@ -336,6 +383,7 @@ def daily_arxiv_ingest_dag():
             'skipped': skipped,
             'failed': failed,
             'authors_linked': authors_linked_total,
+            'signals_updated': signals_updated,
         }
 
     ingest_papers()

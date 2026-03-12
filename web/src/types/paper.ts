@@ -177,8 +177,6 @@ export interface Paper {
   avgCostPerPage: number | null;
   /** Public storage URL of thumbnail image */
   thumbnailUrl: string | null;
-  /** External popularity metrics (JSON) */
-  externalPopularitySignals: Record<string, unknown> | null;
   /** Hash of content for deduplication */
   contentHash: string | null;
   /** Direct URL to PDF file */
@@ -200,6 +198,8 @@ export interface MinimalPaper {
   slug: string | null;
   /** Public storage URL of thumbnail image */
   thumbnailUrl: string | null;
+  /** Score breakdown from the feed ranking system (only present in feed responses) */
+  scoreBreakdown?: import('@/types/recommendation').ScoreBreakdown;
 }
 
 /**

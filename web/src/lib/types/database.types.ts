@@ -173,7 +173,7 @@ export type Database = {
           created_at: string
           embedding: string | null
           error_message: string | null
-          external_popularity_signals: Json | null
+
           finished_at: string | null
           id: number
           initiated_by_user_id: string | null
@@ -181,6 +181,7 @@ export type Database = {
           paper_uuid: string
           pdf_url: string | null
           processing_time_seconds: number | null
+          signals: Json | null
           started_at: string | null
           status: string
           summaries: Json | null
@@ -199,7 +200,7 @@ export type Database = {
           created_at?: string
           embedding?: string | null
           error_message?: string | null
-          external_popularity_signals?: Json | null
+
           finished_at?: string | null
           id?: number
           initiated_by_user_id?: string | null
@@ -207,6 +208,7 @@ export type Database = {
           paper_uuid: string
           pdf_url?: string | null
           processing_time_seconds?: number | null
+          signals?: Json | null
           started_at?: string | null
           status: string
           summaries?: Json | null
@@ -225,7 +227,7 @@ export type Database = {
           created_at?: string
           embedding?: string | null
           error_message?: string | null
-          external_popularity_signals?: Json | null
+
           finished_at?: string | null
           id?: number
           initiated_by_user_id?: string | null
@@ -233,6 +235,7 @@ export type Database = {
           paper_uuid?: string
           pdf_url?: string | null
           processing_time_seconds?: number | null
+          signals?: Json | null
           started_at?: string | null
           status?: string
           summaries?: Json | null
@@ -375,9 +378,9 @@ export type Database = {
         Returns: {
           authors: string
           embedding: string
-          external_popularity_signals: Json
           finished_at: string
           paper_uuid: string
+          signals: Json
           similarity: number
           title: string
         }[]

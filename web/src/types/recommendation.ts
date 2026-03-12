@@ -36,6 +36,37 @@ export interface InteractionEvent {
 }
 
 // ============================================================================
+// INTERFACES - Score Breakdown
+// ============================================================================
+
+/**
+ * Breakdown of how a paper's feed score was calculated.
+ * Score = 0.33 * similarity + 0.33 * authorPopularity + 0.33 * recency + 0.33 * hfUpvotes, capped at 1.0.
+ */
+export interface ScoreBreakdown {
+  /** Final weighted score (capped at 1.0) */
+  score: number;
+  /** Semantic similarity component (from ANN search + cluster-weight boost) */
+  similarityScore: number;
+  /** Author popularity component: min(maxHIndex / 50, 1.0) */
+  authorPopularityScore: number;
+  /** HuggingFace upvotes component: min(upvotes / 100, 1.0) */
+  hfUpvotesScore: number;
+  /** Recency component (exponential decay with 7-day half-life) */
+  recencyScore: number;
+  /** Whether this paper is an exploration candidate (outside known interests) */
+  isExploration: boolean;
+  /** Which preference cluster sourced this paper (null for exploration/cold-start) */
+  sourceClusterIndex: number | null;
+  /** When the paper finished processing (used for recency calculation) */
+  finishedAt: string;
+  /** Raw HuggingFace upvote count (null if no signal available) */
+  upvotes: number | null;
+  /** Max h-index across the paper's authors (null if no author data) */
+  maxAuthorHIndex: number | null;
+}
+
+// ============================================================================
 // INTERFACES - Feed Request/Response
 // ============================================================================
 

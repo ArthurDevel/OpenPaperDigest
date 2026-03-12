@@ -224,6 +224,54 @@ def refresh_author_stats(stale_days: int = STALE_DAYS) -> Dict[str, int]:
     return {"refreshed": refreshed, "failed": failed}
 
 
+def update_paper_signals() -> Dict[str, int]:
+    """
+    Compute max_author_h_index for each paper and write it into the signals JSONB column.
+    Processes all papers that have linked authors.
+
+    @returns Dict with updated and failed counts
+    """
+    from sqlalchemy import func
+
+    updated = 0
+    failed = 0
+
+    # Fetch max h-index per paper in one query
+    with database_session() as session:
+        rows = session.query(
+            PaperAuthorRecord.paper_id,
+            func.max(AuthorRecord.h_index).label("max_h_index"),
+        ).join(
+            AuthorRecord, PaperAuthorRecord.author_id == AuthorRecord.id
+        ).filter(
+            AuthorRecord.h_index.isnot(None)
+        ).group_by(
+            PaperAuthorRecord.paper_id
+        ).all()
+
+        paper_h_index_map = {row.paper_id: row.max_h_index for row in rows}
+
+    print(f"  Found {len(paper_h_index_map)} papers with author h-index data")
+
+    # Update each paper's signals column
+    for paper_id, max_h_index in paper_h_index_map.items():
+        try:
+            with database_session() as session:
+                paper = session.query(PaperRecord).filter(
+                    PaperRecord.id == paper_id
+                ).first()
+                if paper:
+                    existing_signals = paper.signals or {}
+                    existing_signals["max_author_h_index"] = max_h_index
+                    paper.signals = existing_signals
+                    updated += 1
+        except Exception as e:
+            print(f"  FAIL paper_id {paper_id}: {e}")
+            failed += 1
+
+    return {"updated": updated, "failed": failed}
+
+
 # ============================================================================
 # DAG DEFINITION
 # ============================================================================
@@ -283,6 +331,10 @@ def backfill_author_stats_dag():
         print("\nRefreshing author stats...")
         stats_result = refresh_author_stats(stale_days=STALE_DAYS)
 
+        # Phase 3: Update paper signals with max author h-index
+        print("\nUpdating paper signals (max_author_h_index)...")
+        signals_result = update_paper_signals()
+
         print("\n" + "=" * 50)
         print("BACKFILL AUTHOR STATS REPORT")
         print("=" * 50)
@@ -292,6 +344,8 @@ def backfill_author_stats_dag():
         print(f"Papers failed:       {total_failed}")
         print(f"Stats refreshed:     {stats_result['refreshed']}")
         print(f"Stats refresh failed:{stats_result['failed']}")
+        print(f"Signals updated:     {signals_result['updated']}")
+        print(f"Signals failed:      {signals_result['failed']}")
         print("=" * 50)
 
         return {
@@ -301,6 +355,8 @@ def backfill_author_stats_dag():
             "papers_failed": total_failed,
             "stats_refreshed": stats_result["refreshed"],
             "stats_refresh_failed": stats_result["failed"],
+            "signals_updated": signals_result["updated"],
+            "signals_failed": signals_result["failed"],
         }
 
     process_all_papers()

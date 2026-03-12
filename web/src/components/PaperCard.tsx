@@ -10,6 +10,7 @@ import rehypeKatex from 'rehype-katex';
 import { Share } from 'lucide-react';
 import AddToListButtonMobile from './AddToListButtonMobile';
 import CopyMarkdownButton from './CopyMarkdownButton';
+import ScoreBreakdownBadge from './ScoreBreakdownBadge';
 
 // Preprocess backticked math expressions
 const preprocessBacktickedMath = (src: string): string => {
@@ -166,6 +167,9 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
               <span className="inline-block px-2 py-0.5 text-xs font-medium rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
                 5-Minute Summary
               </span>
+              {paper.scoreBreakdown && (
+                <ScoreBreakdownBadge breakdown={paper.scoreBreakdown} />
+              )}
               {summary.arxivUrl && (
                 <a
                   href={summary.arxivUrl}

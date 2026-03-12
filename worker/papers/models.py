@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Literal, Union
+from typing import List, Optional, Dict, Any, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -23,17 +23,6 @@ class Section(BaseModel):
     section_title: Optional[str] = None
     summary: Optional[str] = None
     subsections: List["Section"] = Field(default_factory=list)
-
-
-class ExternalPopularitySignal(BaseModel):
-    """External popularity metrics from various sources. This will be used in ranking papers."""
-    source: Literal["HuggingFace", "HuggingFaceTrending", "AlphaXiv", "GoogleResearch", "MicrosoftResearch", "DeepMindResearch", "NvidiaResearch"]  # Expandable to more sources
-    values: Dict[str, Any]  # Flexible values per source
-    fetch_info: Dict[str, Any]  # Refetch metadata per source
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    class Config:
-        from_attributes = True
 
 
 class PaperSlug(BaseModel):
@@ -93,44 +82,27 @@ class Paper(BaseModel):
     pages: List[Page] = Field(default_factory=list)
     sections: List[Section] = Field(default_factory=list)
 
-    # External popularity signals from various platforms
-    external_popularity_signals: List[ExternalPopularitySignal] = Field(default_factory=list)
-    
-    @field_validator('external_popularity_signals', mode='before')
+    # Pre-computed scoring signals (e.g. {"max_author_h_index": 42, "hf_upvotes": 10})
+    signals: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator('signals', mode='before')
     @classmethod
-    def _deserialize_external_popularity_signals(cls, value: Union[str, List, None]) -> List[ExternalPopularitySignal]:
+    def _deserialize_signals(cls, value: Union[str, Dict, None]) -> Dict[str, Any]:
         """Handle JSON string deserialization from database."""
         if value is None:
-            return []
-        
+            return {}
         if isinstance(value, str):
             try:
-                # Parse JSON string from database
-                signals_data = json.loads(value)
-                return [ExternalPopularitySignal.model_validate(signal_data) for signal_data in signals_data]
+                return json.loads(value)
             except (json.JSONDecodeError, ValueError, TypeError):
-                return []
-        
-        if isinstance(value, list):
-            # Already a list - validate each item
-            return [
-                ExternalPopularitySignal.model_validate(signal) if not isinstance(signal, ExternalPopularitySignal) else signal 
-                for signal in value
-            ]
-        
-        return []
-    
+                return {}
+        if isinstance(value, dict):
+            return value
+        return {}
+
     def to_orm(self):
         """Convert Paper DTO to SQLAlchemy PaperRecord."""
         from papers.db.models import PaperRecord
-
-        # Serialize external popularity signals to JSON
-        signals_json = None
-        if self.external_popularity_signals:
-            signals_json = json.dumps(
-                [signal.model_dump() for signal in self.external_popularity_signals],
-                default=str  # Convert datetime objects to strings
-            )
 
         return PaperRecord(
             paper_uuid=self.paper_uuid,
@@ -150,7 +122,7 @@ class Paper(BaseModel):
             processing_time_seconds=self.processing_time_seconds,
             total_cost=self.total_cost,
             avg_cost_per_page=self.avg_cost_per_page,
-            external_popularity_signals=signals_json,
+            signals=self.signals,
             content_hash=self.content_hash,
             pdf_url=self.pdf_url,
         )

@@ -14,7 +14,6 @@ sys.path.insert(0, '/opt/airflow')
 
 from sqlalchemy.orm import Session
 from shared.db import SessionLocal
-from papers.models import ExternalPopularitySignal
 from papers.client import create_paper
 
 from selenium import webdriver
@@ -485,14 +484,13 @@ def daily_microsoft_research_papers_dag():
                         skipped_count += 1
                         continue
 
-                    # Create popularity signal for Microsoft Research
-                    microsoft_signal = ExternalPopularitySignal(
-                        source="MicrosoftResearch",
-                        values={},
-                        fetch_info={
+                    # Create signals dict
+                    signals = {
+                        "sources": ["MicrosoftResearch"],
+                        "microsoft_fetch_info": {
                             "publication_url": paper.get('url'),
                         }
-                    )
+                    }
 
                     # Add paper to processing queue
                     if arxiv_id:
@@ -501,7 +499,7 @@ def daily_microsoft_research_papers_dag():
                             db=session,
                             arxiv_id=arxiv_id,
                             title=title,
-                            external_popularity_signals=[microsoft_signal],
+                            signals=signals,
                             initiated_by_user_id=None
                         )
                         print(f"Added arXiv paper {arxiv_id} to queue (rank #{rank})")
@@ -511,7 +509,7 @@ def daily_microsoft_research_papers_dag():
                             db=session,
                             pdf_url=paper_url,
                             title=title,
-                            external_popularity_signals=[microsoft_signal],
+                            signals=signals,
                             initiated_by_user_id=None
                         )
                         print(f"Added Microsoft-hosted paper to queue (rank #{rank})")

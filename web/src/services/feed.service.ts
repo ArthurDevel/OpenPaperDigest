@@ -4,12 +4,12 @@
  * Server-side feed ranking service that produces a personalized paper feed.
  * Uses similarity-driven candidate retrieval via pgvector ANN search, combined
  * with an exploration pool for topic discovery. Scores candidates with a weighted
- * blend of similarity (with cluster-weight boost), popularity, and recency.
+ * blend of similarity, author popularity, recency, and HuggingFace upvotes.
  *
  * Responsibilities:
  * - Build preference vectors from user clusters (raw embeddings, normalized weights)
  * - Fetch candidates via ANN similarity search + exploration pool
- * - Score candidates with cluster-weight-boosted similarity + popularity + recency
+ * - Score candidates: 0.33 * similarity + 0.33 * authorPopularity + 0.33 * recency + 0.33 * hfUpvotes (capped at 1.0)
  * - Inject diversity (cluster balancing + exploration interleaving)
  * - Return paginated FeedResponse with slug lookups
  */
@@ -27,11 +27,17 @@ import type { MinimalPaper } from '@/types/paper';
 /** Weight for semantic similarity in the scoring formula */
 const SIMILARITY_WEIGHT = 0.33;
 
-/** Weight for popularity signals in the scoring formula */
-const POPULARITY_WEIGHT = 0.34;
+/** Weight for author popularity (max h-index) in the scoring formula */
+const AUTHOR_POPULARITY_WEIGHT = 0.33;
 
 /** Weight for recency in the scoring formula */
 const RECENCY_WEIGHT = 0.33;
+
+/** Weight for HuggingFace upvotes in the scoring formula */
+const HF_UPVOTES_WEIGHT = 0.33;
+
+/** H-index value that produces a max author popularity score of 1.0 */
+const H_INDEX_CAP = 50;
 
 /** Half-life in days for the recency exponential decay */
 const RECENCY_HALF_LIFE_DAYS = 7;
@@ -62,10 +68,14 @@ interface ScoredPaper {
   paper: MinimalPaper;
   score: number;
   recencyScore: number;
-  popularityScore: number;
+  authorPopularityScore: number;
+  hfUpvotesScore: number;
   similarityScore: number;
   sourceClusterIndex: number | null;
   isExploration: boolean;
+  finishedAt: Date;
+  upvotes: number | null;
+  maxAuthorHIndex: number | null;
 }
 
 /** Raw row from the match_papers_by_embedding RPC or cold-start query */
@@ -75,7 +85,7 @@ interface CandidateRow {
   authors: string | null;
   finishedAt: Date;
   embedding: number[];
-  externalPopularitySignals: Record<string, unknown> | null;
+  signals: Record<string, unknown> | null;
   similarity: number;
   sourceClusterIndex: number | null;
 }
@@ -130,6 +140,18 @@ export async function getRankedFeed(
     ...sp.paper,
     slug: slugMap.get(sp.paper.paperUuid) ?? null,
     thumbnailUrl: thumbnailMap.get(sp.paper.paperUuid) ?? null,
+    scoreBreakdown: {
+      score: sp.score,
+      similarityScore: sp.similarityScore,
+      authorPopularityScore: sp.authorPopularityScore,
+      hfUpvotesScore: sp.hfUpvotesScore,
+      recencyScore: sp.recencyScore,
+      isExploration: sp.isExploration,
+      sourceClusterIndex: sp.sourceClusterIndex,
+      finishedAt: sp.finishedAt.toISOString(),
+      upvotes: sp.upvotes,
+      maxAuthorHIndex: sp.maxAuthorHIndex,
+    },
   }));
 
   return { items, page, limit, hasMore };
@@ -234,7 +256,7 @@ async function fetchCandidatesFromANN(
           authors: string | null;
           finished_at: string;
           embedding: string;
-          external_popularity_signals: Record<string, unknown> | null;
+          signals: Record<string, unknown> | null;
           similarity: number;
         }[],
       };
@@ -254,7 +276,7 @@ async function fetchCandidatesFromANN(
           authors: row.authors,
           finishedAt: new Date(row.finished_at),
           embedding: parseEmbeddingString(row.embedding),
-          externalPopularitySignals: row.external_popularity_signals,
+          signals: row.signals,
           similarity: row.similarity,
           sourceClusterIndex: clusterIndex,
         });
@@ -282,7 +304,7 @@ async function fetchColdStartCandidates(
   // Build query
   let query = supabase
     .from('papers')
-    .select('paper_uuid, title, authors, finished_at, external_popularity_signals')
+    .select('paper_uuid, title, authors, finished_at, signals')
     .in('status', ['completed', 'partially_completed'])
     .order('finished_at', { ascending: false })
     .limit(fetchCount);
@@ -304,14 +326,14 @@ async function fetchColdStartCandidates(
     title: string | null;
     authors: string | null;
     finished_at: string;
-    external_popularity_signals: Record<string, unknown> | null;
+    signals: Record<string, unknown> | null;
   }[]).map((row) => ({
     paperUuid: row.paper_uuid,
     title: row.title,
     authors: row.authors,
     finishedAt: new Date(row.finished_at),
     embedding: [],
-    externalPopularitySignals: row.external_popularity_signals,
+    signals: row.signals,
     similarity: 0,
     sourceClusterIndex: null,
   }));
@@ -332,7 +354,7 @@ async function fetchExplorationCandidates(
 
   let query = supabase
     .from('papers')
-    .select('paper_uuid, title, authors, finished_at, external_popularity_signals')
+    .select('paper_uuid, title, authors, finished_at, signals')
     .in('status', ['completed', 'partially_completed'])
     .order('finished_at', { ascending: false })
     .limit(count);
@@ -353,23 +375,23 @@ async function fetchExplorationCandidates(
     title: string | null;
     authors: string | null;
     finished_at: string;
-    external_popularity_signals: Record<string, unknown> | null;
+    signals: Record<string, unknown> | null;
   }[]).map((row) => ({
     paperUuid: row.paper_uuid,
     title: row.title,
     authors: row.authors,
     finishedAt: new Date(row.finished_at),
     embedding: [],
-    externalPopularitySignals: row.external_popularity_signals,
+    signals: row.signals,
     similarity: 0,
     sourceClusterIndex: null,
   }));
 }
 
 /**
- * Scores candidates with the weighted blend of similarity, popularity, and recency.
- * ANN candidates get a cluster-weight boost on similarity. Exploration candidates
- * score on popularity and recency only.
+ * Scores candidates with a weighted blend of similarity, author popularity,
+ * recency, and HuggingFace upvotes. Each term is weighted at 0.33, so the
+ * max raw score is ~1.32 -- capped at 1.0.
  * @param candidates - Candidate rows to score
  * @param preferenceVectors - User's preference vectors (empty for cold start)
  * @returns Scored and sorted papers
@@ -380,10 +402,8 @@ async function scoreCandidates(
 ): Promise<ScoredPaper[]> {
   const now = Date.now();
 
-  // Batch-fetch all thumbnail URLs in one API call
-  const thumbnailMap = await getPaperThumbnailUrls(
-    candidates.map((c) => c.paperUuid)
-  );
+  const candidateUuids = candidates.map((c) => c.paperUuid);
+  const thumbnailMap = await getPaperThumbnailUrls(candidateUuids);
 
   // Build a lookup from clusterIndex -> normalized weight for cluster-weight boost
   const clusterWeightMap = new Map<number, number>();
@@ -396,8 +416,15 @@ async function scoreCandidates(
     const daysSinceFinished = (now - candidate.finishedAt.getTime()) / (1000 * 60 * 60 * 24);
     const recencyScore = Math.exp(-daysSinceFinished * Math.LN2 / RECENCY_HALF_LIFE_DAYS);
 
-    // Popularity: from external_popularity_signals
-    const popularityScore = computePopularityScore(candidate.externalPopularitySignals);
+    // Author popularity: max h-index from pre-computed signals, normalized to [0, 1]
+    const maxAuthorHIndex = (candidate.signals?.max_author_h_index as number) ?? null;
+    const authorPopularityScore = maxAuthorHIndex !== null
+      ? Math.min(maxAuthorHIndex / H_INDEX_CAP, 1.0)
+      : 0;
+
+    // HuggingFace upvotes: min(upvotes/100, 1.0), 0 if no data
+    const upvotes = extractUpvotes(candidate.signals);
+    const hfUpvotesScore = upvotes !== null ? Math.min(upvotes / 100, 1.0) : 0;
 
     // Similarity: apply cluster-weight boost for ANN candidates, 0 for exploration
     const isExploration = candidate.sourceClusterIndex === null && candidate.similarity === 0
@@ -408,11 +435,13 @@ async function scoreCandidates(
       similarityScore = candidate.similarity * (1 + CLUSTER_WEIGHT_BOOST * clusterWeight);
     }
 
-    // Weighted blend
-    const score =
+    // Weighted blend (4 terms x 0.33 = max ~1.32), capped at 1.0
+    const rawScore =
       SIMILARITY_WEIGHT * similarityScore +
-      POPULARITY_WEIGHT * popularityScore +
-      RECENCY_WEIGHT * recencyScore;
+      AUTHOR_POPULARITY_WEIGHT * authorPopularityScore +
+      RECENCY_WEIGHT * recencyScore +
+      HF_UPVOTES_WEIGHT * hfUpvotesScore;
+    const score = Math.min(rawScore, 1.0);
 
     const paper: MinimalPaper = {
       paperUuid: candidate.paperUuid,
@@ -423,9 +452,10 @@ async function scoreCandidates(
     };
 
     return {
-      paper, score, recencyScore, popularityScore, similarityScore,
-      sourceClusterIndex: candidate.sourceClusterIndex,
-      isExploration,
+      paper, score, recencyScore, authorPopularityScore, hfUpvotesScore,
+      similarityScore, sourceClusterIndex: candidate.sourceClusterIndex,
+      isExploration, finishedAt: candidate.finishedAt, upvotes,
+      maxAuthorHIndex,
     } satisfies ScoredPaper;
   });
 
@@ -529,33 +559,14 @@ function injectDiversity(
 }
 
 /**
- * Computes a popularity score from external_popularity_signals.
- * NULL signals = 0.5 (neutral). HuggingFace upvotes: min(upvotes/100, 1.0).
- * @param signals - The external popularity signals JSON
- * @returns Normalized popularity score in [0, 1]
+ * Extracts the raw HuggingFace upvote count from the signals dict.
+ * @param signals - The signals JSON dict (e.g. {"hf_upvotes": 42})
+ * @returns Raw upvote count or null if not available
  */
-function computePopularityScore(
-  signals: Record<string, unknown> | null
-): number {
-  if (!signals) return 0.5;
-
-  // Check for HuggingFace upvotes (may be double-encoded as string)
-  let parsed = signals;
-  if (typeof signals === 'string') {
-    try {
-      parsed = JSON.parse(signals);
-    } catch {
-      return 0.5;
-    }
-  }
-
-  // Look for HuggingFace upvotes
-  const hfUpvotes = (parsed as Record<string, unknown>)?.upvotes;
-  if (typeof hfUpvotes === 'number') {
-    return Math.min(hfUpvotes / 100, 1.0);
-  }
-
-  return 0.5;
+function extractUpvotes(signals: Record<string, unknown> | null): number | null {
+  if (!signals) return null;
+  const upvotes = signals.hf_upvotes;
+  return typeof upvotes === 'number' ? upvotes : null;
 }
 
 /**
