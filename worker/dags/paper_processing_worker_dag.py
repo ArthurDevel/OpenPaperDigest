@@ -111,23 +111,81 @@ def database_session():
 # ============================================================================
 
 
+def _refresh_and_score_paper(paper_id: int, author_ids: set) -> None:
+    """
+    Fetch stats for the paper's authors from Semantic Scholar and write
+    max_author_h_index into signals. Raises on failure so the paper is
+    marked as failed.
+
+    @param paper_id: Database ID of the paper
+    @param author_ids: Set of author DB IDs to refresh
+    """
+    from shared.semantic_scholar.client import fetch_author_stats
+    from sqlalchemy import func
+
+    if not author_ids:
+        raise Exception(f"No authors found for paper {paper_id}, cannot compute h-index")
+
+    # Refresh stats for authors that don't have them yet
+    with database_session() as session:
+        stale_authors = session.query(AuthorRecord).filter(
+            AuthorRecord.id.in_(author_ids),
+            AuthorRecord.stats_updated_at.is_(None),
+        ).all()
+        to_refresh = [(a.id, a.s2_author_id) for a in stale_authors]
+
+    for author_db_id, s2_id in to_refresh:
+        stats = fetch_author_stats(s2_id)
+        with database_session() as session:
+            record = session.query(AuthorRecord).filter(
+                AuthorRecord.id == author_db_id
+            ).first()
+            if record:
+                record.name = stats.name
+                record.affiliations = stats.affiliations
+                record.homepage = stats.homepage
+                record.paper_count = stats.paper_count
+                record.citation_count = stats.citation_count
+                record.h_index = stats.h_index
+                record.stats_updated_at = datetime.utcnow()
+
+    # Compute and write max_author_h_index
+    with database_session() as session:
+        row = session.query(
+            func.max(AuthorRecord.h_index).label("max_h_index"),
+        ).join(
+            PaperAuthorRecord, PaperAuthorRecord.author_id == AuthorRecord.id
+        ).filter(
+            PaperAuthorRecord.paper_id == paper_id,
+            AuthorRecord.h_index.isnot(None),
+        ).first()
+
+        if not row or row.max_h_index is None:
+            raise Exception(f"Could not compute max_author_h_index for paper {paper_id}")
+
+        paper = session.query(PaperRecord).filter(
+            PaperRecord.id == paper_id
+        ).first()
+        if paper:
+            existing_signals = paper.signals or {}
+            existing_signals["max_author_h_index"] = row.max_h_index
+            paper.signals = existing_signals
+            print(f"  Set max_author_h_index={row.max_h_index} for paper {paper_id}")
+
+
 def _link_authors_for_paper(arxiv_id: str) -> None:
     """
     Link authors from Semantic Scholar for a single arXiv paper.
-    Best-effort: logs errors but does not raise.
+    Raises on failure so the paper is marked as failed.
 
     @param arxiv_id: arXiv identifier to look up in S2
     """
     from shared.semantic_scholar.client import fetch_paper_authors
 
-    try:
-        s2_result = fetch_paper_authors(arxiv_id)
-    except Exception as e:
-        print(f"  S2 author lookup failed for {arxiv_id}: {e}")
-        return
+    s2_result = fetch_paper_authors(arxiv_id)
 
     if not s2_result.authors:
-        return
+        raise Exception(f"No authors returned from Semantic Scholar for {arxiv_id}")
 
     with database_session() as session:
         record = session.query(PaperRecord).filter(
@@ -172,6 +230,9 @@ def _link_authors_for_paper(arxiv_id: str) -> None:
                 authors_linked += 1
 
         print(f"  Linked {authors_linked} authors for {arxiv_id}")
+
+        # Fetch stats and compute max_author_h_index signal
+        _refresh_and_score_paper(record.id, seen_author_ids)
 
 
 # ============================================================================
@@ -361,7 +422,7 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
             session.flush()  # Ensure slug is committed before marking requests
             await set_requests_processed(session, saved_paper.arxiv_id, paper_slug_dto.slug)
         
-        # Step 3: Link authors via Semantic Scholar (best-effort, non-blocking)
+        # Step 3: Link authors and compute h-index signal
         if job.arxiv_id:
             _link_authors_for_paper(job.arxiv_id)
 
