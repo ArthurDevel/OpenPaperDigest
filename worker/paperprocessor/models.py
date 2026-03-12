@@ -64,6 +64,7 @@ class ProcessedDocument:
     rewritten_final_markdown: Optional[str] = None
     # Summary generation
     five_minute_summary: Optional[str] = None    # Accessible 5-minute summary
+    abstract_summary: Optional[str] = None       # Short 2-3 sentence summary from abstract
     # 1536-dim embedding vector from text-embedding-3-small
     embedding: Optional[List[float]] = None
     abstract: Optional[str] = None

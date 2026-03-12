@@ -225,6 +225,8 @@ export interface PaperSummary {
   arxivUrl: string | null;
   /** AI-generated 5-minute summary */
   fiveMinuteSummary: string | null;
+  /** Short 2-3 sentence summary generated from the abstract */
+  abstractSummary: string | null;
   /** Number of pages in the PDF */
   pageCount: number;
   /** URL to thumbnail image endpoint */

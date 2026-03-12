@@ -100,8 +100,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   }
 
   // Extract first 200 characters of summary for description
-  const description = paperData.fiveMinuteSummary
-    ? paperData.fiveMinuteSummary.substring(0, 200).replace(/[#*`]/g, '') + '...'
+  const summaryText = paperData.fiveMinuteSummary || paperData.abstractSummary;
+  const description = summaryText
+    ? summaryText.substring(0, 200).replace(/[#*`]/g, '') + '...'
     : `Research paper by ${paperData.authors || 'Unknown authors'}`;
 
   const title = `${paperData.title || 'Research Paper'} - ${paperData.authors?.split(',')[0] || 'Paper Summary'}`;
