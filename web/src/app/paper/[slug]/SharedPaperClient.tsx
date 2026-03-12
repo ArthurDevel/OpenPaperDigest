@@ -34,6 +34,7 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
   const [expandedPaperIds, setExpandedPaperIds] = useState<Set<string>>(new Set());
   const [paperSummaries, setPaperSummaries] = useState<Map<string, PaperSummary>>(new Map());
   const [loadingSummaries, setLoadingSummaries] = useState<Set<string>>(new Set());
+  const [generatingSummaries, setGeneratingSummaries] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [generatedSummary, setGeneratedSummary] = useState<string | null>(null);
@@ -104,19 +105,26 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
     };
   }, [hasMore, isLoading, currentPage, loadPage]);
 
-  // Toggle paper expansion
+  // Toggle paper expansion — auto-generate summary if missing
   const toggleExpanded = useCallback((paperUuid: string) => {
     setExpandedPaperIds(prev => {
       const next = new Set(prev);
-      if (next.has(paperUuid)) {
-        next.delete(paperUuid);
-      } else {
+      const isExpanding = !next.has(paperUuid);
+      if (isExpanding) {
         next.clear();
         next.add(paperUuid);
+
+        // Auto-generate summary if it's null and not already generating
+        const existing = paperSummaries.get(paperUuid);
+        if (existing && !existing.fiveMinuteSummary && !generatingSummaries.has(paperUuid)) {
+          generateSummaryForCard(paperUuid);
+        }
+      } else {
+        next.delete(paperUuid);
       }
       return next;
     });
-  }, []);
+  }, [paperSummaries, generatingSummaries]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load paper summary
   const loadPaperSummary = async (paperUuid: string) => {
@@ -133,6 +141,39 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
       console.error('Failed to load summary:', e);
     } finally {
       setLoadingSummaries(prev => {
+        const next = new Set(prev);
+        next.delete(paperUuid);
+        return next;
+      });
+    }
+  };
+
+  // Generate summary on-demand for a feed card
+  const generateSummaryForCard = async (paperUuid: string) => {
+    if (generatingSummaries.has(paperUuid)) return;
+
+    setGeneratingSummaries(prev => new Set(prev).add(paperUuid));
+
+    try {
+      const response = await fetch(`/api/papers/${paperUuid}/generate-summary`, {
+        method: 'POST',
+      });
+      if (!response.ok) throw new Error('Failed to generate summary');
+      const data = await response.json();
+
+      // Update the stored summary with the generated text
+      setPaperSummaries(prev => {
+        const next = new Map(prev);
+        const existing = next.get(paperUuid);
+        if (existing) {
+          next.set(paperUuid, { ...existing, fiveMinuteSummary: data.summary });
+        }
+        return next;
+      });
+    } catch (e) {
+      console.error('Failed to generate summary:', e);
+    } finally {
+      setGeneratingSummaries(prev => {
         const next = new Set(prev);
         next.delete(paperUuid);
         return next;
@@ -333,6 +374,7 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
             const isExpanded = expandedPaperIds.has(paper.paperUuid);
             const summary = paperSummaries.get(paper.paperUuid);
             const isLoadingSummary = loadingSummaries.has(paper.paperUuid);
+            const isGenerating = generatingSummaries.has(paper.paperUuid);
 
             return (
               <PaperCard
@@ -340,6 +382,7 @@ export default function SharedPaperClient({ initialPaperData, slug }: SharedPape
                 paper={paper}
                 isExpanded={isExpanded}
                 isLoadingSummary={isLoadingSummary}
+                isGeneratingSummary={isGenerating}
                 summary={summary}
                 onToggleExpand={toggleExpanded}
                 onLoadSummary={loadPaperSummary}

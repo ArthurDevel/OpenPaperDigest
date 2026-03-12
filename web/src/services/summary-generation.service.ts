@@ -12,6 +12,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { downloadPaperMarkdown } from '@/lib/supabase/storage';
 import { chatCompletion } from '@/lib/openrouter';
 
 // ============================================================================
@@ -112,16 +113,8 @@ export async function generateSummaryForPaper(paperUuid: string): Promise<Genera
     return { summary: existingSummary, alreadyExisted: true };
   }
 
-  // Step 2: Download content.md from Supabase Storage
-  const { data: fileData, error: downloadError } = await supabase.storage
-    .from('papers')
-    .download(`${paperUuid}/content.md`);
-
-  if (downloadError || !fileData) {
-    throw new Error('Paper content not available for summary generation.');
-  }
-
-  const contentMarkdown = await fileData.text();
+  // Step 2: Download content.md from Supabase Storage (uses service role key)
+  const contentMarkdown = await downloadPaperMarkdown(paperUuid);
 
   // Step 3: Generate summary via Gemini 3 Flash
   const response = await chatCompletion(

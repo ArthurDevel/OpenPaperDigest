@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { MinimalPaperItem } from '../types/paper';
 import type { PaperSummaryResponse } from '../services/api';
 import ReactMarkdown from 'react-markdown';
@@ -21,6 +21,8 @@ interface PaperCardProps {
   paper: MinimalPaperItem;
   isExpanded: boolean;
   isLoadingSummary: boolean;
+  isGeneratingSummary?: boolean;
+  generateSummaryError?: boolean;
   summary?: PaperSummaryResponse;
   onToggleExpand: (paperUuid: string) => void;
   onLoadSummary?: (paperUuid: string) => void;
@@ -28,16 +30,48 @@ interface PaperCardProps {
   readingTrackerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
+const GENERATE_DURATION_MS = 15_000;
+
 const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
   paper,
   isExpanded,
   isLoadingSummary,
+  isGeneratingSummary,
+  generateSummaryError,
   summary,
   onToggleExpand,
   onLoadSummary,
   readingTrackerRef,
 }, ref) => {
   const [copied, setCopied] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Animate progress bar while generating
+  useEffect(() => {
+    if (isGeneratingSummary) {
+      setProgress(0);
+      const step = 50; // ms per tick
+      const increment = (step / GENERATE_DURATION_MS) * 100;
+      progressRef.current = setInterval(() => {
+        setProgress(prev => Math.min(prev + increment, 95));
+      }, step);
+    } else {
+      if (progressRef.current) {
+        clearInterval(progressRef.current);
+        progressRef.current = null;
+      }
+      // Snap to 100 briefly if we were generating, then reset
+      if (progress > 0) {
+        setProgress(100);
+        const t = setTimeout(() => setProgress(0), 400);
+        return () => clearTimeout(t);
+      }
+    }
+    return () => {
+      if (progressRef.current) clearInterval(progressRef.current);
+    };
+  }, [isGeneratingSummary]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle share button click - always copy to clipboard
   const handleShare = async (e: React.MouseEvent) => {
@@ -109,6 +143,18 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
         <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
           <div className="text-gray-600 dark:text-gray-400 text-sm">
             Loading summary...
+          </div>
+        </div>
+      ) : isGeneratingSummary || (isExpanded && progress > 0) ? (
+        <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+            Generating summary…
+          </p>
+          <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 rounded-full transition-all duration-100 ease-linear"
+              style={{ width: `${progress}%` }}
+            />
           </div>
         </div>
       ) : summary?.fiveMinuteSummary ? (
@@ -189,6 +235,12 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
             </div>
           </button>
         )
+      ) : generateSummaryError && isExpanded ? (
+        <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
+          <p className="text-sm text-red-500 dark:text-red-400">
+            Failed to generate summary. Try collapsing and expanding again.
+          </p>
+        </div>
       ) : null}
     </div>
   );
