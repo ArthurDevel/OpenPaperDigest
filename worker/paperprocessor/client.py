@@ -12,7 +12,7 @@ from paperprocessor.internals.pdf_to_image import convert_pdf_to_images
 from paperprocessor.internals.mistral_ocr import call_mistral_ocr, apply_ocr_results
 from paperprocessor.internals.metadata_extractor import extract_metadata
 from paperprocessor.internals.header_formatter import format_headers, format_images
-from paperprocessor.internals.summary_generator import generate_five_minute_summary
+from paperprocessor.internals.summary_generator import generate_five_minute_summary, generate_abstract_summary
 from shared.db import SessionLocal
 from papers.client import get_paper_metadata
 
@@ -217,8 +217,12 @@ async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None)
         logger.info("Step 3b: Formatting inline image references.")
         await format_images(document)
 
-        # Step 4: Summary generation (disabled - now generated on-demand via web API)
+        # Step 4: Full summary generation (disabled - now generated on-demand via web API)
         # await generate_five_minute_summary(document)
+
+        # Step 5: Generate abstract summary (cheap, fast - from abstract or first 1000 words)
+        logger.info("Step 5: Generating abstract summary.")
+        await generate_abstract_summary(document)
 
         logger.info("Paper processing pipeline v2 finished (simplified).")
         return document

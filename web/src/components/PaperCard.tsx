@@ -139,21 +139,22 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
       </button>
 
       {/* Summary Preview or Expanded Content */}
-      {isLoadingSummary ? (
-        <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
-          <div className="text-gray-600 dark:text-gray-400 text-sm">
-            Loading summary...
-          </div>
-        </div>
-      ) : isGeneratingSummary || (isExpanded && progress > 0) ? (
+      {isLoadingSummary || isGeneratingSummary || (isExpanded && progress > 0) ? (
         <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-4">
+          {summary?.abstractSummary && (
+            <div className="mb-3">
+              <div className="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300">
+                <ReactMarkdown>{`## What This Paper Is About\n\n${summary.abstractSummary}`}</ReactMarkdown>
+              </div>
+            </div>
+          )}
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-            Generating summary…
+            {isLoadingSummary ? 'Loading summary...' : 'Generating full summary...'}
           </p>
           <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
             <div
               className="h-full bg-blue-500 rounded-full transition-all duration-100 ease-linear"
-              style={{ width: `${progress}%` }}
+              style={{ width: `${isLoadingSummary ? 0 : progress}%` }}
             />
           </div>
         </div>
@@ -241,6 +242,22 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
             Failed to generate summary. Try collapsing and expanding again.
           </p>
         </div>
+      ) : summary?.abstractSummary ? (
+        <button
+          onClick={handleThumbnailClick}
+          className="w-full text-left border-t border-gray-200 dark:border-gray-700 px-4 pb-4 pt-3 relative group"
+        >
+          <div className="relative overflow-hidden" style={{ maxHeight: '10rem' }}>
+            <div className="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300">
+              <ReactMarkdown>{`## What This Paper Is About\n\n${summary.abstractSummary}`}</ReactMarkdown>
+            </div>
+            {/* Fade overlay */}
+            <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-white dark:from-gray-800 to-transparent pointer-events-none group-hover:from-gray-50 dark:group-hover:from-gray-700 transition-colors" />
+          </div>
+          <div className="mt-2 text-xs text-blue-600 dark:text-blue-400 group-hover:underline">
+            Click to read more
+          </div>
+        </button>
       ) : null}
     </div>
   );

@@ -533,7 +533,10 @@ def save_paper(db: Session, processed_content: ProcessedDocument) -> Paper:
         'num_pages': len(processed_content.pages),
         'total_cost': result_dict["total_cost"],
         'avg_cost_per_page': result_dict["avg_cost_per_page"],
-        'summaries': {"five_minute_summary": processed_content.five_minute_summary},
+        'summaries': {
+            "five_minute_summary": processed_content.five_minute_summary,
+            "abstract_summary": processed_content.abstract_summary,
+        },
         'embedding': processed_content.embedding,
         'abstract': processed_content.abstract,
         'finished_at': datetime.utcnow(),

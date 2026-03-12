@@ -187,9 +187,10 @@ export async function getPaperSummary(uuid: string): Promise<PaperSummary> {
     throw new Error(`Paper not found: ${uuid}`);
   }
 
-  // Read five_minute_summary from the summaries JSON column
+  // Read summaries from the summaries JSON column
   const summaries = paper.summaries as Record<string, string> | null;
   const fiveMinuteSummary = summaries?.five_minute_summary ?? null;
+  const abstractSummary = summaries?.abstract_summary ?? null;
 
   return {
     paperId: paper.paper_uuid,
@@ -197,6 +198,7 @@ export async function getPaperSummary(uuid: string): Promise<PaperSummary> {
     authors: paper.authors,
     arxivUrl: paper.arxiv_url,
     fiveMinuteSummary,
+    abstractSummary,
     pageCount: paper.num_pages ?? 0,
     thumbnailUrl: await getPaperThumbnailUrl(paper.paper_uuid),
   };

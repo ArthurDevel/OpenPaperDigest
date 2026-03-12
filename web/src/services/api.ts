@@ -133,6 +133,7 @@ export type PaperSummaryResponse = {
   authors?: string | null;
   arxivUrl?: string | null;
   fiveMinuteSummary?: string | null;
+  abstractSummary?: string | null;
   pageCount: number;
   thumbnailUrl?: string | null;
 };
