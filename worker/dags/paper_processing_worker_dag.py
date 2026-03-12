@@ -120,7 +120,7 @@ def _refresh_and_score_paper(paper_id: int, author_ids: set) -> None:
     @param paper_id: Database ID of the paper
     @param author_ids: Set of author DB IDs to refresh
     """
-    from shared.semantic_scholar.client import fetch_author_stats
+    from shared.semantic_scholar.client import fetch_author_stats_batch
     from sqlalchemy import func
 
     if not author_ids:
@@ -132,22 +132,26 @@ def _refresh_and_score_paper(paper_id: int, author_ids: set) -> None:
             AuthorRecord.id.in_(author_ids),
             AuthorRecord.stats_updated_at.is_(None),
         ).all()
-        to_refresh = [(a.id, a.s2_author_id) for a in stale_authors]
+        s2_to_db = {a.s2_author_id: a.id for a in stale_authors}
 
-    for author_db_id, s2_id in to_refresh:
-        stats = fetch_author_stats(s2_id)
-        with database_session() as session:
-            record = session.query(AuthorRecord).filter(
-                AuthorRecord.id == author_db_id
-            ).first()
-            if record:
-                record.name = stats.name
-                record.affiliations = stats.affiliations
-                record.homepage = stats.homepage
-                record.paper_count = stats.paper_count
-                record.citation_count = stats.citation_count
-                record.h_index = stats.h_index
-                record.stats_updated_at = datetime.utcnow()
+    if s2_to_db:
+        batch_results = fetch_author_stats_batch(list(s2_to_db.keys()))
+        for stats in batch_results:
+            db_id = s2_to_db.get(stats.s2_author_id)
+            if not db_id:
+                continue
+            with database_session() as session:
+                record = session.query(AuthorRecord).filter(
+                    AuthorRecord.id == db_id
+                ).first()
+                if record:
+                    record.name = stats.name
+                    record.affiliations = stats.affiliations
+                    record.homepage = stats.homepage
+                    record.paper_count = stats.paper_count
+                    record.citation_count = stats.citation_count
+                    record.h_index = stats.h_index
+                    record.stats_updated_at = datetime.utcnow()
 
     # Compute and write max_author_h_index
     with database_session() as session:

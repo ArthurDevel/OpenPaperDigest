@@ -2,12 +2,14 @@
 Client for the Semantic Scholar API.
 
 Uses the free API with optional API key for higher rate limits.
-Free tier: 100 requests/5 minutes. With API key: 1 request/second.
+Free tier: 1000 req/s shared globally among all unauthenticated users.
+With API key: dedicated 1-10 req/s depending on endpoint.
 
 Responsibilities:
 - Fetch paper author data by arXiv ID
 - Fetch individual author stats (h-index, citations, etc.)
 - Batch fetch paper authors for bulk ingestion
+- Batch fetch author stats for bulk ingestion
 """
 
 import os
@@ -27,12 +29,12 @@ logger = logging.getLogger(__name__)
 
 S2_API_BASE = 'https://api.semanticscholar.org/graph/v1'
 
-# NOTE: The free-tier rate limit (100 req / 5 min) is shared globally across
-# ALL unauthenticated users, so adding a long delay between our requests
-# doesn't actually help — other users consume the budget too. Instead we
-# retry quickly (1s) on 429 until we get through.
-RETRY_DELAY = 1.0   # seconds between retries on 429
-MAX_RETRIES = 10     # enough attempts to ride out short contention windows
+# The free-tier rate limit is shared globally across ALL unauthenticated users.
+# Burst fast and retry with exponential backoff — waiting a fixed delay just
+# lets other users consume the pool. Tested in testscripts/7_test_rate_limits.py.
+RETRY_BASE_DELAY = 0.1  # seconds, doubles each retry
+RETRY_BACKOFF = 2.0
+MAX_RETRIES = 5
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -50,22 +52,23 @@ def _get_headers() -> dict:
 
 def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
     """
-    Make an HTTP request with retry on 429 (rate limit) responses.
-    Retries every RETRY_DELAY seconds — the free-tier limit is shared
-    globally so there's no point backing off exponentially.
+    Make an HTTP request with exponential backoff retry on 429 responses.
+    Bursts fast and backs off — optimal for the shared global rate limit pool.
 
     @param method: HTTP method ('get' or 'post')
     @param url: Request URL
     @param kwargs: Additional arguments passed to requests.get/post
     @returns Response object
     """
+    delay = RETRY_BASE_DELAY
     for attempt in range(MAX_RETRIES):
         response = getattr(requests, method)(url, **kwargs)
         if response.status_code != 429:
             response.raise_for_status()
             return response
-        logger.warning(f"S2 rate limited (429), retrying in {RETRY_DELAY}s (attempt {attempt + 1}/{MAX_RETRIES})")
-        time.sleep(RETRY_DELAY)
+        logger.warning(f"S2 rate limited (429), retrying in {delay:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})")
+        time.sleep(delay)
+        delay *= RETRY_BACKOFF
 
     # Final attempt, let it raise
     response = getattr(requests, method)(url, **kwargs)
@@ -130,6 +133,43 @@ def fetch_author_stats(s2_author_id: str) -> S2Author:
         citation_count=data.get('citationCount'),
         h_index=data.get('hIndex'),
     )
+
+
+def fetch_author_stats_batch(s2_author_ids: List[str]) -> List[S2Author]:
+    """
+    Batch fetch stats for multiple authors. Up to 1000 authors per request.
+
+    @param s2_author_ids: List of Semantic Scholar author IDs
+    @returns List of S2Author with stats (h_index, citation_count, etc.)
+    """
+    url = f'{S2_API_BASE}/author/batch'
+    params = {'fields': 'name,affiliations,homepage,paperCount,citationCount,hIndex'}
+
+    response = _request_with_retry(
+        'post', url,
+        headers=_get_headers(),
+        params=params,
+        json={'ids': s2_author_ids},
+        timeout=60,
+    )
+    results = response.json()
+
+    authors = []
+    for i, author_data in enumerate(results):
+        if author_data is None:
+            continue
+
+        authors.append(S2Author(
+            s2_author_id=s2_author_ids[i],
+            name=author_data.get('name', 'Unknown'),
+            affiliations=author_data.get('affiliations') or None,
+            homepage=author_data.get('homepage') or None,
+            paper_count=author_data.get('paperCount'),
+            citation_count=author_data.get('citationCount'),
+            h_index=author_data.get('hIndex'),
+        ))
+
+    return authors
 
 
 def fetch_paper_authors_batch(arxiv_ids: List[str]) -> List[S2PaperAuthors]:

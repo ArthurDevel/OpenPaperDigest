@@ -205,13 +205,14 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
 
 def refresh_author_stats(stale_days: int = STALE_DAYS, only_author_ids: set = None) -> Dict[str, int]:
     """
-    Fetch stats for authors where stats_updated_at is NULL or stale.
+    Batch-fetch stats for authors where stats_updated_at is NULL or stale.
+    Uses POST /author/batch (up to 1000 per request) instead of individual calls.
 
     @param stale_days: Number of days after which stats are considered stale
     @param only_author_ids: If provided, only refresh these author IDs
     @returns Dict with refreshed and failed counts
     """
-    from shared.semantic_scholar.client import fetch_author_stats
+    from shared.semantic_scholar.client import fetch_author_stats_batch
 
     cutoff = datetime.utcnow() - timedelta(days=stale_days)
     refreshed = 0
@@ -224,21 +225,33 @@ def refresh_author_stats(stale_days: int = STALE_DAYS, only_author_ids: set = No
         )
         if only_author_ids:
             query = query.filter(AuthorRecord.id.in_(only_author_ids))
-        stale_authors = query.limit(500).all()
+        stale_authors = query.limit(1000).all()
 
-        author_ids = [(a.id, a.s2_author_id) for a in stale_authors]
+        # Map s2_author_id -> db id for updating after batch fetch
+        s2_to_db = {a.s2_author_id: a.id for a in stale_authors}
 
-    print(f"  Found {len(author_ids)} authors needing stats refresh")
+    s2_ids = list(s2_to_db.keys())
+    print(f"  Found {len(s2_ids)} authors needing stats refresh")
 
-    for idx, (author_db_id, s2_id) in enumerate(author_ids):
-        if (idx + 1) % 50 == 0:
-            print(f"  Stats progress: {idx + 1}/{len(author_ids)} ({refreshed} refreshed, {failed} failed)")
+    if not s2_ids:
+        return {"refreshed": 0, "failed": 0}
 
+    try:
+        batch_results = fetch_author_stats_batch(s2_ids)
+    except Exception as e:
+        print(f"  Batch author stats fetch failed: {e}")
+        return {"refreshed": 0, "failed": len(s2_ids)}
+
+    print(f"  S2 returned stats for {len(batch_results)} authors")
+
+    for stats in batch_results:
+        db_id = s2_to_db.get(stats.s2_author_id)
+        if not db_id:
+            continue
         try:
-            stats = fetch_author_stats(s2_id)
             with database_session() as session:
                 record = session.query(AuthorRecord).filter(
-                    AuthorRecord.id == author_db_id
+                    AuthorRecord.id == db_id
                 ).first()
                 if record:
                     record.name = stats.name
@@ -250,8 +263,15 @@ def refresh_author_stats(stale_days: int = STALE_DAYS, only_author_ids: set = No
                     record.stats_updated_at = datetime.utcnow()
             refreshed += 1
         except Exception as e:
-            print(f"  FAIL author {s2_id}: {e}")
+            print(f"  FAIL saving author {stats.s2_author_id}: {e}")
             failed += 1
+
+    # Count authors that S2 didn't return (not found)
+    returned_ids = {s.s2_author_id for s in batch_results}
+    not_found = len(s2_ids) - len(returned_ids)
+    if not_found:
+        print(f"  {not_found} authors not found in S2")
+        failed += not_found
 
     return {"refreshed": refreshed, "failed": failed}
 
