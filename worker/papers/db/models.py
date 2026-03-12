@@ -43,6 +43,8 @@ class PaperRecord(Base):
     # 1536-dim embedding vector from text-embedding-3-small via OpenRouter
     embedding = Column(Vector(1536), nullable=True)
     abstract = Column(Text, nullable=True)
+    # Pre-computed scoring signals (e.g. {"max_author_h_index": 42})
+    signals = Column(JSON, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("paper_uuid", name="uq_papers_paper_uuid"),

@@ -200,6 +200,8 @@ export interface MinimalPaper {
   slug: string | null;
   /** Public storage URL of thumbnail image */
   thumbnailUrl: string | null;
+  /** Score breakdown from the feed ranking system (only present in feed responses) */
+  scoreBreakdown?: import('@/types/recommendation').ScoreBreakdown;
 }
 
 /**
