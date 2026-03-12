@@ -241,6 +241,12 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
             Failed to generate summary. Try collapsing and expanding again.
           </p>
         </div>
+      ) : summary?.abstractSummary ? (
+        <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
+          <p className="text-sm text-gray-700 dark:text-gray-300 line-clamp-3">
+            {summary.abstractSummary}
+          </p>
+        </div>
       ) : null}
     </div>
   );
