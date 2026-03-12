@@ -112,6 +112,7 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
     authors_linked = 0
     authors_created = 0
     papers_failed = 0
+    all_author_ids: set = set()
 
     print(f"  S2 returned {len(batch_results)} results, processing DB upserts...")
 
@@ -147,6 +148,8 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
                         author_id = new_author.id
                         authors_created += 1
 
+                    all_author_ids.add(author_id)
+
                     if author_id in seen_author_ids:
                         continue
                     seen_author_ids.add(author_id)
@@ -172,14 +175,16 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
         "authors_linked": authors_linked,
         "authors_created": authors_created,
         "papers_failed": papers_failed,
+        "author_ids": all_author_ids,
     }
 
 
-def refresh_author_stats(stale_days: int = STALE_DAYS) -> Dict[str, int]:
+def refresh_author_stats(stale_days: int = STALE_DAYS, only_author_ids: set = None) -> Dict[str, int]:
     """
     Fetch stats for authors where stats_updated_at is NULL or stale.
 
     @param stale_days: Number of days after which stats are considered stale
+    @param only_author_ids: If provided, only refresh these author IDs
     @returns Dict with refreshed and failed counts
     """
     from shared.semantic_scholar.client import fetch_author_stats
@@ -189,10 +194,13 @@ def refresh_author_stats(stale_days: int = STALE_DAYS) -> Dict[str, int]:
     failed = 0
 
     with database_session() as session:
-        stale_authors = session.query(AuthorRecord).filter(
+        query = session.query(AuthorRecord).filter(
             (AuthorRecord.stats_updated_at.is_(None)) |
             (AuthorRecord.stats_updated_at < cutoff)
-        ).limit(500).all()
+        )
+        if only_author_ids:
+            query = query.filter(AuthorRecord.id.in_(only_author_ids))
+        stale_authors = query.limit(500).all()
 
         author_ids = [(a.id, a.s2_author_id) for a in stale_authors]
 
@@ -224,11 +232,11 @@ def refresh_author_stats(stale_days: int = STALE_DAYS) -> Dict[str, int]:
     return {"refreshed": refreshed, "failed": failed}
 
 
-def update_paper_signals() -> Dict[str, int]:
+def update_paper_signals(only_paper_ids: set = None) -> Dict[str, int]:
     """
     Compute max_author_h_index for each paper and write it into the signals JSONB column.
-    Processes all papers that have linked authors.
 
+    @param only_paper_ids: If provided, only update these paper IDs
     @returns Dict with updated and failed counts
     """
     from sqlalchemy import func
@@ -238,14 +246,17 @@ def update_paper_signals() -> Dict[str, int]:
 
     # Fetch max h-index per paper in one query
     with database_session() as session:
-        rows = session.query(
+        query = session.query(
             PaperAuthorRecord.paper_id,
             func.max(AuthorRecord.h_index).label("max_h_index"),
         ).join(
             AuthorRecord, PaperAuthorRecord.author_id == AuthorRecord.id
         ).filter(
             AuthorRecord.h_index.isnot(None)
-        ).group_by(
+        )
+        if only_paper_ids:
+            query = query.filter(PaperAuthorRecord.paper_id.in_(only_paper_ids))
+        rows = query.group_by(
             PaperAuthorRecord.paper_id
         ).all()
 
@@ -297,7 +308,9 @@ def backfill_author_stats_dag():
     @task
     def process_all_papers() -> Dict[str, int]:
         """
-        Batch-link authors for all papers, then refresh stats.
+        For each batch: link authors, fetch their stats, and update paper signals
+        immediately — so papers get scored as we go instead of waiting for all
+        linking to finish first.
 
         @returns Dict with total counts
         """
@@ -305,58 +318,73 @@ def backfill_author_stats_dag():
         total_linked = 0
         total_created = 0
         total_failed = 0
-        attempted_paper_ids: set = set()  # Track all attempted papers to avoid infinite loops
+        total_stats_refreshed = 0
+        total_stats_failed = 0
+        total_signals_updated = 0
+        total_signals_failed = 0
+        attempted_paper_ids: set = set()
 
-        # Phase 1: Link paper authors using batch endpoint
+        batch_num = 0
         while True:
             papers = fetch_papers_without_author_links(batch_size=BATCH_SIZE, exclude_ids=attempted_paper_ids)
             if not papers:
                 break
 
-            # Mark these papers as attempted before processing
+            batch_num += 1
+            batch_paper_ids = {p["id"] for p in papers}
             for p in papers:
                 attempted_paper_ids.add(p["id"])
 
             total_papers += len(papers)
-            print(f"Fetched batch of {len(papers)} papers (total so far: {total_papers})")
+            print(f"\n{'=' * 50}")
+            print(f"BATCH {batch_num}: {len(papers)} papers (total so far: {total_papers})")
+            print(f"{'=' * 50}")
 
+            # Step 1: Link authors
             result = link_batch_authors(papers)
             total_linked += result["authors_linked"]
             total_created += result["authors_created"]
             total_failed += result["papers_failed"]
-
             print(f"  Linked {result['authors_linked']} authors, created {result['authors_created']} new")
 
-        # Phase 2: Refresh author stats
-        print("\nRefreshing author stats...")
-        stats_result = refresh_author_stats(stale_days=STALE_DAYS)
+            # Step 2: Refresh stats for authors we just touched
+            batch_author_ids = result.get("author_ids", set())
+            if batch_author_ids:
+                print(f"  Refreshing stats for {len(batch_author_ids)} authors...")
+                stats_result = refresh_author_stats(stale_days=STALE_DAYS, only_author_ids=batch_author_ids)
+                total_stats_refreshed += stats_result["refreshed"]
+                total_stats_failed += stats_result["failed"]
+                print(f"  Stats: {stats_result['refreshed']} refreshed, {stats_result['failed']} failed")
 
-        # Phase 3: Update paper signals with max author h-index
-        print("\nUpdating paper signals (max_author_h_index)...")
-        signals_result = update_paper_signals()
+            # Step 3: Update signals for papers in this batch
+            print(f"  Updating signals for {len(batch_paper_ids)} papers...")
+            signals_result = update_paper_signals(only_paper_ids=batch_paper_ids)
+            total_signals_updated += signals_result["updated"]
+            total_signals_failed += signals_result["failed"]
+            print(f"  Signals: {signals_result['updated']} updated, {signals_result['failed']} failed")
 
-        print("\n" + "=" * 50)
+        print(f"\n{'=' * 50}")
         print("BACKFILL AUTHOR STATS REPORT")
-        print("=" * 50)
+        print(f"{'=' * 50}")
         print(f"Papers processed:    {total_papers}")
         print(f"Authors linked:      {total_linked}")
         print(f"Authors created:     {total_created}")
         print(f"Papers failed:       {total_failed}")
-        print(f"Stats refreshed:     {stats_result['refreshed']}")
-        print(f"Stats refresh failed:{stats_result['failed']}")
-        print(f"Signals updated:     {signals_result['updated']}")
-        print(f"Signals failed:      {signals_result['failed']}")
-        print("=" * 50)
+        print(f"Stats refreshed:     {total_stats_refreshed}")
+        print(f"Stats refresh failed:{total_stats_failed}")
+        print(f"Signals updated:     {total_signals_updated}")
+        print(f"Signals failed:      {total_signals_failed}")
+        print(f"{'=' * 50}")
 
         return {
             "total_papers": total_papers,
             "authors_linked": total_linked,
             "authors_created": total_created,
             "papers_failed": total_failed,
-            "stats_refreshed": stats_result["refreshed"],
-            "stats_refresh_failed": stats_result["failed"],
-            "signals_updated": signals_result["updated"],
-            "signals_failed": signals_result["failed"],
+            "stats_refreshed": total_stats_refreshed,
+            "stats_refresh_failed": total_stats_failed,
+            "signals_updated": total_signals_updated,
+            "signals_failed": total_signals_failed,
         }
 
     process_all_papers()
