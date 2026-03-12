@@ -80,7 +80,7 @@ def fetch_papers_without_author_links(batch_size: int = BATCH_SIZE, exclude_ids:
         )
         if exclude_ids:
             query = query.filter(~PaperRecord.id.in_(exclude_ids))
-        rows = query.order_by(PaperRecord.id).limit(batch_size).all()
+        rows = query.order_by(PaperRecord.id.desc()).limit(batch_size).all()
 
         return [
             {"id": row.id, "paper_uuid": row.paper_uuid, "arxiv_id": row.arxiv_id}
