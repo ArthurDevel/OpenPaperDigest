@@ -206,7 +206,7 @@ def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
 def refresh_author_stats(stale_days: int = STALE_DAYS, only_author_ids: set = None) -> Dict[str, int]:
     """
     Batch-fetch stats for authors where stats_updated_at is NULL or stale.
-    Uses POST /author/batch (up to 1000 per request) instead of individual calls.
+    Uses POST /author/batch (up to 1000 per request), loops until all done.
 
     @param stale_days: Number of days after which stats are considered stale
     @param only_author_ids: If provided, only refresh these author IDs
@@ -218,60 +218,71 @@ def refresh_author_stats(stale_days: int = STALE_DAYS, only_author_ids: set = No
     refreshed = 0
     failed = 0
 
-    with database_session() as session:
-        query = session.query(AuthorRecord).filter(
-            (AuthorRecord.stats_updated_at.is_(None)) |
-            (AuthorRecord.stats_updated_at < cutoff)
-        )
-        if only_author_ids:
-            query = query.filter(AuthorRecord.id.in_(only_author_ids))
-        stale_authors = query.limit(1000).all()
+    while True:
+        with database_session() as session:
+            query = session.query(AuthorRecord).filter(
+                (AuthorRecord.stats_updated_at.is_(None)) |
+                (AuthorRecord.stats_updated_at < cutoff)
+            )
+            if only_author_ids:
+                query = query.filter(AuthorRecord.id.in_(only_author_ids))
+            stale_authors = query.limit(1000).all()
 
-        # Map s2_author_id -> db id for updating after batch fetch
-        s2_to_db = {a.s2_author_id: a.id for a in stale_authors}
+            s2_to_db = {a.s2_author_id: a.id for a in stale_authors}
 
-    s2_ids = list(s2_to_db.keys())
-    print(f"  Found {len(s2_ids)} authors needing stats refresh")
+        s2_ids = list(s2_to_db.keys())
+        if not s2_ids:
+            break
 
-    if not s2_ids:
-        return {"refreshed": 0, "failed": 0}
+        print(f"  Fetching stats for {len(s2_ids)} authors...")
 
-    try:
-        batch_results = fetch_author_stats_batch(s2_ids)
-    except Exception as e:
-        print(f"  Batch author stats fetch failed: {e}")
-        return {"refreshed": 0, "failed": len(s2_ids)}
-
-    print(f"  S2 returned stats for {len(batch_results)} authors")
-
-    for stats in batch_results:
-        db_id = s2_to_db.get(stats.s2_author_id)
-        if not db_id:
-            continue
         try:
-            with database_session() as session:
-                record = session.query(AuthorRecord).filter(
-                    AuthorRecord.id == db_id
-                ).first()
-                if record:
-                    record.name = stats.name
-                    record.affiliations = stats.affiliations
-                    record.homepage = stats.homepage
-                    record.paper_count = stats.paper_count
-                    record.citation_count = stats.citation_count
-                    record.h_index = stats.h_index
-                    record.stats_updated_at = datetime.utcnow()
-            refreshed += 1
+            batch_results = fetch_author_stats_batch(s2_ids)
         except Exception as e:
-            print(f"  FAIL saving author {stats.s2_author_id}: {e}")
-            failed += 1
+            print(f"  Batch author stats fetch failed: {e}")
+            failed += len(s2_ids)
+            break
 
-    # Count authors that S2 didn't return (not found)
-    returned_ids = {s.s2_author_id for s in batch_results}
-    not_found = len(s2_ids) - len(returned_ids)
-    if not_found:
-        print(f"  {not_found} authors not found in S2")
-        failed += not_found
+        print(f"  S2 returned stats for {len(batch_results)} authors")
+
+        for stats in batch_results:
+            db_id = s2_to_db.get(stats.s2_author_id)
+            if not db_id:
+                continue
+            try:
+                with database_session() as session:
+                    record = session.query(AuthorRecord).filter(
+                        AuthorRecord.id == db_id
+                    ).first()
+                    if record:
+                        record.name = stats.name
+                        record.affiliations = stats.affiliations
+                        record.homepage = stats.homepage
+                        record.paper_count = stats.paper_count
+                        record.citation_count = stats.citation_count
+                        record.h_index = stats.h_index
+                        record.stats_updated_at = datetime.utcnow()
+                refreshed += 1
+            except Exception as e:
+                print(f"  FAIL saving author {stats.s2_author_id}: {e}")
+                failed += 1
+
+        # Count authors that S2 didn't return (not found) — mark their
+        # stats_updated_at so we don't re-fetch them every loop iteration
+        returned_ids = {s.s2_author_id for s in batch_results}
+        not_found_ids = set(s2_ids) - returned_ids
+        if not_found_ids:
+            print(f"  {len(not_found_ids)} authors not found in S2")
+            failed += len(not_found_ids)
+            with database_session() as session:
+                for s2_id in not_found_ids:
+                    db_id = s2_to_db.get(s2_id)
+                    if db_id:
+                        record = session.query(AuthorRecord).filter(
+                            AuthorRecord.id == db_id
+                        ).first()
+                        if record:
+                            record.stats_updated_at = datetime.utcnow()
 
     return {"refreshed": refreshed, "failed": failed}
 
@@ -409,10 +420,15 @@ def backfill_author_stats_dag():
 
         # Catch-up pass: papers that have author links but missing signals
         # (e.g. from a previous run that crashed after linking but before stats/signals)
-        missing = fetch_papers_missing_signals(batch_size=BATCH_SIZE)
-        if missing:
+        catchup_round = 0
+        while True:
+            missing = fetch_papers_missing_signals(batch_size=BATCH_SIZE)
+            if not missing:
+                break
+
+            catchup_round += 1
             print(f"\n{'=' * 50}")
-            print(f"CATCH-UP: {len(missing)} papers with authors but missing signals")
+            print(f"CATCH-UP {catchup_round}: {len(missing)} papers with authors but missing signals")
             print(f"{'=' * 50}")
 
             # Collect all author IDs for these papers
