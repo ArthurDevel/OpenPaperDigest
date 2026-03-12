@@ -88,6 +88,30 @@ def fetch_papers_without_author_links(batch_size: int = BATCH_SIZE, exclude_ids:
         ]
 
 
+def fetch_papers_missing_signals(batch_size: int = BATCH_SIZE) -> List[int]:
+    """
+    Query papers that have author links but are missing max_author_h_index in signals.
+    These are papers where linking succeeded but stats/signals weren't written yet.
+
+    @param batch_size: Maximum number of paper IDs to fetch
+    @returns List of paper IDs
+    """
+    from sqlalchemy import text
+
+    with database_session() as session:
+        rows = session.execute(text("""
+            SELECT DISTINCT pa.paper_id
+            FROM paper_authors pa
+            JOIN papers p ON p.id = pa.paper_id
+            WHERE p.signals IS NULL
+               OR NOT (p.signals ? 'max_author_h_index')
+            ORDER BY pa.paper_id DESC
+            LIMIT :limit
+        """), {"limit": batch_size}).fetchall()
+
+        return [row[0] for row in rows]
+
+
 def link_batch_authors(papers: List[Dict]) -> Dict[str, int]:
     """
     Batch-fetch author IDs from Semantic Scholar and create DB records.
@@ -359,6 +383,36 @@ def backfill_author_stats_dag():
             # Step 3: Update signals for papers in this batch
             print(f"  Updating signals for {len(batch_paper_ids)} papers...")
             signals_result = update_paper_signals(only_paper_ids=batch_paper_ids)
+            total_signals_updated += signals_result["updated"]
+            total_signals_failed += signals_result["failed"]
+            print(f"  Signals: {signals_result['updated']} updated, {signals_result['failed']} failed")
+
+        # Catch-up pass: papers that have author links but missing signals
+        # (e.g. from a previous run that crashed after linking but before stats/signals)
+        missing = fetch_papers_missing_signals(batch_size=BATCH_SIZE)
+        if missing:
+            print(f"\n{'=' * 50}")
+            print(f"CATCH-UP: {len(missing)} papers with authors but missing signals")
+            print(f"{'=' * 50}")
+
+            # Collect all author IDs for these papers
+            with database_session() as session:
+                author_rows = session.query(
+                    PaperAuthorRecord.author_id
+                ).filter(
+                    PaperAuthorRecord.paper_id.in_(missing)
+                ).distinct().all()
+                catchup_author_ids = {row.author_id for row in author_rows}
+
+            if catchup_author_ids:
+                print(f"  Refreshing stats for {len(catchup_author_ids)} authors...")
+                stats_result = refresh_author_stats(stale_days=STALE_DAYS, only_author_ids=catchup_author_ids)
+                total_stats_refreshed += stats_result["refreshed"]
+                total_stats_failed += stats_result["failed"]
+                print(f"  Stats: {stats_result['refreshed']} refreshed, {stats_result['failed']} failed")
+
+            print(f"  Updating signals for {len(missing)} papers...")
+            signals_result = update_paper_signals(only_paper_ids=set(missing))
             total_signals_updated += signals_result["updated"]
             total_signals_failed += signals_result["failed"]
             print(f"  Signals: {signals_result['updated']} updated, {signals_result['failed']} failed")
