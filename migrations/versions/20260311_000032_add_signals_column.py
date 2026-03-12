@@ -30,9 +30,12 @@ def upgrade() -> None:
         "ALTER TABLE papers ADD COLUMN IF NOT EXISTS signals JSONB"
     ))
 
-    # Update match_papers_by_embedding to return signals
+    # Drop and recreate RPC (return type changed, CREATE OR REPLACE cannot handle that)
+    connection.execute(sa.text(
+        "DROP FUNCTION IF EXISTS match_papers_by_embedding(vector, int, text[])"
+    ))
     connection.execute(sa.text("""
-        CREATE OR REPLACE FUNCTION match_papers_by_embedding(
+        CREATE FUNCTION match_papers_by_embedding(
             query_embedding vector(1536),
             match_count int DEFAULT 20,
             exclude_uuids text[] DEFAULT '{}'
@@ -69,9 +72,12 @@ def downgrade() -> None:
     """Remove signals column and revert match_papers_by_embedding RPC."""
     connection = op.get_bind()
 
-    # Revert RPC to version without signals
+    # Drop and recreate RPC (return type changes back)
+    connection.execute(sa.text(
+        "DROP FUNCTION IF EXISTS match_papers_by_embedding(vector, int, text[])"
+    ))
     connection.execute(sa.text("""
-        CREATE OR REPLACE FUNCTION match_papers_by_embedding(
+        CREATE FUNCTION match_papers_by_embedding(
             query_embedding vector(1536),
             match_count int DEFAULT 20,
             exclude_uuids text[] DEFAULT '{}'

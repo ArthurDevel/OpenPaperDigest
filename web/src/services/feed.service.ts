@@ -85,7 +85,6 @@ interface CandidateRow {
   authors: string | null;
   finishedAt: Date;
   embedding: number[];
-  externalPopularitySignals: Record<string, unknown> | null;
   signals: Record<string, unknown> | null;
   similarity: number;
   sourceClusterIndex: number | null;
@@ -257,7 +256,6 @@ async function fetchCandidatesFromANN(
           authors: string | null;
           finished_at: string;
           embedding: string;
-          external_popularity_signals: Record<string, unknown> | null;
           signals: Record<string, unknown> | null;
           similarity: number;
         }[],
@@ -278,7 +276,6 @@ async function fetchCandidatesFromANN(
           authors: row.authors,
           finishedAt: new Date(row.finished_at),
           embedding: parseEmbeddingString(row.embedding),
-          externalPopularitySignals: row.external_popularity_signals,
           signals: row.signals,
           similarity: row.similarity,
           sourceClusterIndex: clusterIndex,
@@ -307,7 +304,7 @@ async function fetchColdStartCandidates(
   // Build query
   let query = supabase
     .from('papers')
-    .select('paper_uuid, title, authors, finished_at, external_popularity_signals, signals')
+    .select('paper_uuid, title, authors, finished_at, signals')
     .in('status', ['completed', 'partially_completed'])
     .order('finished_at', { ascending: false })
     .limit(fetchCount);
@@ -329,7 +326,6 @@ async function fetchColdStartCandidates(
     title: string | null;
     authors: string | null;
     finished_at: string;
-    external_popularity_signals: Record<string, unknown> | null;
     signals: Record<string, unknown> | null;
   }[]).map((row) => ({
     paperUuid: row.paper_uuid,
@@ -337,7 +333,6 @@ async function fetchColdStartCandidates(
     authors: row.authors,
     finishedAt: new Date(row.finished_at),
     embedding: [],
-    externalPopularitySignals: row.external_popularity_signals,
     signals: row.signals,
     similarity: 0,
     sourceClusterIndex: null,
@@ -359,7 +354,7 @@ async function fetchExplorationCandidates(
 
   let query = supabase
     .from('papers')
-    .select('paper_uuid, title, authors, finished_at, external_popularity_signals, signals')
+    .select('paper_uuid, title, authors, finished_at, signals')
     .in('status', ['completed', 'partially_completed'])
     .order('finished_at', { ascending: false })
     .limit(count);
@@ -380,7 +375,6 @@ async function fetchExplorationCandidates(
     title: string | null;
     authors: string | null;
     finished_at: string;
-    external_popularity_signals: Record<string, unknown> | null;
     signals: Record<string, unknown> | null;
   }[]).map((row) => ({
     paperUuid: row.paper_uuid,
@@ -388,7 +382,6 @@ async function fetchExplorationCandidates(
     authors: row.authors,
     finishedAt: new Date(row.finished_at),
     embedding: [],
-    externalPopularitySignals: row.external_popularity_signals,
     signals: row.signals,
     similarity: 0,
     sourceClusterIndex: null,
@@ -430,7 +423,7 @@ async function scoreCandidates(
       : 0;
 
     // HuggingFace upvotes: min(upvotes/100, 1.0), 0 if no data
-    const upvotes = extractUpvotes(candidate.externalPopularitySignals);
+    const upvotes = extractUpvotes(candidate.signals);
     const hfUpvotesScore = upvotes !== null ? Math.min(upvotes / 100, 1.0) : 0;
 
     // Similarity: apply cluster-weight boost for ANN candidates, 0 for exploration
@@ -566,24 +559,14 @@ function injectDiversity(
 }
 
 /**
- * Extracts the raw HuggingFace upvote count from external popularity signals.
- * @param signals - The external popularity signals JSON
+ * Extracts the raw HuggingFace upvote count from the signals dict.
+ * @param signals - The signals JSON dict (e.g. {"hf_upvotes": 42})
  * @returns Raw upvote count or null if not available
  */
 function extractUpvotes(signals: Record<string, unknown> | null): number | null {
   if (!signals) return null;
-
-  let parsed = signals;
-  if (typeof signals === 'string') {
-    try {
-      parsed = JSON.parse(signals);
-    } catch {
-      return null;
-    }
-  }
-
-  const hfUpvotes = (parsed as Record<string, unknown>)?.upvotes;
-  return typeof hfUpvotes === 'number' ? hfUpvotes : null;
+  const upvotes = signals.hf_upvotes;
+  return typeof upvotes === 'number' ? upvotes : null;
 }
 
 /**

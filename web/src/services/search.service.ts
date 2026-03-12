@@ -64,7 +64,7 @@ export async function searchPapers(
     title: string | null;
     authors: string | null;
     finished_at: string | null;
-    external_popularity_signals: Record<string, unknown> | null;
+    signals: Record<string, unknown> | null;
     similarity: number;
   }[];
 
@@ -76,7 +76,7 @@ export async function searchPapers(
     const recencyScore = row.finished_at
       ? Math.exp(-(now - new Date(row.finished_at).getTime()) / (1000 * 60 * 60 * 24) * Math.LN2 / RECENCY_HALF_LIFE_DAYS)
       : 0;
-    const popularityScore = computePopularityScore(row.external_popularity_signals);
+    const popularityScore = computePopularityScore(row.signals);
     const score =
       SIMILARITY_WEIGHT * row.similarity +
       POPULARITY_WEIGHT * popularityScore +
@@ -106,29 +106,20 @@ export async function searchPapers(
 // ============================================================================
 
 /**
- * Computes a popularity score from external_popularity_signals.
- * Same logic as feed.service.ts.
+ * Computes a popularity score from the signals dict.
+ * Returns 0 if no signals or no hf_upvotes (intentional: missing data = 0 contribution).
+ * @param signals - The signals JSON dict (e.g. {"hf_upvotes": 42})
+ * @returns Popularity score in [0, 1]
  */
 function computePopularityScore(
   signals: Record<string, unknown> | null
 ): number {
-  if (!signals) return 0.5;
-
-  let parsed = signals;
-  if (typeof signals === 'string') {
-    try {
-      parsed = JSON.parse(signals);
-    } catch {
-      return 0.5;
-    }
-  }
-
-  const hfUpvotes = (parsed as Record<string, unknown>)?.upvotes;
+  if (!signals) return 0;
+  const hfUpvotes = signals.hf_upvotes;
   if (typeof hfUpvotes === 'number') {
     return Math.min(hfUpvotes / 100, 1.0);
   }
-
-  return 0.5;
+  return 0;
 }
 
 /**

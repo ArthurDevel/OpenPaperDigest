@@ -12,7 +12,6 @@ sys.path.insert(0, '/opt/airflow')
 
 from sqlalchemy.orm import Session
 from shared.db import SessionLocal
-from papers.models import ExternalPopularitySignal
 from papers.client import create_paper
 
 
@@ -204,26 +203,24 @@ def daily_huggingface_papers_dag():
                         skipped_count += 1
                         continue
                     
-                    # Step 2: Create popularity signal
-                    hf_signal = ExternalPopularitySignal(
-                        source="HuggingFace",
-                        values={
-                            "upvotes": paper.get('upvotes', 0),
-                            "github_stars": paper.get('githubStars', 0)
-                        },
-                        fetch_info={
+                    # Step 2: Create signals dict
+                    signals = {
+                        "hf_upvotes": paper.get('upvotes', 0),
+                        "hf_github_stars": paper.get('githubStars', 0),
+                        "sources": ["HuggingFace"],
+                        "hf_fetch_info": {
                             "hf_paper_id": paper_item.get('discussionId'),
                             "api_endpoint": "https://huggingface.co/api/daily_papers"
                         }
-                    )
-                    
+                    }
+
                     # Step 3: Add paper to processing queue
                     created_paper = create_paper(
                         db=session,
                         arxiv_id=arxiv_id,
                         title=paper.get('title'),
                         authors=authors_str,
-                        external_popularity_signals=[hf_signal],
+                        signals=signals,
                         initiated_by_user_id=None  # System job
                     )
                     

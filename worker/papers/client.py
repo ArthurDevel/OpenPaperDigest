@@ -10,7 +10,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from papers.models import Paper, PaperSlug, Page, Section, ExternalPopularitySignal
+from papers.models import Paper, PaperSlug, Page, Section
 from papers.db.client import (
     get_paper_record, create_paper_record, update_paper_record, list_paper_records,
     get_paper_slugs, get_all_paper_slugs, tombstone_paper_slugs,
@@ -211,7 +211,7 @@ def create_paper(
     title: Optional[str] = None,
     authors: Optional[str] = None,
     abstract: Optional[str] = None,
-    external_popularity_signals: Optional[List[ExternalPopularitySignal]] = None,
+    signals: Optional[Dict[str, Any]] = None,
     initiated_by_user_id: Optional[str] = None
 ) -> Paper:
     """
@@ -230,7 +230,7 @@ def create_paper(
         pdf_url: Direct PDF URL if no arXiv ID - optional
         title: Paper title (optional - will be extracted during processing if not provided)
         authors: Comma-separated author names (optional - will be extracted if not provided)
-        external_popularity_signals: List of ExternalPopularitySignal objects with metrics
+        signals: Pre-computed scoring signals dict (e.g. {"hf_upvotes": 42, "sources": ["HuggingFace"]})
         initiated_by_user_id: User ID who requested processing (None for system jobs)
 
     Returns:
@@ -283,7 +283,7 @@ def create_paper(
         authors=authors,
         status='not_started',  # This queues the paper for processing!
         initiated_by_user_id=initiated_by_user_id,
-        external_popularity_signals=external_popularity_signals or []
+        signals=signals or {}
     )
 
     # Step 4: Persist to database using internal layer

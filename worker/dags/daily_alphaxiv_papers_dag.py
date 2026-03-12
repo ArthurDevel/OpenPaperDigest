@@ -15,7 +15,6 @@ sys.path.insert(0, '/opt/airflow')
 
 from sqlalchemy.orm import Session
 from shared.db import SessionLocal
-from papers.models import ExternalPopularitySignal
 from papers.client import create_paper
 
 from selenium import webdriver
@@ -458,16 +457,15 @@ def daily_alphaxiv_papers_dag():
                         skipped_count += 1
                         continue
 
-                    # Create popularity signal with data from paper page
-                    alphaxiv_signal = ExternalPopularitySignal(
-                        source="AlphaXiv",
-                        values={},
-                        fetch_info={
+                    # Create signals dict
+                    signals = {
+                        "sources": ["AlphaXiv"],
+                        "alphaxiv_fetch_info": {
                             "alphaxiv_paper_id": paper.get('id'),
                             "paper_group_id": paper.get('paper_group_id'),
                             "alphaxiv_url": f"{ALPHAXIV_BASE_URL}/abs/{arxiv_id}"
                         }
-                    )
+                    }
 
                     # Step 3: Add paper to processing queue
                     create_paper(
@@ -475,7 +473,7 @@ def daily_alphaxiv_papers_dag():
                         arxiv_id=arxiv_id,
                         title=title,
                         authors=authors_str,
-                        external_popularity_signals=[alphaxiv_signal],
+                        signals=signals,
                         initiated_by_user_id=None  # System job
                     )
 

@@ -972,10 +972,6 @@ async function mapDbRowToApiPaper(paper: Tables<'papers'>): Promise<Paper> {
     totalCost: paper.total_cost,
     avgCostPerPage: paper.avg_cost_per_page,
     thumbnailUrl: await getPaperThumbnailUrl(paper.paper_uuid),
-    externalPopularitySignals: paper.external_popularity_signals as Record<
-      string,
-      unknown
-    > | null,
     contentHash: paper.content_hash,
     pdfUrl: paper.pdf_url,
   };
