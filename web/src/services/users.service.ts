@@ -7,6 +7,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getPaperThumbnailUrl } from '@/lib/supabase/storage';
 import type {
   CreatedResponse,
@@ -730,31 +731,38 @@ export async function getProcessingMetrics(
  * @returns Array of admin user items sorted by creation date (newest first)
  */
 export async function listAllUsers(): Promise<AdminUserItem[]> {
-  const supabase = await createClient();
+  // User data lives in auth.users (Supabase Auth), not a public table.
+  // Use the Auth Admin API via a service role client to list users.
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRoleKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is not set -- cannot list auth users');
+  }
+  const serviceClient = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    serviceRoleKey
+  );
 
-  // Fetch all users
-  const { data: usersData, error: usersError } = await supabase
-    .from('users')
-    .select('id, email, created_at')
-    .order('created_at', { ascending: false });
+  // Fetch all auth users (paginated, max 1000 per page)
+  const { data: authData, error: authError } = await serviceClient.auth.admin.listUsers({
+    perPage: 1000,
+    page: 1,
+  });
 
-  if (usersError) throw new Error(usersError.message);
+  if (authError) throw new Error(authError.message);
 
-  const users = (usersData ?? []) as Array<{
-    id: string;
-    email: string;
-    created_at: string;
-  }>;
+  // Filter out anonymous users (they have no email)
+  const realUsers = authData.users.filter((u) => !u.is_anonymous && u.email);
 
-  // Fetch all user_lists and user_requests counts in parallel
-  const userIds = users.map((u) => u.id);
+  // Collect user IDs for activity count queries
+  const userIds = realUsers.map((u) => u.id);
 
+  // Fetch user_lists and user_requests counts in parallel
   const [listsResult, requestsResult] = await Promise.all([
-    supabase
+    serviceClient
       .from('user_lists')
       .select('user_id')
       .in('user_id', userIds),
-    supabase
+    serviceClient
       .from('user_requests')
       .select('user_id')
       .in('user_id', userIds),
@@ -774,9 +782,14 @@ export async function listAllUsers(): Promise<AdminUserItem[]> {
     requestCounts.set(row.user_id, (requestCounts.get(row.user_id) ?? 0) + 1);
   }
 
-  return users.map((user) => ({
+  // Sort newest first
+  const sorted = realUsers.sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+
+  return sorted.map((user) => ({
     id: user.id,
-    email: user.email,
+    email: user.email ?? '',
     createdAt: user.created_at,
     savedPapersCount: listCounts.get(user.id) ?? 0,
     requestsCount: requestCounts.get(user.id) ?? 0,
