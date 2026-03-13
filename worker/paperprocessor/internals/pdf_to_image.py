@@ -32,22 +32,27 @@ def _resize_to_max(image: Image.Image, max_width: int, max_height: int) -> Image
     return image.resize((new_width, new_height), resample=resample)
 
 
-async def convert_pdf_to_images(pdf_bytes: bytes) -> List[Image.Image]:
+async def convert_pdf_to_images(pdf_bytes: bytes, max_pages: int = 3) -> List[Image.Image]:
     """
-    Converts a PDF document into a list of PIL Image objects.
-    
+    Converts the first pages of a PDF document into PIL Image objects.
+
+    Only the first max_pages are converted, since the pipeline only needs them
+    for metadata extraction (first 3 pages) and thumbnail (first page).
+
     Args:
         pdf_bytes: The byte content of the PDF file.
+        max_pages: Maximum number of pages to convert (default: 3).
 
     Returns:
-        A list of PIL Image objects, one for each page of the PDF.
+        A list of PIL Image objects, one for each converted page.
     """
     logger.info("Converting PDF to images...")
-    
+
     try:
         pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+        pages_to_convert = min(len(pdf_document), max_pages)
         images = []
-        for page_num in range(len(pdf_document)):
+        for page_num in range(pages_to_convert):
             page = pdf_document.load_page(page_num)
             
             # Render page to a pixmap (an image)
@@ -70,7 +75,7 @@ async def convert_pdf_to_images(pdf_bytes: bytes) -> List[Image.Image]:
                 f"resized={resized_image.width}x{resized_image.height} px"
             )
             
-        logger.info(f"Successfully converted PDF with {len(images)} pages to images.")
+        logger.info(f"Converted {len(images)} of {len(pdf_document)} PDF pages to images.")
         return images
         
     except Exception as e:
