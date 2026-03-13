@@ -80,7 +80,7 @@ async def extract_final_markdown_from_pdf(pdf_contents: bytes) -> str:
     pdf_base64 = base64.b64encode(pdf_contents).decode('utf-8')
 
     from paperprocessor.internals.pdf_to_image import convert_pdf_to_images
-    images = await convert_pdf_to_images(pdf_contents)
+    images = await convert_pdf_to_images(pdf_contents, max_pages=999)
 
     pages = []
     for i, image in enumerate(images):
