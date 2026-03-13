@@ -374,6 +374,33 @@ def _claim_available_jobs(session: Session, max_jobs: int) -> List[JobInfo]:
     return claimed_jobs
 
 
+def _get_job_info(session: Session, job_id: int) -> JobInfo:
+    """
+    Fetch job information from the database by ID.
+
+    Args:
+        session: Active database session
+        job_id: ID of the job to fetch
+
+    Returns:
+        JobInfo: Job information for the given ID
+
+    Raises:
+        Exception: If no job is found with the given ID
+    """
+    job_record = session.get(PaperRecord, job_id)
+    if not job_record:
+        raise Exception(f"Job {job_id} not found in database")
+
+    return JobInfo(
+        id=job_record.id,
+        paper_uuid=job_record.paper_uuid,
+        arxiv_id=job_record.arxiv_id,
+        arxiv_url=job_record.arxiv_url,
+        pdf_url=job_record.pdf_url,
+    )
+
+
 def _mark_job_failed(session: Session, job_id: int, error_message: str) -> None:
     """
     Mark a job as failed with error details.
@@ -473,51 +500,52 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
 def paper_processing_worker_dag():
     
     @task
-    def claim_available_jobs() -> List[Dict[str, Any]]:
+    def claim_available_jobs() -> List[int]:
         """
         Claim available paper jobs from the queue.
-        
+
         Returns:
-            List[Dict]: List of job dictionaries for parallel processing
+            List[int]: List of job IDs for parallel processing (IDs only to avoid XCom size limits)
         """
         print(f"Claiming up to {MAX_PAPERS_PER_RUN} jobs from queue...")
-        
+
         with database_session() as session:
             jobs = _claim_available_jobs(session, MAX_PAPERS_PER_RUN)
-        
+
         if not jobs:
             print("No papers found in queue")
             return []
-        
+
         print(f"Claimed {len(jobs)} jobs for parallel processing")
-        
-        # Convert to dictionaries for Airflow serialization
-        return [job.to_dict() for job in jobs]
+
+        # Return only IDs to keep XCom payload small
+        return [job.id for job in jobs]
     
     @task
-    def process_single_paper(job_dict: Dict[str, Any]) -> Dict[str, Any]:
+    def process_single_paper(job_id: int) -> Dict[str, Any]:
         """
         Process a single paper job through the complete pipeline.
-        
+
         Args:
-            job_dict: Job information dictionary
-            
+            job_id: Database ID of the job to process
+
         Returns:
             dict: Processing result with status and job_id
         """
-        job = JobInfo.from_dict(job_dict)
-        
+        with database_session() as session:
+            job = _get_job_info(session, job_id)
+
         try:
             # Run async processing function
             asyncio.run(_process_paper_job_complete(job))
             return {"status": "success", "job_id": job.id}
         except Exception as e:
             print(f"Failed to process job {job.id}: {e}")
-            
+
             # Mark job as failed to prevent stuck 'processing' status
             with database_session() as session:
                 _mark_job_failed(session, job.id, str(e))
-            
+
             return {"status": "failed", "job_id": job.id, "error": str(e)}
     
     @task
@@ -549,7 +577,7 @@ def paper_processing_worker_dag():
     claimed_jobs = claim_available_jobs()
     
     # Step 2: Process each job in parallel using dynamic task mapping
-    processing_results = process_single_paper.expand(job_dict=claimed_jobs)
+    processing_results = process_single_paper.expand(job_id=claimed_jobs)
     
     # Step 3: Aggregate results
     aggregate_results(processing_results)
