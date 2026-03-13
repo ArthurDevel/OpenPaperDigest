@@ -10,10 +10,10 @@
  * - Track whether the summary div is visible in the viewport
  * - Detect user activity (scroll, mouse, touch) within the summary div
  * - Accumulate active reading time and compute a reading ratio
- * - Fire a callback when the paper collapses/unmounts if readingRatio > 0.4
+ * - Fire a callback with reading time when the paper collapses/unmounts
  */
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useCallback } from 'react';
 
 // ============================================================================
 // CONSTANTS
@@ -21,20 +21,20 @@ import { useRef, useEffect, useCallback } from 'react';
 
 /** Words per minute reading speed assumption */
 const READING_SPEED_WPM = 200;
-/** Minimum reading ratio to trigger the onReadComplete callback */
-const MIN_READING_RATIO = 0.4;
 /** Activity timeout -- user is "inactive" if no event for this many ms */
 const ACTIVITY_TIMEOUT_MS = 15_000;
 /** Throttle interval for activity event listeners */
 const ACTIVITY_THROTTLE_MS = 300;
+/** Heartbeat interval in ms for accumulating active time */
+const HEARTBEAT_MS = 1000;
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
 export interface ReadingTrackerResult {
-  /** Ref to attach to the expanded summary content div */
-  ref: React.RefObject<HTMLDivElement | null>;
+  /** Callback ref to attach to the expanded summary content div */
+  ref: (node: HTMLDivElement | null) => void;
   /** Whether the user is currently actively reading */
   isActivelyReading: boolean;
 }
@@ -45,111 +45,108 @@ export interface ReadingTrackerResult {
 
 /**
  * Tracks active reading time for an expanded paper summary.
- * Uses IntersectionObserver to detect visibility and activity listeners
+ * Uses a callback ref to start/stop tracking when the element mounts/unmounts.
+ * Sets up IntersectionObserver for visibility and activity listeners
  * (scroll, mousemove, touchstart) scoped to the summary div.
- * Fires onReadComplete when the paper collapses or unmounts if the user
- * read for at least 40% of the expected reading time.
+ * Fires onReadComplete when the element unmounts (paper collapses) if any
+ * active reading time was accumulated.
  *
  * @param paperUuid - UUID of the paper being read
  * @param wordCount - Number of words in the summary
- * @param onReadComplete - Callback fired with (paperUuid, readingRatio) when reading ends
- * @returns Object with ref to attach to the summary div and active reading state
+ * @param onReadComplete - Callback fired with (paperUuid, readingRatio, activeTimeSeconds) on unmount
+ * @returns Object with callback ref to attach to the summary div and active reading state
  */
 export function useReadingTracker(
   paperUuid: string,
   wordCount: number,
-  onReadComplete: (paperUuid: string, readingRatio: number) => void
+  onReadComplete: (paperUuid: string, readingRatio: number, activeTimeSeconds: number) => void
 ): ReadingTrackerResult {
-  const ref = useRef<HTMLDivElement | null>(null);
   const isActivelyReadingRef = useRef(false);
-  const isInViewportRef = useRef(false);
-  const lastActivityRef = useRef<number>(0);
-  const activeTimeRef = useRef<number>(0);
-  const lastTickRef = useRef<number>(0);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hasFiredRef = useRef(false);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   // Expected reading time in ms
   const expectedReadingTimeMs = (wordCount / READING_SPEED_WPM) * 60 * 1000;
 
-  // Fire the callback if enough reading happened
-  const fireIfQualified = useCallback(() => {
-    if (hasFiredRef.current || expectedReadingTimeMs <= 0) return;
-
-    const ratio = activeTimeRef.current / expectedReadingTimeMs;
-    if (ratio > MIN_READING_RATIO) {
-      hasFiredRef.current = true;
-      onReadComplete(paperUuid, ratio);
+  // Callback ref: sets up tracking when element mounts, tears down on unmount
+  const ref = useCallback((node: HTMLDivElement | null) => {
+    // Tear down previous tracking if any
+    if (cleanupRef.current) {
+      cleanupRef.current();
+      cleanupRef.current = null;
     }
-  }, [paperUuid, expectedReadingTimeMs, onReadComplete]);
 
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
+    if (!node) return;
+
+    // -- Tracking state for this element lifecycle --
+    let isInViewport = false;
+    let lastActivity = Date.now();
+    let activeTimeMs = 0;
+    let lastTick = Date.now();
+    let lastThrottled = 0;
 
     // -- Activity tracking (throttled) --
-    let lastThrottled = 0;
     const handleActivity = () => {
       const now = Date.now();
       if (now - lastThrottled < ACTIVITY_THROTTLE_MS) return;
       lastThrottled = now;
-      lastActivityRef.current = now;
+      lastActivity = now;
     };
 
-    element.addEventListener('scroll', handleActivity, { passive: true });
-    element.addEventListener('mousemove', handleActivity, { passive: true });
-    element.addEventListener('touchstart', handleActivity, { passive: true });
+    node.addEventListener('scroll', handleActivity, { passive: true });
+    node.addEventListener('mousemove', handleActivity, { passive: true });
+    node.addEventListener('touchstart', handleActivity, { passive: true });
 
     // -- IntersectionObserver --
     const observer = new IntersectionObserver(
       ([entry]) => {
-        isInViewportRef.current = entry.isIntersecting;
+        isInViewport = entry.isIntersecting;
         if (entry.isIntersecting) {
-          // Start tracking -- mark activity so the first tick counts
-          lastActivityRef.current = Date.now();
-          lastTickRef.current = Date.now();
+          lastActivity = Date.now();
+          lastTick = Date.now();
         }
       },
       { threshold: 0.3 }
     );
-    observer.observe(element);
+    observer.observe(node);
 
     // -- Heartbeat interval to accumulate active time --
-    intervalRef.current = setInterval(() => {
+    const interval = setInterval(() => {
       const now = Date.now();
-      const isActive = isInViewportRef.current
-        && (now - lastActivityRef.current < ACTIVITY_TIMEOUT_MS);
+      const isActive = isInViewport && (now - lastActivity < ACTIVITY_TIMEOUT_MS);
 
       isActivelyReadingRef.current = isActive;
 
-      if (isActive && lastTickRef.current > 0) {
-        activeTimeRef.current += now - lastTickRef.current;
+      if (isActive && lastTick > 0) {
+        activeTimeMs += now - lastTick;
       }
-      lastTickRef.current = now;
-    }, 1000);
+      lastTick = now;
+    }, HEARTBEAT_MS);
 
-    // -- Cleanup --
-    return () => {
+    // -- Cleanup function: called when element unmounts or ref changes --
+    cleanupRef.current = () => {
       // Accumulate any final active time
       const now = Date.now();
-      const isActive = isInViewportRef.current
-        && (now - lastActivityRef.current < ACTIVITY_TIMEOUT_MS);
-      if (isActive && lastTickRef.current > 0) {
-        activeTimeRef.current += now - lastTickRef.current;
+      const isActive = isInViewport && (now - lastActivity < ACTIVITY_TIMEOUT_MS);
+      if (isActive && lastTick > 0) {
+        activeTimeMs += now - lastTick;
       }
 
-      fireIfQualified();
-
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+      // Fire callback if any reading time was accumulated
+      if (activeTimeMs > 0) {
+        const ratio = expectedReadingTimeMs > 0
+          ? activeTimeMs / expectedReadingTimeMs
+          : 0;
+        onReadComplete(paperUuid, ratio, Math.round(activeTimeMs / 1000));
       }
+
+      clearInterval(interval);
       observer.disconnect();
-
-      element.removeEventListener('scroll', handleActivity);
-      element.removeEventListener('mousemove', handleActivity);
-      element.removeEventListener('touchstart', handleActivity);
+      node.removeEventListener('scroll', handleActivity);
+      node.removeEventListener('mousemove', handleActivity);
+      node.removeEventListener('touchstart', handleActivity);
+      isActivelyReadingRef.current = false;
     };
-  }, [fireIfQualified]);
+  }, [paperUuid, expectedReadingTimeMs, onReadComplete]);
 
   return {
     ref,

@@ -97,6 +97,47 @@ export interface FeedResponse {
 }
 
 // ============================================================================
+// INTERFACES - Interaction Stats
+// ============================================================================
+
+/**
+ * Aggregated interaction statistics for a user.
+ */
+export interface InteractionStats {
+  /** Total number of papers expanded (previewed) */
+  totalExpanded: number;
+  /** Total number of papers read (scrolled past threshold) */
+  totalRead: number;
+  /** Total number of papers saved */
+  totalSaved: number;
+  /** Total active reading time across all reads, in seconds */
+  totalReadingTimeSeconds: number;
+  /** 50 most recently opened papers with aggregated reading time */
+  readingHistory: ReadingHistoryItem[];
+}
+
+/**
+ * A single entry in the user's reading history.
+ * One row per unique paper, showing total reading time and last-opened timestamp.
+ */
+export interface ReadingHistoryItem {
+  /** UUID of the paper */
+  paperUuid: string;
+  /** Paper title (null if paper row is missing) */
+  title: string | null;
+  /** Paper authors (null if paper row is missing) */
+  authors: string | null;
+  /** URL-friendly slug (null if no slug exists) */
+  slug: string | null;
+  /** Signed thumbnail URL (null if no thumbnail in storage) */
+  thumbnailUrl: string | null;
+  /** Total active reading time in seconds across all sessions */
+  activeTimeSeconds: number;
+  /** ISO timestamp when the paper was last opened */
+  lastOpenedAt: string;
+}
+
+// ============================================================================
 // INTERFACES - User Preference Clusters
 // ============================================================================
 

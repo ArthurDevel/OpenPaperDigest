@@ -27,8 +27,8 @@ interface PaperCardProps {
   summary?: PaperSummaryResponse;
   onToggleExpand: (paperUuid: string) => void;
   onLoadSummary?: (paperUuid: string) => void;
-  /** Ref from useReadingTracker to attach to the expanded summary content */
-  readingTrackerRef?: React.RefObject<HTMLDivElement | null>;
+  /** Callback ref from useReadingTracker to attach to the expanded summary content */
+  readingTrackerRef?: ((node: HTMLDivElement | null) => void);
 }
 
 const GENERATE_DURATION_MS = 15_000;

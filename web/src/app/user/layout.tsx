@@ -14,6 +14,7 @@ type TabItem = {
 const TAB_ITEMS: TabItem[] = [
   { href: '/user/list', label: 'My list' },
   { href: '/user/requests', label: 'My requests' },
+  { href: '/user/activity', label: 'My activity' },
   { href: '/user/personalization', label: 'Personalization' },
 ];
 

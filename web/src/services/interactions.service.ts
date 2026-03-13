@@ -8,10 +8,17 @@
  * - Batch-insert interaction events into the user_interactions table
  * - Update preference clusters based on interacted paper embeddings
  * - Retrieve preference clusters with daily weight decay
+ * - Aggregate interaction stats and reading history for the activity page
  */
 
 import { createClient } from '@/lib/supabase/server';
-import type { InteractionEvent, UserPreferenceCluster } from '@/types/recommendation';
+import type {
+  InteractionEvent,
+  InteractionStats,
+  ReadingHistoryItem,
+  UserPreferenceCluster,
+} from '@/types/recommendation';
+import { getPaperThumbnailUrls } from '@/lib/supabase/storage';
 
 // ============================================================================
 // CONSTANTS
@@ -31,6 +38,9 @@ const CENTROID_NEW_WEIGHT = 0.2;
 
 /** Daily decay factor applied to cluster weights */
 const DAILY_WEIGHT_DECAY = 0.95;
+
+/** Maximum number of recent reads returned in reading history */
+const READING_HISTORY_LIMIT = 50;
 
 // ============================================================================
 // MAIN HANDLERS
@@ -321,9 +331,188 @@ export async function getPreferenceClusters(
   });
 }
 
+/**
+ * Returns aggregated interaction stats and reading history for a user.
+ * Uses two queries: one for counts/totals, one for the 50 most recent reads with paper details.
+ * @param userId - Supabase auth.uid() of the user
+ * @returns Aggregated stats with reading history
+ */
+export async function getInteractionStats(userId: string): Promise<InteractionStats> {
+  const supabase = await createClient();
+
+  // Query 1: Fetch all interactions with minimal projection for aggregation
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: allInteractions, error: aggError } = await (supabase
+    .from('user_interactions') as any)
+    .select('interaction_type, metadata')
+    .eq('user_id', userId);
+
+  if (aggError) {
+    throw new Error(`Failed to fetch interaction stats: ${aggError.message}`);
+  }
+
+  // Client-side aggregation by interaction_type
+  const rows = (allInteractions ?? []) as {
+    interaction_type: string;
+    metadata: Record<string, unknown> | null;
+  }[];
+
+  let totalExpanded = 0;
+  let totalRead = 0;
+  let totalSaved = 0;
+  let totalReadingTimeSeconds = 0;
+
+  for (const row of rows) {
+    switch (row.interaction_type) {
+      case 'expanded':
+        totalExpanded++;
+        break;
+      case 'read':
+        totalRead++;
+        // Sum activeTimeSeconds, treating null/missing as 0
+        if (row.metadata && typeof row.metadata.activeTimeSeconds === 'number') {
+          totalReadingTimeSeconds += row.metadata.activeTimeSeconds;
+        }
+        break;
+      case 'saved':
+        totalSaved++;
+        break;
+    }
+  }
+
+  // Query 2: Fetch expanded interactions to build per-paper history
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: expandedRows, error: expandError } = await (supabase
+    .from('user_interactions') as any)
+    .select('paper_uuid, created_at')
+    .eq('user_id', userId)
+    .eq('interaction_type', 'expanded')
+    .order('created_at', { ascending: false });
+
+  if (expandError) {
+    throw new Error(`Failed to fetch expanded history: ${expandError.message}`);
+  }
+
+  // Query 3: Fetch all read interactions to aggregate reading time per paper
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: readRows, error: readsError } = await (supabase
+    .from('user_interactions') as any)
+    .select('paper_uuid, metadata')
+    .eq('user_id', userId)
+    .eq('interaction_type', 'read');
+
+  if (readsError) {
+    throw new Error(`Failed to fetch reading history: ${readsError.message}`);
+  }
+
+  // Build reading history: one row per unique paper, ordered by last opened
+  const readingHistory = await buildReadingHistory(
+    supabase,
+    (expandedRows ?? []) as { paper_uuid: string; created_at: string }[],
+    (readRows ?? []) as { paper_uuid: string; metadata: Record<string, unknown> | null }[]
+  );
+
+  return {
+    totalExpanded,
+    totalRead,
+    totalSaved,
+    totalReadingTimeSeconds,
+    readingHistory,
+  };
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+/**
+ * Builds the reading history: one row per unique paper, ordered by last opened.
+ * Aggregates total reading time from read events and uses the latest expand timestamp.
+ * @param supabase - Supabase client instance
+ * @param expandedRows - Raw expanded interaction rows (sorted by created_at desc)
+ * @param readRows - Raw read interaction rows with metadata
+ * @returns Array of ReadingHistoryItem with paper details, capped at READING_HISTORY_LIMIT
+ */
+async function buildReadingHistory(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  expandedRows: { paper_uuid: string; created_at: string }[],
+  readRows: { paper_uuid: string; metadata: Record<string, unknown> | null }[]
+): Promise<ReadingHistoryItem[]> {
+  if (expandedRows.length === 0) return [];
+
+  // Group expanded rows by paper: keep only the latest timestamp per paper
+  const lastOpenedMap = new Map<string, string>();
+  for (const row of expandedRows) {
+    if (!lastOpenedMap.has(row.paper_uuid)) {
+      // Rows are sorted desc, so first occurrence is the latest
+      lastOpenedMap.set(row.paper_uuid, row.created_at);
+    }
+  }
+
+  // Sum activeTimeSeconds per paper from read events
+  const readingTimeMap = new Map<string, number>();
+  for (const row of readRows) {
+    if (row.metadata && typeof row.metadata.activeTimeSeconds === 'number') {
+      const current = readingTimeMap.get(row.paper_uuid) ?? 0;
+      readingTimeMap.set(row.paper_uuid, current + row.metadata.activeTimeSeconds);
+    }
+  }
+
+  // Build ordered list of unique paper UUIDs (by last opened, desc), capped at limit
+  const orderedUuids: string[] = [];
+  for (const row of expandedRows) {
+    if (!orderedUuids.includes(row.paper_uuid)) {
+      orderedUuids.push(row.paper_uuid);
+      if (orderedUuids.length >= READING_HISTORY_LIMIT) break;
+    }
+  }
+
+  // Batch-fetch paper details, slugs, and thumbnails in parallel
+  const [papersResult, slugsResult, thumbnailMap] = await Promise.all([
+    supabase
+      .from('papers')
+      .select('paper_uuid, title, authors')
+      .in('paper_uuid', orderedUuids),
+    supabase
+      .from('paper_slugs')
+      .select('paper_uuid, slug')
+      .in('paper_uuid', orderedUuids),
+    getPaperThumbnailUrls(orderedUuids),
+  ]);
+
+  if (papersResult.error) {
+    throw new Error(`Failed to fetch papers: ${papersResult.error.message}`);
+  }
+  if (slugsResult.error) {
+    throw new Error(`Failed to fetch paper slugs: ${slugsResult.error.message}`);
+  }
+
+  // Build lookup maps
+  const paperMap = new Map<string, { title: string | null; authors: string | null }>();
+  for (const p of (papersResult.data ?? []) as { paper_uuid: string; title: string | null; authors: string | null }[]) {
+    paperMap.set(p.paper_uuid, { title: p.title, authors: p.authors });
+  }
+
+  const slugMap = new Map<string, string>();
+  for (const s of (slugsResult.data ?? []) as { paper_uuid: string; slug: string }[]) {
+    slugMap.set(s.paper_uuid, s.slug);
+  }
+
+  // Assemble reading history items
+  return orderedUuids.map((uuid) => {
+    const paper = paperMap.get(uuid);
+    return {
+      paperUuid: uuid,
+      title: paper?.title ?? null,
+      authors: paper?.authors ?? null,
+      slug: slugMap.get(uuid) ?? null,
+      thumbnailUrl: thumbnailMap.get(uuid) ?? null,
+      activeTimeSeconds: readingTimeMap.get(uuid) ?? 0,
+      lastOpenedAt: lastOpenedMap.get(uuid)!,
+    };
+  });
+}
 
 /**
  * Computes cosine similarity between two vectors.

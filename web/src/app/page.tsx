@@ -69,7 +69,7 @@ const PaperCardWithTracking = ({
   summary?: PaperSummaryResponse;
   onToggleExpand: (paperUuid: string) => void;
   onLoadSummary?: (paperUuid: string) => void;
-  onReadComplete: (paperUuid: string, readingRatio: number) => void;
+  onReadComplete: (paperUuid: string, readingRatio: number, activeTimeSeconds: number) => void;
 }) => {
   const impressionRef = usePaperImpression(paper.paperUuid, true);
   const wordCount = estimateWordCount(summary?.fiveMinuteSummary);
