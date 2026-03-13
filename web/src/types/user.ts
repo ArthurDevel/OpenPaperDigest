@@ -145,6 +145,23 @@ export interface StartProcessingResponse {
 }
 
 /**
+ * A user record for admin display.
+ * Includes activity counts for saved papers and requests.
+ */
+export interface AdminUserItem {
+  /** Auth provider user ID */
+  id: string;
+  /** User email address */
+  email: string;
+  /** When the user account was created */
+  createdAt: string;
+  /** Number of papers in the user's saved list */
+  savedPapersCount: number;
+  /** Number of paper requests made by the user */
+  requestsCount: number;
+}
+
+/**
  * Response from deleting a paper request.
  */
 export interface DeleteRequestedResponse {

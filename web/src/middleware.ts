@@ -30,7 +30,7 @@ function unauthorized(): NextResponse {
 
 function needsAdmin(url: URL, method: string): boolean {
   const p = url.pathname;
-  if (p === '/management') return true;
+  if (p === '/management' || p.startsWith('/management/')) return true;
   if (p === '/layouttests/data' && (method === 'POST' || method === 'DELETE')) return true;
   if (p.startsWith('/api/admin/')) return true;
   return false;

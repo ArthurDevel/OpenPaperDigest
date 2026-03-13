@@ -92,6 +92,12 @@ export default function ManagementPage() {
         <h1 className="text-2xl font-bold">Management</h1>
         <div className="flex items-center gap-3">
           <Link
+            href="/management/users"
+            className="px-4 py-2 rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+          >
+            Users
+          </Link>
+          <Link
             href="/management/papers-overview"
             className="px-4 py-2 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors"
           >
