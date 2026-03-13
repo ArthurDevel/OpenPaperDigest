@@ -15,6 +15,7 @@ import type {
   UserListItem,
   UserRequestItem,
   AdminRequestItem,
+  AdminUserItem,
   AggregatedRequestItem,
   StartProcessingResponse,
 } from '@/types/user';
@@ -717,4 +718,67 @@ export async function getProcessingMetrics(
     finishedAt: paper.finished_at ? new Date(paper.finished_at) : null,
     errorMessage: paper.error_message,
   };
+}
+
+// ============================================================================
+// ADMIN HANDLERS - User Management
+// ============================================================================
+
+/**
+ * List all users with their activity counts (admin only).
+ * Queries the users table and counts saved papers and requests per user.
+ * @returns Array of admin user items sorted by creation date (newest first)
+ */
+export async function listAllUsers(): Promise<AdminUserItem[]> {
+  const supabase = await createClient();
+
+  // Fetch all users
+  const { data: usersData, error: usersError } = await supabase
+    .from('users')
+    .select('id, email, created_at')
+    .order('created_at', { ascending: false });
+
+  if (usersError) throw new Error(usersError.message);
+
+  const users = (usersData ?? []) as Array<{
+    id: string;
+    email: string;
+    created_at: string;
+  }>;
+
+  // Fetch all user_lists and user_requests counts in parallel
+  const userIds = users.map((u) => u.id);
+
+  const [listsResult, requestsResult] = await Promise.all([
+    supabase
+      .from('user_lists')
+      .select('user_id')
+      .in('user_id', userIds),
+    supabase
+      .from('user_requests')
+      .select('user_id')
+      .in('user_id', userIds),
+  ]);
+
+  if (listsResult.error) throw new Error(listsResult.error.message);
+  if (requestsResult.error) throw new Error(requestsResult.error.message);
+
+  // Count per user
+  const listCounts = new Map<string, number>();
+  for (const row of (listsResult.data ?? []) as Array<{ user_id: string }>) {
+    listCounts.set(row.user_id, (listCounts.get(row.user_id) ?? 0) + 1);
+  }
+
+  const requestCounts = new Map<string, number>();
+  for (const row of (requestsResult.data ?? []) as Array<{ user_id: string }>) {
+    requestCounts.set(row.user_id, (requestCounts.get(row.user_id) ?? 0) + 1);
+  }
+
+  return users.map((user) => ({
+    id: user.id,
+    email: user.email,
+    createdAt: user.created_at,
+    savedPapersCount: listCounts.get(user.id) ?? 0,
+    requestsCount: requestCounts.get(user.id) ?? 0,
+  }));
 }

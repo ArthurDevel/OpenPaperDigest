@@ -344,6 +344,29 @@ export async function getArxivMetadata(arxivIdOrUrl: string): Promise<ArxivMetad
 }
 
 /**
+ * Admin user item returned by the users endpoint.
+ */
+export type AdminUserItem = {
+  id: string;
+  email: string;
+  createdAt: string;
+  savedPapersCount: number;
+  requestsCount: number;
+};
+
+/**
+ * List all users from the admin endpoint.
+ * @returns List of users with activity counts
+ */
+export async function listUsers(): Promise<AdminUserItem[]> {
+  const response = await fetch(`${API_URL}/admin/users`);
+  if (!response.ok) {
+    await handleErrorResponse(response);
+  }
+  return response.json();
+}
+
+/**
  * Get cumulative daily paper statistics.
  * @returns List of daily statistics
  */
