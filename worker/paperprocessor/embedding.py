@@ -10,7 +10,6 @@ Responsibilities:
 - Return a single embedding vector for the paper
 """
 
-import asyncio
 import logging
 from typing import List, Optional
 
@@ -24,7 +23,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 
-def generate_embedding(title: str, abstract: Optional[str] = None) -> List[float]:
+async def generate_embedding(title: str, abstract: Optional[str] = None) -> List[float]:
     """
     Generate a 1536-dimensional embedding for a paper from its title and abstract.
 
@@ -44,8 +43,7 @@ def generate_embedding(title: str, abstract: Optional[str] = None) -> List[float
     else:
         text = title
 
-    # Call the OpenRouter embeddings endpoint (async -> sync bridge)
-    embeddings = asyncio.run(get_embeddings([text]))
+    embeddings = await get_embeddings([text])
 
     if not embeddings:
         raise ValueError(f"OpenRouter returned no embeddings for text: {text[:100]}...")

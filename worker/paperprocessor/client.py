@@ -227,7 +227,7 @@ async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None)
 
         # Step 6: Generate embedding for similarity search
         logger.info("Step 6: Generating embedding.")
-        document.embedding = generate_embedding(document.title, document.abstract)
+        document.embedding = await generate_embedding(document.title, document.abstract)
 
         logger.info("Paper processing pipeline v2 finished (simplified).")
         return document
