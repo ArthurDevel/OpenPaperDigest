@@ -168,7 +168,8 @@ def backfill_embeddings_dag():
                 try:
                     abstract = paper.get("abstract")
 
-                    embedding = generate_embedding(title, abstract)
+                    import asyncio
+                    embedding = asyncio.run(generate_embedding(title, abstract))
                     save_embedding(paper_uuid, embedding)
                     updated += 1
 
