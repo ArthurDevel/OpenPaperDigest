@@ -30,7 +30,7 @@ from users.client import set_requests_processed
 
 MAX_PDF_PAGES = 70
 MAX_PAPERS_PER_RUN = 500
-MAX_PARALLEL_TASKS = 2
+MAX_PARALLEL_TASKS = 4
 
 
 # ============================================================================
@@ -487,7 +487,7 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
 @dag(
     dag_id="paper_processing_worker",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
-    schedule="0 2,14 * * *",  # Twice daily at 2 AM and 2 PM UTC
+    schedule="0 */2 * * *",  # Every 2 hours
     catchup=False,
     max_active_runs=1,  # Prevent overlapping runs
     max_active_tasks=MAX_PARALLEL_TASKS,  # Maximum concurrent paper processing tasks
@@ -497,8 +497,8 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
 
     This DAG processes papers from the queue that are in 'not_started' status.
 
-    - Runs twice daily at 2 AM and 2 PM UTC
-    - Processes up to 10 papers per run (randomly selected, processed in parallel)
+    - Runs every 2 hours
+    - Processes up to 500 papers per run (randomly selected, processed in parallel)
     - Processes papers through simplified pipeline: PDF download → image conversion (first 3 pages) → metadata extraction → abstract summary → embedding → saving → slug creation
     - Uses database locking to prevent race conditions
     - Handles errors gracefully and marks failed jobs
