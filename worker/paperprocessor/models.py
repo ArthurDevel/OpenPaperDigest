@@ -33,9 +33,6 @@ class ProcessedPage:
     img_base64: str             # Base64 encoded page image, max width 1080px
     width: int                  # Page image width in pixels
     height: int                 # Page image height in pixels
-    ocr_markdown: Optional[str] = None      # Raw OCR markdown
-    structured_markdown: Optional[str] = None    # With << tags >>
-    images: List[ProcessedImage] = field(default_factory=list)     # Images on this page
 
 
 @dataclass
@@ -54,14 +51,6 @@ class ProcessedDocument:
     title: Optional[str] = None
     authors: Optional[str] = None
     pages: List[ProcessedPage] = field(default_factory=list)
-    headers: List[Header] = field(default_factory=list)       # Document headers
-    final_markdown: Optional[str] = None    # Fully processed output
-    # Rewriting structure
-    # Sections are derived from final_markdown with <<section>> tags
-    # and hold rewritten content in a simple flat list in document order
-    # Section class is defined below
-    sections: List["Section"] = field(default_factory=list)
-    rewritten_final_markdown: Optional[str] = None
     # Summary generation
     five_minute_summary: Optional[str] = None    # Accessible 5-minute summary
     abstract_summary: Optional[str] = None       # Short 2-3 sentence summary from abstract

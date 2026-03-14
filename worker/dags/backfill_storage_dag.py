@@ -1,4 +1,8 @@
 """
+DEPRECATED: This DAG is no longer needed. New papers (pipeline v2) only store
+thumbnail + metadata.json. This DAG was used for migrating old papers from
+PostgreSQL to Supabase Storage.
+
 Backfill Storage DAG
 
 Migrates existing paper data from PostgreSQL processed_content JSON blob
@@ -37,6 +41,10 @@ def _decode_data_url(data_url):
     tags=["papers", "maintenance", "backfill", "one-time", "storage"],
     doc_md="""
     ### Backfill Storage DAG
+
+    **DEPRECATED**: This DAG is no longer needed. New papers (pipeline v2) only
+    store thumbnail + metadata.json. This DAG was used for migrating old papers
+    from PostgreSQL to Supabase Storage.
 
     Migrates existing paper data from PostgreSQL `processed_content` and
     `thumbnail_data_url` columns into Supabase Storage. Safe to re-run —

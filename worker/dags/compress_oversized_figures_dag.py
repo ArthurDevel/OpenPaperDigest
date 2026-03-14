@@ -1,4 +1,7 @@
 """
+DEPRECATED: This DAG is no longer needed. New papers (pipeline v2) do not
+store figures.
+
 Compress oversized figure images in Supabase Storage.
 
 Scans all completed papers, downloads figure images from storage, compresses
@@ -140,6 +143,9 @@ def compress_figure(image_bytes: bytes) -> tuple:
     },
     doc_md="""
     ### Compress Oversized Figures DAG
+
+    **DEPRECATED**: This DAG is no longer needed. New papers (pipeline v2) do
+    not store figures.
 
     Finds and compresses large figure images stored in Supabase Storage.
 

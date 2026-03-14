@@ -262,13 +262,15 @@ export async function getPaperJson(uuid: string): Promise<Record<string, unknown
   // Download content from Supabase Storage
   const storedContent = await downloadPaperContent(uuid);
 
-  // Build figure objects with signed storage URLs in parallel
-  const figures = await Promise.all(
-    storedContent.figures.map(async (fig) => ({
-      ...fig,
-      imageUrl: await getPaperFigureUrl(uuid, fig.identifier as string),
-    }))
-  );
+  // v2 papers have no content.md/sections/figures -- skip figure URL generation
+  const figures = storedContent.finalMarkdown
+    ? await Promise.all(
+        storedContent.figures.map(async (fig) => ({
+          ...fig,
+          imageUrl: await getPaperFigureUrl(uuid, fig.identifier as string),
+        }))
+      )
+    : [];
 
   // Return combined data with paper metadata and storage content
   return {

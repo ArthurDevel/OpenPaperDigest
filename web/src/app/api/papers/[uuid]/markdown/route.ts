@@ -2,6 +2,7 @@
  * Paper Markdown API Route
  *
  * Returns the raw markdown content for a paper from Supabase Storage.
+ * Note: v2 (PDF-direct) papers return an empty string since they have no content.md.
  * - GET: Fetch paper markdown by UUID
  */
 

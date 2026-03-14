@@ -1,27 +1,26 @@
 """
 Supabase Storage client wrapper for paper assets.
 
-Handles uploading, downloading, and deleting paper files (thumbnails, markdown,
-sections, figures, metadata) in a private Supabase Storage bucket.
+Handles uploading, downloading, and deleting paper files in a private Supabase Storage bucket.
 
 Responsibilities:
-- Upload all paper assets after processing (thumbnail, markdown, sections, figures, metadata)
-- Download paper content for reading (markdown, sections, figures metadata, metadata)
+- Upload paper assets after processing (thumbnail, metadata with pipeline_version)
+- Download paper content (handles both v1 OCR format and v2 PDF-direct format)
 - Generate signed URLs for thumbnails and figures (private bucket)
-- Delete all assets for a paper
+- Delete all assets for a paper (handles both old and new format)
 - Lazy-initialize the Supabase client from config
-
-NOTE: The "papers" bucket must be created manually in the Supabase dashboard.
-      It should be private with no file size restrictions beyond plan limits.
 """
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from supabase import create_client, Client
 
 from shared.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -88,66 +87,28 @@ def _bucket():
 def upload_paper_assets(
     paper_uuid: str,
     thumbnail_bytes: bytes,
-    final_markdown: str,
-    sections: List[Dict],
-    figures: List[Dict],
     metadata: dict,
 ) -> None:
-    """Upload all processed paper assets to Supabase Storage.
+    """Upload processed paper assets to Supabase Storage.
 
-    Uploads the following files under {paper_uuid}/:
-      - thumbnail.png (raw PNG bytes)
-      - content.md (final markdown text)
-      - sections.json (rewritten sections array)
-      - figures.json (figure metadata WITHOUT image_bytes)
-      - metadata.json (usage summary, processing stats)
-      - figures/{identifier}.png for each figure with image_bytes
+    Uploads thumbnail.png and metadata.json (with pipeline_version: 2) under {paper_uuid}/.
 
     Args:
         paper_uuid: Unique identifier for the paper.
         thumbnail_bytes: Raw PNG bytes for the thumbnail (NOT base64).
-        final_markdown: The OCR/processed markdown content.
-        sections: List of section dicts (rewritten content).
-        figures: List of figure dicts, each with at least "identifier" (str)
-                 and "image_bytes" (bytes). Additional metadata keys are preserved
-                 in figures.json without the image_bytes field.
         metadata: Dict of usage summary, processing stats, cost info.
     """
     bucket = _bucket()
     prefix = paper_uuid
+
+    # Add pipeline version to metadata
+    metadata["pipeline_version"] = 2
 
     # Upload thumbnail
     bucket.upload(
         f"{prefix}/thumbnail.png",
         thumbnail_bytes,
         {"content-type": "image/png", "upsert": "true"},
-    )
-
-    # Upload markdown content
-    bucket.upload(
-        f"{prefix}/content.md",
-        final_markdown.encode("utf-8"),
-        {"content-type": "text/markdown", "upsert": "true"},
-    )
-
-    # Upload sections JSON
-    bucket.upload(
-        f"{prefix}/sections.json",
-        json.dumps(sections, ensure_ascii=False).encode("utf-8"),
-        {"content-type": "application/json", "upsert": "true"},
-    )
-
-    # Build figures metadata (strip image_bytes from each figure)
-    figures_metadata = []
-    for fig in figures:
-        fig_meta = {k: v for k, v in fig.items() if k != "image_bytes"}
-        figures_metadata.append(fig_meta)
-
-    # Upload figures metadata JSON
-    bucket.upload(
-        f"{prefix}/figures.json",
-        json.dumps(figures_metadata, ensure_ascii=False).encode("utf-8"),
-        {"content-type": "application/json", "upsert": "true"},
     )
 
     # Upload metadata JSON
@@ -157,22 +118,13 @@ def upload_paper_assets(
         {"content-type": "application/json", "upsert": "true"},
     )
 
-    # Upload each figure image
-    for fig in figures:
-        identifier = fig["identifier"]
-        image_bytes = fig["image_bytes"]
-        bucket.upload(
-            f"{prefix}/figures/{identifier}.png",
-            image_bytes,
-            {"content-type": "image/png", "upsert": "true"},
-        )
-
 
 def download_paper_content(paper_uuid: str) -> StoredPaperContent:
-    """Download all text/JSON content for a paper from storage.
+    """Download content for a paper from storage.
 
-    Downloads content.md, sections.json, figures.json, and metadata.json.
-    Does NOT download figure images (those are served by public URL).
+    Checks pipeline_version from metadata.json first:
+    - v2 papers: return empty final_markdown, empty sections/figures (they don't exist in storage)
+    - v1 papers (or no version): download content.md, sections.json, figures.json as before
 
     Args:
         paper_uuid: Unique identifier for the paper.
@@ -183,38 +135,64 @@ def download_paper_content(paper_uuid: str) -> StoredPaperContent:
     bucket = _bucket()
     prefix = paper_uuid
 
+    # Always download metadata first to check pipeline version
+    metadata_bytes = bucket.download(f"{prefix}/metadata.json")
+    metadata = json.loads(metadata_bytes.decode("utf-8"))
+
+    pipeline_version = metadata.get("pipeline_version", 1)
+
+    # v2 papers: no content.md, sections.json, or figures.json in storage
+    if pipeline_version >= 2:
+        return StoredPaperContent(
+            final_markdown="",
+            sections=[],
+            figures=[],
+            metadata=metadata,
+        )
+
+    # v1 papers: download all legacy files
     markdown_bytes = bucket.download(f"{prefix}/content.md")
     sections_bytes = bucket.download(f"{prefix}/sections.json")
     figures_bytes = bucket.download(f"{prefix}/figures.json")
-    metadata_bytes = bucket.download(f"{prefix}/metadata.json")
 
     return StoredPaperContent(
         final_markdown=markdown_bytes.decode("utf-8"),
         sections=json.loads(sections_bytes.decode("utf-8")),
         figures=json.loads(figures_bytes.decode("utf-8")),
-        metadata=json.loads(metadata_bytes.decode("utf-8")),
+        metadata=metadata,
     )
 
 
 def download_markdown(paper_uuid: str) -> str:
     """Download only the markdown content for a paper.
 
+    Checks metadata for pipeline_version first. Returns empty string for v2 papers.
+
     Args:
         paper_uuid: Unique identifier for the paper.
 
     Returns:
-        The raw markdown string from content.md.
+        The raw markdown string from content.md, or empty string for v2 papers.
     """
     bucket = _bucket()
+    prefix = paper_uuid
+
+    # Check pipeline version from metadata
+    try:
+        metadata_bytes = bucket.download(f"{prefix}/metadata.json")
+        metadata = json.loads(metadata_bytes.decode("utf-8"))
+        if metadata.get("pipeline_version", 1) >= 2:
+            return ""
+    except Exception:
+        # If metadata doesn't exist, try legacy download
+        pass
+
     markdown_bytes = bucket.download(f"{paper_uuid}/content.md")
     return markdown_bytes.decode("utf-8")
 
 
 def get_thumbnail_url(paper_uuid: str) -> str:
     """Generate a signed URL for a paper's thumbnail.
-
-    Uses the service role key to create a time-limited signed URL
-    for the private storage bucket.
 
     Args:
         paper_uuid: Unique identifier for the paper.
@@ -237,9 +215,6 @@ def get_thumbnail_url(paper_uuid: str) -> str:
 
 def get_figure_url(paper_uuid: str, figure_id: str) -> str:
     """Generate a signed URL for a specific figure image.
-
-    Uses the service role key to create a time-limited signed URL
-    for the private storage bucket.
 
     Args:
         paper_uuid: Unique identifier for the paper.
@@ -264,8 +239,9 @@ def get_figure_url(paper_uuid: str, figure_id: str) -> str:
 def delete_paper_assets(paper_uuid: str) -> None:
     """Delete all storage files for a paper.
 
-    Removes all known file paths under {paper_uuid}/ including any figure images
-    listed in figures.json.
+    Handles both v1 (OCR format with content.md, figures, sections) and
+    v2 (just thumbnail + metadata). Includes all possible paths regardless
+    of format -- the remove call handles non-existent files gracefully.
 
     Args:
         paper_uuid: Unique identifier for the paper.
@@ -273,16 +249,16 @@ def delete_paper_assets(paper_uuid: str) -> None:
     bucket = _bucket()
     prefix = paper_uuid
 
-    # Collect known top-level paths
+    # Always include both old and new format paths
     paths_to_delete = [
         f"{prefix}/thumbnail.png",
+        f"{prefix}/metadata.json",
         f"{prefix}/content.md",
         f"{prefix}/sections.json",
         f"{prefix}/figures.json",
-        f"{prefix}/metadata.json",
     ]
 
-    # Try to read figures.json to find individual figure files
+    # Try to read figures.json to find individual figure files (v1 papers only)
     try:
         figures_bytes = bucket.download(f"{prefix}/figures.json")
         figures_list = json.loads(figures_bytes.decode("utf-8"))
@@ -291,8 +267,7 @@ def delete_paper_assets(paper_uuid: str) -> None:
             if identifier:
                 paths_to_delete.append(f"{prefix}/figures/{identifier}.png")
     except Exception:
-        # If figures.json doesn't exist or is malformed, skip figure deletion.
-        # The top-level files will still be cleaned up.
+        # figures.json doesn't exist (v2 paper) or is malformed -- skip figure deletion
         pass
 
     bucket.remove(paths_to_delete)

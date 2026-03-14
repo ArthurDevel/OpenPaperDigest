@@ -147,41 +147,17 @@ def _decode_data_url(data_url: str) -> bytes:
 def _upload_to_storage(paper_uuid: str, result_dict: Dict[str, Any]) -> None:
     """Upload paper assets to Supabase Storage from the processed result dict.
 
-    Extracts thumbnail, markdown, sections, figures, and metadata from the
-    result dict and uploads them via the storage module.
+    Uploads thumbnail + metadata.json (with pipeline_version: 2).
 
     Args:
         paper_uuid: UUID of the paper.
-        result_dict: The fully-built legacy result dict from save_paper().
+        result_dict: The fully-built result dict from save_paper().
     """
     # Decode thumbnail from base64 data URL to raw PNG bytes
     thumbnail_data_url = result_dict.get("thumbnail_data_url")
     if not thumbnail_data_url:
         raise ValueError("Cannot upload to storage: no thumbnail_data_url in result")
     thumbnail_bytes = _decode_data_url(thumbnail_data_url)
-
-    # Extract raw OCR markdown
-    final_markdown = result_dict.get("final_markdown", "")
-
-    # Extract sections array
-    sections = result_dict.get("sections", [])
-
-    # Build figures list with decoded image bytes
-    figures = []
-    for fig in result_dict.get("figures", []):
-        image_data_url = fig.get("image_data_url", "")
-        if not image_data_url:
-            continue
-
-        figures.append({
-            "identifier": fig["figure_identifier"],
-            "image_bytes": _decode_data_url(image_data_url),
-            "short_id": fig.get("short_id"),
-            "bounding_box": fig.get("bounding_box"),
-            "location_page": fig.get("location_page"),
-            "referenced_on_pages": fig.get("referenced_on_pages"),
-            "explanation": fig.get("explanation"),
-        })
 
     # Build metadata dict from usage/cost info
     metadata = {
@@ -195,9 +171,6 @@ def _upload_to_storage(paper_uuid: str, result_dict: Dict[str, Any]) -> None:
     storage.upload_paper_assets(
         paper_uuid=paper_uuid,
         thumbnail_bytes=thumbnail_bytes,
-        final_markdown=final_markdown,
-        sections=sections,
-        figures=figures,
         metadata=metadata,
     )
 
@@ -446,72 +419,24 @@ def save_paper(db: Session, processed_content: ProcessedDocument) -> Paper:
         arxiv_id = processed_content.arxiv_id
         is_update = False
     
-    # Step 2: Convert ProcessedDocument to legacy JSON format
+    # Step 2: Build result dict for storage upload
     result_dict = {
         "paper_id": paper_uuid,
         "title": processed_content.title,
         "authors": processed_content.authors,
         "thumbnail_data_url": None,  # Will be set from first page
         "five_minute_summary": processed_content.five_minute_summary,
-        "final_markdown": processed_content.final_markdown,  # Original OCR markdown
-        "sections": [],
-        "tables": [],
-        "figures": [],
-        "pages": [],
         "usage_summary": {},
         "processing_time_seconds": 0.0,
         "num_pages": len(processed_content.pages),
         "total_cost": 0.0,
         "avg_cost_per_page": 0.0,
     }
-    
-    # Don't store page images - only keep page count for metadata
-    # Page images are only needed during processing for OCR/metadata extraction
-    
-    # Convert individual images from pages to figures format
-    for page in processed_content.pages:
-        for processed_image in page.images:
-            # Normalize bounding box coordinates to 0-1 range
-            normalized_bbox = [
-                processed_image.top_left_x / page.width,
-                processed_image.top_left_y / page.height,
-                processed_image.bottom_right_x / page.width,
-                processed_image.bottom_right_y / page.height
-            ]
 
-            result_dict["figures"].append({
-                "figure_identifier": processed_image.uuid,
-                "short_id": processed_image.short_id,
-                "location_page": processed_image.page_number,
-                "explanation": "",  # Not extracted in current pipeline
-                "image_data_url": f"data:image/png;base64,{processed_image.img_base64}",
-                "referenced_on_pages": [processed_image.page_number],
-                "bounding_box": normalized_bbox,  # Normalized coordinates (0-1)
-            })
-    
     # Set thumbnail from first page
     if processed_content.pages:
         result_dict["thumbnail_data_url"] = f"data:image/png;base64,{processed_content.pages[0].img_base64}"
-    
-    # Convert sections to legacy format
-    for section in processed_content.sections:
-        section_data = {
-            "rewritten_content": section.rewritten_content,
-            "summary": None,  # Not populated in current pipeline
-            "subsections": []  # Flat structure for now
-        }
-        # Only include fields that are actually set
-        if section.start_page is not None:
-            section_data["start_page"] = section.start_page
-        if section.end_page is not None:
-            section_data["end_page"] = section.end_page
-        if section.level is not None:
-            section_data["level"] = section.level
-        if section.section_title is not None:
-            section_data["section_title"] = section.section_title
-        
-        result_dict["sections"].append(section_data)
-    
+
     # Calculate usage summary and costs
     from paperprocessor.client import _calculate_usage_summary
     usage_summary = _calculate_usage_summary(processed_content.step_costs)
@@ -589,23 +514,24 @@ def get_paper(db: Session, paper_uuid: str) -> Paper:
     # Step 2: Download content from Supabase Storage
     stored = storage.download_paper_content(paper_uuid)
 
-    # Step 3: Convert stored sections to Section DTOs
-    sections = []
-    for idx, section_data in enumerate(stored.sections):
-        section = Section(
-            order_index=idx,
-            rewritten_content=section_data["rewritten_content"],
-            start_page=section_data.get("start_page"),
-            end_page=section_data.get("end_page"),
-            level=section_data.get("level"),
-            section_title=section_data.get("section_title"),
-            summary=section_data.get("summary"),
-            subsections=section_data.get("subsections", []),
-        )
-        sections.append(section)
+    # Step 3: Convert stored sections to Section DTOs (empty for v2 papers)
+    if stored.sections:
+        sections = []
+        for idx, section_data in enumerate(stored.sections):
+            section = Section(
+                order_index=idx,
+                rewritten_content=section_data["rewritten_content"],
+                start_page=section_data.get("start_page"),
+                end_page=section_data.get("end_page"),
+                level=section_data.get("level"),
+                section_title=section_data.get("section_title"),
+                summary=section_data.get("summary"),
+                subsections=section_data.get("subsections", []),
+            )
+            sections.append(section)
+        paper.sections = sections
 
     # Step 4: Populate paper DTO with storage data
-    paper.sections = sections
     paper.thumbnail_url = storage.get_thumbnail_url(paper_uuid)
 
     return paper

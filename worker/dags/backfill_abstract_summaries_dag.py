@@ -82,6 +82,9 @@ def get_markdown_for_paper(paper_uuid: str) -> Optional[str]:
     try:
         import papers.storage as storage
         stored = storage.download_paper_content(paper_uuid)
+        # v2 papers (pipeline_version=2) have empty final_markdown -- they get
+        # their abstract summary during processing, so returning None here
+        # correctly skips them in the backfill
         if stored.final_markdown:
             words = stored.final_markdown.split()[:ABSTRACT_SUMMARY_MAX_INPUT_WORDS]
             return " ".join(words)

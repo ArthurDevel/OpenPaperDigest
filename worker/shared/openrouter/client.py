@@ -142,6 +142,69 @@ async def get_llm_response(messages: List[Dict[str, Any]], model: str) -> LLMCal
             raise
 
 
+async def get_llm_response_with_file(
+    messages: List[Dict[str, Any]],
+    model: str,
+    plugins: Optional[List[Dict[str, Any]]] = None,
+) -> LLMCallResult:
+    """
+    Gets a response from a specified LLM on OpenRouter with file content support.
+    Works like get_llm_response but accepts an optional plugins list for the request payload.
+
+    Args:
+        messages: List of message dicts (supports text, file, and image_url content types).
+        model: Model identifier on OpenRouter.
+        plugins: Optional list of plugin dicts (e.g. [{"id": "file-parser", "pdf": {"engine": "native"}}]).
+
+    Returns:
+        LLMCallResult with response text, cost info, and raw response data.
+    """
+    start_time = datetime.utcnow()
+
+    json_payload: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+    }
+    if plugins:
+        json_payload["plugins"] = plugins
+
+    async with httpx.AsyncClient(base_url=BASE_URL, headers=_HEADERS, timeout=TIMEOUT_SECONDS) as client:
+        try:
+            response = await client.post("/chat/completions", json=json_payload)
+            response.raise_for_status()
+            data = response.json()
+
+            usage = data.get("usage", {}) or {}
+            choices = data.get("choices", []) or []
+            first_message = choices[0].get("message") if choices else None
+            response_text = (first_message or {}).get("content") if first_message else None
+            generation_id = data.get("id")
+
+            end_time = datetime.utcnow()
+
+            cost_info = ApiCallCost(
+                prompt_tokens=usage.get("prompt_tokens"),
+                completion_tokens=usage.get("completion_tokens"),
+                total_tokens=usage.get("total_tokens"),
+                total_cost=usage.get("cost"),
+            )
+
+            return LLMCallResult(
+                model=model,
+                generation_id=generation_id,
+                start_time=start_time,
+                end_time=end_time,
+                cost_info=cost_info,
+                response_text=response_text,
+                response_message=first_message,
+                raw_response=data,
+            )
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTPStatusError calling OpenRouter: {e}")
+            logger.error(f"Request body (without file data): model={model}, plugins={plugins}")
+            raise
+
+
 async def get_multimodal_json_response(system_prompt: str, user_prompt_parts: List[Dict[str, Any]], model: str) -> LLMJsonCallResult:
     """
     Gets a structured JSON response from a specified multimodal LLM on OpenRouter.

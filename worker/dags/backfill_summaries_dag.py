@@ -144,6 +144,8 @@ def backfill_summaries_dag():
                         # The five_minute_summary may be in metadata or not
                         # In legacy format it was at the top level of processed_content
                         # In storage it should be in metadata.json or already in summaries
+                        # Note: v2 papers (pipeline_version=2) won't have five_minute_summary
+                        # in metadata -- summaries are generated on-demand via web API
                         five_minute_summary = metadata.get("five_minute_summary")
 
                         if not five_minute_summary:

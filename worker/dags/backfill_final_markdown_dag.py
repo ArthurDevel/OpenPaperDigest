@@ -1,4 +1,7 @@
 """
+DEPRECATED: This DAG is no longer needed. New papers (pipeline v2) do not
+store final_markdown.
+
 Backfill final_markdown for papers missing it in storage.
 
 Downloads PDFs from arXiv, runs OCR + formatting pipeline, and uploads the
@@ -122,6 +125,9 @@ async def extract_final_markdown_from_pdf(pdf_contents: bytes) -> str:
     tags=["papers", "maintenance", "backfill", "one-time"],
     doc_md="""
     ### Backfill Final Markdown DAG
+
+    **DEPRECATED**: This DAG is no longer needed. New papers (pipeline v2) do
+    not store final_markdown.
 
     **ONE-TIME USE DAG**: Backfills content.md in Supabase Storage for papers
     that don't have it.

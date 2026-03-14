@@ -6,7 +6,8 @@
  *
  * Responsibilities:
  * - Check if summary already exists (early return)
- * - Download paper content from Supabase Storage
+ * - For v2 papers: send PDF URL via file content type to LLM
+ * - For v1 papers (fallback): download content.md from Supabase Storage
  * - Generate summary via LLM
  * - Atomically save summary (race-safe via set_paper_summary_if_null RPC)
  */
@@ -14,6 +15,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { downloadPaperMarkdown } from '@/lib/supabase/storage';
 import { chatCompletion } from '@/lib/openrouter';
+import type { OpenRouterMessage, Plugin } from '@/lib/openrouter';
 
 // ============================================================================
 // CONSTANTS
@@ -98,13 +100,13 @@ export interface GenerateSummaryResult {
 export async function generateSummaryForPaper(paperUuid: string): Promise<GenerateSummaryResult> {
   const supabase = await createClient();
 
-  // Step 1: Check if summary already exists
+  // Step 1: Check if summary already exists, and fetch pdf_url/arxiv_id for v2 pipeline
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: existingPaper, error: fetchError } = await (supabase
     .from('papers') as any)
-    .select('summaries, status')
+    .select('summaries, status, pdf_url, arxiv_id')
     .eq('paper_uuid', paperUuid)
-    .single() as { data: { summaries: Record<string, string> | null; status: string } | null; error: { message: string } | null };
+    .single() as { data: { summaries: Record<string, string> | null; status: string; pdf_url: string | null; arxiv_id: string | null } | null; error: { message: string } | null };
 
   if (fetchError || !existingPaper) throw new Error(`Paper not found: ${fetchError?.message}`);
 
@@ -113,17 +115,33 @@ export async function generateSummaryForPaper(paperUuid: string): Promise<Genera
     return { summary: existingSummary, alreadyExisted: true };
   }
 
-  // Step 2: Download content.md from Supabase Storage (uses service role key)
-  const contentMarkdown = await downloadPaperMarkdown(paperUuid);
+  // Step 2: Build messages for LLM -- use PDF URL for v2 papers, fallback to content.md for v1
+  const pdfUrl = existingPaper.pdf_url || (existingPaper.arxiv_id ? `https://arxiv.org/pdf/${existingPaper.arxiv_id}` : null);
 
-  // Step 3: Generate summary via Gemini 3 Flash
-  const response = await chatCompletion(
-    [
+  let messages: OpenRouterMessage[];
+  let plugins: Plugin[] | undefined;
+
+  if (pdfUrl) {
+    // v2 pipeline: send PDF via file content type with native engine
+    messages = [
+      { role: 'system', content: SUMMARY_PROMPT },
+      { role: 'user', content: [
+        { type: 'text', text: 'Please summarize this research paper.' },
+        { type: 'file', file: { filename: 'paper.pdf', file_data: pdfUrl } },
+      ] },
+    ];
+    plugins = [{ id: 'file-parser', pdf: { engine: 'native' } }];
+  } else {
+    // v1 fallback: download content.md from Supabase Storage
+    const contentMarkdown = await downloadPaperMarkdown(paperUuid);
+    messages = [
       { role: 'system', content: SUMMARY_PROMPT },
       { role: 'user', content: contentMarkdown },
-    ],
-    FLASH_MODEL
-  );
+    ];
+  }
+
+  // Step 3: Generate summary via Gemini 3 Flash
+  const response = await chatCompletion(messages, FLASH_MODEL, plugins);
 
   const generatedSummary = response.text;
 
