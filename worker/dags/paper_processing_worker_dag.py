@@ -285,17 +285,28 @@ async def _download_and_process_paper(job: JobInfo) -> ProcessedDocument:
     if page_count > MAX_PDF_PAGES:
         raise Exception(f"Too many pages: {page_count} pages (maximum allowed: {MAX_PDF_PAGES})")
 
-    # Step 3: Process PDF through pipeline
-    print(f"Processing PDF through pipeline")
-    processed_document = await process_paper_pdf(pdf_bytes)
+    # Step 3: Extract metadata from arXiv API if available (free, faster, more accurate)
+    arxiv_title = None
+    arxiv_authors = None
+    arxiv_abstract = None
+    if job.arxiv_id and hasattr(pdf_data, 'metadata') and pdf_data.metadata:
+        arxiv_title = pdf_data.metadata.title
+        arxiv_authors = ", ".join(a.name for a in pdf_data.metadata.authors)
+        arxiv_abstract = pdf_data.metadata.summary
+        print(f"Using arXiv API metadata: title='{arxiv_title[:60]}...', {len(pdf_data.metadata.authors)} authors")
 
-    # Step 4: Add job metadata to processed document
+    # Step 4: Process PDF through pipeline
+    print(f"Processing PDF through pipeline")
+    processed_document = await process_paper_pdf(
+        pdf_bytes,
+        title=arxiv_title,
+        authors=arxiv_authors,
+        abstract=arxiv_abstract,
+    )
+
+    # Step 5: Add job metadata to processed document
     processed_document.paper_uuid = job.paper_uuid
     processed_document.arxiv_id = job.arxiv_id
-
-    # Set abstract from arXiv metadata if available
-    if job.arxiv_id and hasattr(pdf_data, 'metadata') and pdf_data.metadata:
-        processed_document.abstract = pdf_data.metadata.summary
 
     return processed_document
 
