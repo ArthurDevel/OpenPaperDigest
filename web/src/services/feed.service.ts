@@ -40,7 +40,7 @@ const HF_UPVOTES_WEIGHT = 0.33;
 const H_INDEX_CAP = 50;
 
 /** Half-life in days for the recency exponential decay */
-const RECENCY_HALF_LIFE_DAYS = 7;
+const RECENCY_HALF_LIFE_DAYS = 14;
 
 /** Number of ANN candidates to fetch per preference cluster */
 const CANDIDATES_PER_CLUSTER = 50;
