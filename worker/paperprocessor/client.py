@@ -152,11 +152,17 @@ def get_processing_metrics_for_admin(paper_uuid: str) -> Dict[str, Any]:
         session.close()
 
 
-async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None) -> ProcessedDocument:
+async def process_paper_pdf(
+    pdf_contents: bytes,
+    paper_id: Optional[str] = None,
+    title: Optional[str] = None,
+    authors: Optional[str] = None,
+    abstract: Optional[str] = None,
+) -> ProcessedDocument:
         """
         PDF processing pipeline (no OCR):
-        1. Convert first 3 pages to images (for metadata extraction + thumbnail)
-        2. Extract metadata (title, authors, abstract)
+        1. Convert first 3 pages to images (for thumbnail + fallback metadata extraction)
+        2. Set metadata from caller (e.g. arXiv API) or extract via LLM
         3. Generate abstract summary
         4. Generate embedding
 
@@ -165,6 +171,9 @@ async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None)
         Args:
             pdf_contents: Raw PDF bytes.
             paper_id: Optional paper UUID for update mode.
+            title: Pre-extracted title (e.g. from arXiv API). Skips LLM metadata extraction.
+            authors: Pre-extracted authors (e.g. from arXiv API). Skips LLM metadata extraction.
+            abstract: Pre-extracted abstract text (e.g. from arXiv API).
 
         Returns:
             ProcessedDocument with metadata, abstract summary, and embedding.
@@ -173,7 +182,7 @@ async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None)
 
         pdf_base64 = base64.b64encode(pdf_contents).decode('utf-8')
 
-        # Step 1: Convert first 3 pages to images (for metadata + thumbnail)
+        # Step 1: Convert first 3 pages to images (for thumbnail + fallback metadata)
         logger.info("Step 1: Converting first 3 pages to images.")
         images = await convert_pdf_to_images(pdf_contents)
 
@@ -196,9 +205,16 @@ async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None)
             pages=pages
         )
 
-        # Step 2: Extract metadata (title, authors, abstract) - modifies document in place
-        logger.info("Step 2: Extracting metadata.")
-        await extract_metadata(document)
+        # Step 2: Set metadata from caller (arXiv API) or extract via LLM
+        if title and authors:
+            logger.info("Step 2: Using pre-extracted metadata (skipping LLM extraction).")
+            document.title = title
+            document.authors = authors
+            if abstract:
+                document.abstract = abstract
+        else:
+            logger.info("Step 2: Extracting metadata via LLM (no pre-extracted metadata).")
+            await extract_metadata(document)
 
         # Step 3: Generate abstract summary (from abstract text or page images)
         # Full 5-minute summary is generated on-demand via web API
