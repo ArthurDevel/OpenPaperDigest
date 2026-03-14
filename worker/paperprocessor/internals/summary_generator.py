@@ -11,6 +11,7 @@ Responsibilities:
 - Track API call costs for each generation step
 """
 
+import asyncio
 import logging
 import os
 from typing import Optional
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 SUMMARY_MODEL = "google/gemini-3-flash-preview"
 ABSTRACT_SUMMARY_MODEL = "google/gemini-3.1-flash-lite-preview"
 PDF_FILE_PLUGINS = [{"id": "file-parser", "pdf": {"engine": "native"}}]
+ABSTRACT_SUMMARY_TIMEOUT_SECONDS = 30
 
 
 # ============================================================================
@@ -129,10 +131,13 @@ async def generate_abstract_summary(document: ProcessedDocument) -> None:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": input_text},
         ]
-        result = await openrouter_client.get_llm_response(
-            messages=messages,
-            model=ABSTRACT_SUMMARY_MODEL,
-        )
+        try:
+            result = await asyncio.wait_for(
+                openrouter_client.get_llm_response(messages=messages, model=ABSTRACT_SUMMARY_MODEL),
+                timeout=ABSTRACT_SUMMARY_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"Abstract summary generation timed out after {ABSTRACT_SUMMARY_TIMEOUT_SECONDS}s")
     else:
         # Fallback: send first 3 page images to extract abstract
         if not document.pages:
@@ -146,10 +151,13 @@ async def generate_abstract_summary(document: ProcessedDocument) -> None:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ]
-        result = await openrouter_client.get_llm_response(
-            messages=messages,
-            model=ABSTRACT_SUMMARY_MODEL,
-        )
+        try:
+            result = await asyncio.wait_for(
+                openrouter_client.get_llm_response(messages=messages, model=ABSTRACT_SUMMARY_MODEL),
+                timeout=ABSTRACT_SUMMARY_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"Abstract summary generation timed out after {ABSTRACT_SUMMARY_TIMEOUT_SECONDS}s")
 
     # Step 3: Validate response
     summary_text = getattr(result, "response_text", None)
