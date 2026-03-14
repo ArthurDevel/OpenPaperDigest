@@ -161,7 +161,7 @@ async def process_paper_pdf(
 ) -> ProcessedDocument:
         """
         PDF processing pipeline (no OCR):
-        1. Convert first 3 pages to images (for thumbnail + fallback metadata extraction)
+        1. Convert PDF pages to images (1 page for thumbnail if metadata provided, 3 pages otherwise)
         2. Set metadata from caller (e.g. arXiv API) or extract via LLM
         3. Generate abstract summary
         4. Generate embedding
@@ -182,9 +182,13 @@ async def process_paper_pdf(
 
         pdf_base64 = base64.b64encode(pdf_contents).decode('utf-8')
 
-        # Step 1: Convert first 3 pages to images (for thumbnail + fallback metadata)
-        logger.info("Step 1: Converting first 3 pages to images.")
-        images = await convert_pdf_to_images(pdf_contents)
+        # Step 1: Convert PDF pages to images
+        # With pre-extracted metadata + abstract, only need page 1 (thumbnail)
+        # Without, need 3 pages for LLM metadata extraction and abstract fallback
+        has_full_metadata = bool(title and authors and abstract)
+        max_pages = 1 if has_full_metadata else 3
+        logger.info(f"Step 1: Converting first {max_pages} page(s) to images.")
+        images = await convert_pdf_to_images(pdf_contents, max_pages=max_pages)
 
         pages = []
         for i, image in enumerate(images):
