@@ -3,7 +3,7 @@
 /**
  * Interaction Tracker Hook
  *
- * Session-level tracker that collects user interaction events (expand, read, save)
+ * Session-level tracker that collects user interaction events (expand, read, save, seen)
  * and flushes them to the backend API.
  *
  * Responsibilities:
@@ -37,6 +37,8 @@ export interface InteractionTrackerReturn {
   trackRead: (paperUuid: string, readingRatio: number, activeTimeSeconds: number) => void;
   /** Track a paper save event (only fires for non-anonymous users) */
   trackSave: (paperUuid: string) => void;
+  /** Track a paper seen event (fired when a paper card scrolls into view) */
+  trackSeen: (paperUuid: string) => void;
   /** Get all paper UUIDs interacted with this session */
   getSessionPaperUuids: () => string[];
 }
@@ -172,9 +174,26 @@ export function useInteractionTracker(): InteractionTrackerReturn {
     });
   }, []);
 
+  /**
+   * Track a paper seen (impression) event.
+   * Deduplicates within the session: if the paper is already in
+   * sessionPaperUuidsRef, the buffer push is skipped.
+   * @param paperUuid - UUID of the paper that scrolled into view
+   */
+  const trackSeen = useCallback((paperUuid: string) => {
+    // Skip if already tracked this session (handles remounts from scrolling)
+    if (sessionPaperUuidsRef.current.has(paperUuid)) return;
+
+    sessionPaperUuidsRef.current.add(paperUuid);
+    bufferRef.current.push({
+      paperUuid,
+      interactionType: 'seen',
+    });
+  }, []);
+
   const getSessionPaperUuids = useCallback((): string[] => {
     return Array.from(sessionPaperUuidsRef.current);
   }, []);
 
-  return { trackExpand, trackRead, trackSave, getSessionPaperUuids };
+  return { trackExpand, trackRead, trackSave, trackSeen, getSessionPaperUuids };
 }

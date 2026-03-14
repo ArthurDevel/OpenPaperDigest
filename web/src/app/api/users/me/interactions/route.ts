@@ -60,17 +60,24 @@ export async function POST(
 
     await interactionsService.saveInteractions(user.id, body.events);
 
-    // Extract unique paper UUIDs for cluster update
-    const paperUuids = [...new Set(body.events.map((e) => e.paperUuid))];
+    // Extract unique paper UUIDs from expanded/read events only for cluster update
+    // Seen and saved events should not influence preference clusters
+    const clusterPaperUuids = [...new Set(
+      body.events
+        .filter((e) => e.interactionType === 'expanded' || e.interactionType === 'read')
+        .map((e) => e.paperUuid)
+    )];
 
-    // Trigger async cluster update after response is sent
-    after(async () => {
-      try {
-        await interactionsService.updatePreferenceClusters(user.id, paperUuids);
-      } catch (err) {
-        console.error('Error updating preference clusters:', err);
-      }
-    });
+    // Trigger async cluster update after response is sent (only if there are relevant events)
+    if (clusterPaperUuids.length > 0) {
+      after(async () => {
+        try {
+          await interactionsService.updatePreferenceClusters(user.id, clusterPaperUuids);
+        } catch (err) {
+          console.error('Error updating preference clusters:', err);
+        }
+      });
+    }
 
     return NextResponse.json({ ok: true as const });
   } catch (error) {

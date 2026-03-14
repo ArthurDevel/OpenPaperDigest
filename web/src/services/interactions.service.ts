@@ -332,6 +332,33 @@ export async function getPreferenceClusters(
 }
 
 /**
+ * Returns distinct paper UUIDs the user has interacted with (any interaction type).
+ * Used to exclude previously seen/interacted papers from the feed.
+ * @param userId - Supabase auth.uid() of the user
+ * @returns Flat array of paper UUID strings
+ */
+export async function getInteractedPaperUuids(userId: string): Promise<string[]> {
+  const supabase = await createClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase.from('user_interactions') as any)
+    .select('paper_uuid')
+    .eq('user_id', userId);
+
+  if (error) {
+    throw new Error(`Failed to fetch interacted paper UUIDs: ${error.message}`);
+  }
+
+  // Extract distinct paper UUIDs
+  const uuids = new Set<string>();
+  for (const row of (data ?? []) as { paper_uuid: string }[]) {
+    uuids.add(row.paper_uuid);
+  }
+
+  return Array.from(uuids);
+}
+
+/**
  * Returns aggregated interaction stats and reading history for a user.
  * Uses two queries: one for counts/totals, one for the 50 most recent reads with paper details.
  * @param userId - Supabase auth.uid() of the user
