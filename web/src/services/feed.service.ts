@@ -16,7 +16,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { getPaperThumbnailUrls } from '@/lib/supabase/storage';
-import { getPreferenceClusters } from '@/services/interactions.service';
+import { getPreferenceClusters, getInteractedPaperUuids } from '@/services/interactions.service';
 import type { FeedResponse } from '@/types/recommendation';
 import type { MinimalPaper } from '@/types/paper';
 
@@ -110,6 +110,13 @@ export async function getRankedFeed(
   excludePaperUuids: string[],
   userId: string | null
 ): Promise<FeedResponse> {
+  // Merge previously interacted paper UUIDs into the exclude list
+  if (userId) {
+    const interactedUuids = await getInteractedPaperUuids(userId);
+    const mergedExcludes = new Set([...excludePaperUuids, ...interactedUuids]);
+    excludePaperUuids = Array.from(mergedExcludes);
+  }
+
   // Build preference vectors (empty for unauthenticated or cold-start users)
   const preferenceVectors = userId
     ? await buildPreferenceVectors(userId)

@@ -60,6 +60,7 @@ const PaperCardWithTracking = ({
   onToggleExpand,
   onLoadSummary,
   onReadComplete,
+  onSeen,
 }: {
   paper: MinimalPaperItem;
   isExpanded: boolean;
@@ -70,8 +71,9 @@ const PaperCardWithTracking = ({
   onToggleExpand: (paperUuid: string) => void;
   onLoadSummary?: (paperUuid: string) => void;
   onReadComplete: (paperUuid: string, readingRatio: number, activeTimeSeconds: number) => void;
+  onSeen?: (paperUuid: string) => void;
 }) => {
-  const impressionRef = usePaperImpression(paper.paperUuid, true);
+  const impressionRef = usePaperImpression(paper.paperUuid, true, onSeen);
   const wordCount = estimateWordCount(summary?.fiveMinuteSummary);
   const { ref: readingRef } = useReadingTracker(
     paper.paperUuid,
@@ -115,7 +117,7 @@ export default function ScrollingPapersPage() {
   const observerTarget = useRef<HTMLDivElement>(null);
 
   // Interaction tracking for feed recommendations
-  const { trackExpand, trackRead, getSessionPaperUuids } = useInteractionTracker();
+  const { trackExpand, trackRead, trackSeen, getSessionPaperUuids } = useInteractionTracker();
 
   // ============================================================================
   // EVENT HANDLERS
@@ -372,6 +374,7 @@ export default function ScrollingPapersPage() {
                 onToggleExpand={toggleExpanded}
                 onLoadSummary={loadPaperSummary}
                 onReadComplete={trackRead}
+                onSeen={trackSeen}
               />
             );
           })}

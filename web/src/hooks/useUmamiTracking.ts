@@ -15,9 +15,10 @@ declare global {
  *   each time the paper leaves the viewport or the tab is hidden.
  * @param paperUuid - The UUID of the paper to track.
  * @param enabled - Whether the hook is active.
+ * @param onSeen - Optional callback fired once when the paper first scrolls into view.
  * @returns A ref to attach to the element to be observed.
  */
-export const usePaperImpression = (paperUuid: string, enabled: boolean) => {
+export const usePaperImpression = (paperUuid: string, enabled: boolean, onSeen?: (paperUuid: string) => void) => {
   const ref = useRef<HTMLDivElement>(null);
   const hasBeenSeen = useRef(false);
   const startTime = useRef<number | null>(null);
@@ -75,6 +76,7 @@ export const usePaperImpression = (paperUuid: string, enabled: boolean) => {
           if (!hasBeenSeen.current) {
             hasBeenSeen.current = true;
             trackImpression();
+            onSeen?.(paperUuid);
           }
           // Start the timer
           startTime.current = Date.now();
@@ -95,7 +97,7 @@ export const usePaperImpression = (paperUuid: string, enabled: boolean) => {
       trackDuration(); // Track any final duration when the component unmounts
       observer.unobserve(currentElement);
     };
-  }, [enabled, trackImpression, trackDuration]);
+  }, [enabled, trackImpression, trackDuration, onSeen]);
 
   return ref;
 };

@@ -17,7 +17,7 @@ import type { MinimalPaper } from './paper';
 // ============================================================================
 
 /** Types of user interactions tracked by the system */
-export type InteractionType = 'expanded' | 'read' | 'saved';
+export type InteractionType = 'expanded' | 'read' | 'saved' | 'seen';
 
 // ============================================================================
 // INTERFACES - Interaction Events
