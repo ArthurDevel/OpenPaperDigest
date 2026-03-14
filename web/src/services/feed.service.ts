@@ -42,11 +42,8 @@ const H_INDEX_CAP = 50;
 /** Half-life in days for the recency exponential decay */
 const RECENCY_HALF_LIFE_DAYS = 14;
 
-/** Number of ANN candidates to fetch per preference cluster */
-const CANDIDATES_PER_CLUSTER = 50;
-
-/** Fraction of feed candidates reserved for exploration (topic discovery) */
-const EXPLORATION_RATIO = 0.2;
+/** Multiplier for ANN candidates relative to page size (fetches limit*2 total across clusters) */
+const ANN_CANDIDATE_MULTIPLIER = 2;
 
 /** Max boost from cluster weight on similarity score. Dominant cluster (weight ~0.6)
  *  gets similarity multiplied by ~1.18, minor cluster (weight ~0.1) by ~1.03. */
@@ -131,10 +128,9 @@ export async function getRankedFeed(
   // Inject diversity
   const diversified = injectDiversity(scored, preferenceVectors);
 
-  // Paginate: we already excluded shown papers, so slice from start
-  const startIdx = (page - 1) * limit;
-  const pageItems = diversified.slice(startIdx, startIdx + limit);
-  const hasMore = diversified.length > startIdx + limit;
+  // Return up to limit items; each request fetches fresh candidates via excludes
+  const pageItems = diversified.slice(0, limit);
+  const hasMore = diversified.length > limit;
 
   // Look up slugs for the page items
   const paperUuids = pageItems.map((sp) => sp.paper.paperUuid);
@@ -202,21 +198,21 @@ async function fetchCandidates(
   limit: number
 ): Promise<CandidateRow[]> {
   if (preferenceVectors.length > 0) {
-    const annCandidates = await fetchCandidatesFromANN(excludePaperUuids, preferenceVectors);
+    const candidatesPerCluster = Math.ceil(
+      (limit * ANN_CANDIDATE_MULTIPLIER) / preferenceVectors.length
+    );
+    const annCandidates = await fetchCandidatesFromANN(
+      excludePaperUuids, preferenceVectors, candidatesPerCluster
+    );
 
-    // Fall back to cold start if ANN returns nothing (e.g. no papers have embeddings yet)
-    if (annCandidates.length === 0) {
-      return fetchColdStartCandidates(excludePaperUuids, limit);
-    }
-
-    // Fetch exploration candidates (recent papers outside ANN results)
-    const explorationCount = Math.ceil(limit * EXPLORATION_RATIO);
+    // Fetch exploration candidates (multi-signal: recent + popular + upvoted)
     const annUuids = annCandidates.map((c) => c.paperUuid);
     const explorationCandidates = await fetchExplorationCandidates(
       [...excludePaperUuids, ...annUuids],
-      explorationCount
+      limit
     );
 
+    // If ANN returned nothing, exploration alone keeps the feed alive
     return [...annCandidates, ...explorationCandidates];
   }
   return fetchColdStartCandidates(excludePaperUuids, limit);
@@ -232,7 +228,8 @@ async function fetchCandidates(
  */
 async function fetchCandidatesFromANN(
   excludePaperUuids: string[],
-  preferenceVectors: PreferenceVector[]
+  preferenceVectors: PreferenceVector[],
+  candidatesPerCluster: number
 ): Promise<CandidateRow[]> {
   const supabase = await createClient();
 
@@ -246,7 +243,7 @@ async function fetchCandidatesFromANN(
         'match_papers_by_embedding',
         {
           query_embedding: vectorString,
-          match_count: CANDIDATES_PER_CLUSTER,
+          match_count: candidatesPerCluster,
           exclude_uuids: excludePaperUuids,
         }
       );
@@ -347,11 +344,12 @@ async function fetchColdStartCandidates(
 }
 
 /**
- * Fetches exploration candidates for serendipitous topic discovery.
- * Returns recent completed papers outside the user's known interests.
+ * Fetches exploration candidates using three signals for diversity:
+ * most recent, most popular (h-index), and most upvoted (HF upvotes).
+ * Deduplicates across the three pools and returns merged candidates.
  * @param excludePaperUuids - Paper UUIDs to exclude (already shown + ANN results)
- * @param count - Number of exploration candidates to fetch
- * @returns Candidate rows with similarity=0 and sourceClusterIndex=null
+ * @param count - Number of candidates to fetch per signal
+ * @returns Deduplicated candidate rows with similarity=0 and sourceClusterIndex=null
  */
 async function fetchExplorationCandidates(
   excludePaperUuids: string[],
@@ -359,40 +357,62 @@ async function fetchExplorationCandidates(
 ): Promise<CandidateRow[]> {
   const supabase = await createClient();
 
-  let query = supabase
-    .from('papers')
-    .select('paper_uuid, title, authors, finished_at, signals')
-    .in('status', ['completed', 'partially_completed'])
-    .order('finished_at', { ascending: false })
-    .limit(count);
+  const baseFilters = (query: ReturnType<typeof supabase.from>) => {
+    let q = query
+      .select('paper_uuid, title, authors, finished_at, signals')
+      .in('status', ['completed', 'partially_completed'])
+      .limit(count);
 
-  if (excludePaperUuids.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    query = (query as any).not('paper_uuid', 'in', `(${excludePaperUuids.join(',')})`);
-  }
+    if (excludePaperUuids.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      q = (q as any).not('paper_uuid', 'in', `(${excludePaperUuids.join(',')})`);
+    }
+    return q;
+  };
 
-  const { data, error } = await query;
+  // Fetch three pools in parallel: recent, popular, upvoted
+  const [recentResult, popularResult, upvotedResult] = await Promise.all([
+    baseFilters(supabase.from('papers'))
+      .order('finished_at', { ascending: false }),
+    baseFilters(supabase.from('papers'))
+      .order('signals->max_author_h_index', { ascending: false, nullsFirst: false }),
+    baseFilters(supabase.from('papers'))
+      .order('signals->hf_upvotes', { ascending: false, nullsFirst: false }),
+  ]);
 
-  if (error) {
-    throw new Error(`Exploration candidate fetch failed: ${error.message}`);
-  }
+  if (recentResult.error) throw new Error(`Exploration (recent) fetch failed: ${recentResult.error.message}`);
+  if (popularResult.error) throw new Error(`Exploration (popular) fetch failed: ${popularResult.error.message}`);
+  if (upvotedResult.error) throw new Error(`Exploration (upvoted) fetch failed: ${upvotedResult.error.message}`);
 
-  return ((data ?? []) as {
+  // Deduplicate across the three pools
+  const candidateMap = new Map<string, CandidateRow>();
+
+  for (const row of [
+    ...(recentResult.data ?? []),
+    ...(popularResult.data ?? []),
+    ...(upvotedResult.data ?? []),
+  ] as {
     paper_uuid: string;
     title: string | null;
     authors: string | null;
     finished_at: string;
     signals: Record<string, unknown> | null;
-  }[]).map((row) => ({
-    paperUuid: row.paper_uuid,
-    title: row.title,
-    authors: row.authors,
-    finishedAt: new Date(row.finished_at),
-    embedding: [],
-    signals: row.signals,
-    similarity: 0,
-    sourceClusterIndex: null,
-  }));
+  }[]) {
+    if (!candidateMap.has(row.paper_uuid)) {
+      candidateMap.set(row.paper_uuid, {
+        paperUuid: row.paper_uuid,
+        title: row.title,
+        authors: row.authors,
+        finishedAt: new Date(row.finished_at),
+        embedding: [],
+        signals: row.signals,
+        similarity: 0,
+        sourceClusterIndex: null,
+      });
+    }
+  }
+
+  return Array.from(candidateMap.values());
 }
 
 /**
