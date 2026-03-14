@@ -134,8 +134,9 @@ export async function getPaperFigureUrl(paperUuid: string, figureId: string): Pr
 
 /**
  * Download all text/JSON content for a paper from storage.
- * Downloads content.md, sections.json, figures.json, and metadata.json
- * using the authenticated Supabase client (service role key).
+ * Checks pipeline_version from metadata.json first:
+ * - v2 papers (PDF-direct pipeline): returns empty content fields (no content.md/sections/figures)
+ * - v1 papers: downloads content.md, sections.json, figures.json as before
  * @param paperUuid - Unique identifier for the paper
  * @returns StoredPaperContent with all text content fields populated
  */
@@ -144,12 +145,30 @@ export async function downloadPaperContent(paperUuid: string): Promise<StoredPap
   const bucket = supabase.storage.from(BUCKET_NAME);
   const prefix = paperUuid;
 
-  // Download all four files in parallel
-  const [markdownResult, sectionsResult, figuresResult, metadataResult] = await Promise.all([
+  // Download metadata first to check pipeline version
+  const metadataResult = await bucket.download(`${prefix}/metadata.json`);
+  if (metadataResult.error || !metadataResult.data) {
+    throw new Error(`Failed to download metadata.json for paper ${paperUuid}: ${metadataResult.error?.message}`);
+  }
+
+  const metadataText = await metadataResult.data.text();
+  const metadata = JSON.parse(metadataText) as Record<string, unknown>;
+
+  // v2 papers have no content.md, sections.json, or figures.json
+  if (metadata.pipeline_version === 2) {
+    return {
+      finalMarkdown: '',
+      sections: [],
+      figures: [],
+      metadata,
+    };
+  }
+
+  // v1 pipeline: download remaining files
+  const [markdownResult, sectionsResult, figuresResult] = await Promise.all([
     bucket.download(`${prefix}/content.md`),
     bucket.download(`${prefix}/sections.json`),
     bucket.download(`${prefix}/figures.json`),
-    bucket.download(`${prefix}/metadata.json`),
   ]);
 
   if (markdownResult.error || !markdownResult.data) {
@@ -161,38 +180,45 @@ export async function downloadPaperContent(paperUuid: string): Promise<StoredPap
   if (figuresResult.error || !figuresResult.data) {
     throw new Error(`Failed to download figures.json for paper ${paperUuid}: ${figuresResult.error?.message}`);
   }
-  if (metadataResult.error || !metadataResult.data) {
-    throw new Error(`Failed to download metadata.json for paper ${paperUuid}: ${metadataResult.error?.message}`);
-  }
 
-  // Parse blob contents
-  const [finalMarkdown, sectionsText, figuresText, metadataText] = await Promise.all([
+  const [finalMarkdown, sectionsText, figuresText] = await Promise.all([
     markdownResult.data.text(),
     sectionsResult.data.text(),
     figuresResult.data.text(),
-    metadataResult.data.text(),
   ]);
 
   return {
     finalMarkdown,
     sections: JSON.parse(sectionsText) as Record<string, unknown>[],
     figures: JSON.parse(figuresText) as Record<string, unknown>[],
-    metadata: JSON.parse(metadataText) as Record<string, unknown>,
+    metadata,
   };
 }
 
 /**
  * Download only the markdown content for a paper.
- * Uses the authenticated Supabase client (service role key).
+ * Checks metadata.json for pipeline_version first:
+ * - v2 papers: returns empty string (no content.md exists)
+ * - v1 papers: downloads and returns content.md
  * @param paperUuid - Unique identifier for the paper
- * @returns The raw markdown string from content.md
+ * @returns The raw markdown string from content.md, or empty string for v2 papers
  */
 export async function downloadPaperMarkdown(paperUuid: string): Promise<string> {
   const supabase = getServiceClient();
+  const bucket = supabase.storage.from(BUCKET_NAME);
 
-  const { data, error } = await supabase.storage
-    .from(BUCKET_NAME)
-    .download(`${paperUuid}/content.md`);
+  // Check pipeline version from metadata
+  const metadataResult = await bucket.download(`${paperUuid}/metadata.json`);
+  if (metadataResult.data) {
+    const metadataText = await metadataResult.data.text();
+    const metadata = JSON.parse(metadataText) as Record<string, unknown>;
+    if (metadata.pipeline_version === 2) {
+      return '';
+    }
+  }
+
+  // v1 pipeline: download content.md
+  const { data, error } = await bucket.download(`${paperUuid}/content.md`);
 
   if (error || !data) {
     throw new Error(`Failed to download content.md for paper ${paperUuid}: ${error?.message}`);
@@ -208,7 +234,7 @@ export async function downloadPaperMarkdown(paperUuid: string): Promise<string> 
 /**
  * Delete all storage files for a paper.
  * Uses a service-role Supabase client since delete requires elevated permissions.
- * Reads figures.json first to discover individual figure file paths.
+ * Handles both v1 (content.md, figures, sections) and v2 (thumbnail + metadata only) formats.
  * @param paperUuid - Unique identifier for the paper
  */
 export async function deletePaperAssets(paperUuid: string): Promise<void> {
@@ -216,16 +242,16 @@ export async function deletePaperAssets(paperUuid: string): Promise<void> {
   const bucket = supabase.storage.from(BUCKET_NAME);
   const prefix = paperUuid;
 
-  // Collect known top-level paths
+  // Include all possible file paths from both v1 and v2 formats
   const pathsToDelete = [
     `${prefix}/thumbnail.png`,
+    `${prefix}/metadata.json`,
     `${prefix}/content.md`,
     `${prefix}/sections.json`,
     `${prefix}/figures.json`,
-    `${prefix}/metadata.json`,
   ];
 
-  // Try to read figures.json to find individual figure files
+  // Try to read figures.json to find individual figure files (v1 only)
   try {
     const { data: figuresBlob, error: figuresError } = await bucket.download(`${prefix}/figures.json`);
     if (!figuresError && figuresBlob) {
@@ -240,7 +266,6 @@ export async function deletePaperAssets(paperUuid: string): Promise<void> {
     }
   } catch {
     // If figures.json doesn't exist or is malformed, skip figure path discovery.
-    // Top-level files will still be cleaned up.
   }
 
   const { error } = await bucket.remove(pathsToDelete);

@@ -488,7 +488,7 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
 
     - Runs twice daily at 2 AM and 2 PM UTC
     - Processes up to 10 papers per run (randomly selected, processed in parallel)
-    - Processes papers through simplified pipeline: PDF download → OCR → metadata extraction → summary generation → saving → slug creation
+    - Processes papers through simplified pipeline: PDF download → image conversion (first 3 pages) → metadata extraction → abstract summary → embedding → saving → slug creation
     - Uses database locking to prevent race conditions
     - Handles errors gracefully and marks failed jobs
     - Processes papers in parallel using Airflow dynamic task mapping

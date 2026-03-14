@@ -3,6 +3,7 @@
  *
  * Responsibilities:
  * - Send chat completion requests to OpenRouter API
+ * - Support multimodal content (text, images, files/PDFs)
  * - Handle retries with exponential backoff
  * - Return structured response with token usage and cost
  */
@@ -19,9 +20,36 @@ const BASE_DELAY_MS = 1000;
 // INTERFACES
 // ============================================================================
 
+/** A text content part for multimodal messages */
+export interface TextPart {
+  type: 'text';
+  text: string;
+}
+
+/** An image URL content part for multimodal messages */
+export interface ImageUrlPart {
+  type: 'image_url';
+  image_url: { url: string };
+}
+
+/** A file content part (e.g. PDF via URL or base64 data URI) */
+export interface FilePart {
+  type: 'file';
+  file: { filename: string; file_data: string };
+}
+
+/** Union of all supported content part types */
+export type ContentPart = TextPart | ImageUrlPart | FilePart;
+
 export interface OpenRouterMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | ContentPart[];
+}
+
+/** OpenRouter plugin configuration (e.g. PDF engine selection) */
+export interface Plugin {
+  id: string;
+  pdf?: { engine: string };
 }
 
 export interface OpenRouterResponse {
@@ -42,17 +70,25 @@ export interface OpenRouterResponse {
 /**
  * Send a chat completion request to OpenRouter.
  * Includes retry logic with exponential backoff (3 attempts).
- * @param messages - Array of chat messages
+ * @param messages - Array of chat messages (supports text and multimodal content)
  * @param model - OpenRouter model identifier
+ * @param plugins - Optional plugins (e.g. for PDF native engine)
  * @returns Response with generated text and usage metrics
  */
 export async function chatCompletion(
   messages: OpenRouterMessage[],
-  model: string
+  model: string,
+  plugins?: Plugin[]
 ): Promise<OpenRouterResponse> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY environment variable is not set');
+  }
+
+  // Build request payload, conditionally including plugins
+  const payload: Record<string, unknown> = { model, messages };
+  if (plugins) {
+    payload.plugins = plugins;
   }
 
   let lastError: Error | null = null;
@@ -66,7 +102,7 @@ export async function chatCompletion(
           'Content-Type': 'application/json',
           'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
         },
-        body: JSON.stringify({ model, messages }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {

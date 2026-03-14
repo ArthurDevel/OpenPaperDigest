@@ -2,16 +2,11 @@ import logging
 import asyncio
 import base64
 import io
-import time
-import os
-import json
 from typing import Optional, Dict, Any, List
 
 from paperprocessor.models import ProcessedDocument, ProcessedPage, ApiCallCostForStep
 from paperprocessor.internals.pdf_to_image import convert_pdf_to_images
-from paperprocessor.internals.mistral_ocr import call_mistral_ocr, apply_ocr_results
 from paperprocessor.internals.metadata_extractor import extract_metadata
-from paperprocessor.internals.header_formatter import format_headers, format_images
 from paperprocessor.internals.summary_generator import generate_five_minute_summary, generate_abstract_summary
 from paperprocessor.embedding import generate_embedding
 from shared.db import SessionLocal
@@ -159,29 +154,29 @@ def get_processing_metrics_for_admin(paper_uuid: str) -> Dict[str, Any]:
 
 async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None) -> ProcessedDocument:
         """
-        Simplified 4-step pipeline:
-        1. OCR → markdown per page (runs in parallel with image conversion)
-        2. Extract metadata
-        3. Format headers and images
-        4. Generate summary from original content
+        PDF processing pipeline (no OCR):
+        1. Convert first 3 pages to images (for metadata extraction + thumbnail)
+        2. Extract metadata (title, authors, abstract)
+        3. Generate abstract summary
+        4. Generate embedding
+
+        Full 5-minute summary is generated on-demand via web API using PDF URL.
+
+        Args:
+            pdf_contents: Raw PDF bytes.
+            paper_id: Optional paper UUID for update mode.
+
+        Returns:
+            ProcessedDocument with metadata, abstract summary, and embedding.
         """
-        logger.info("Paper processing pipeline v2 started (simplified).")
+        logger.info("Paper processing pipeline started.")
 
         pdf_base64 = base64.b64encode(pdf_contents).decode('utf-8')
 
-        # Run Mistral OCR and image conversion in parallel.
-        # OCR uses the raw PDF — it doesn't need the page images.
-        # Images are only needed for storage and coordinate transformation after OCR.
-        logger.info("Step 1: OCR + image conversion (parallel).")
-
-        async def _run_ocr():
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, call_mistral_ocr, pdf_base64)
-
-        ocr_task = asyncio.create_task(_run_ocr())
+        # Step 1: Convert first 3 pages to images (for metadata + thumbnail)
+        logger.info("Step 1: Converting first 3 pages to images.")
         images = await convert_pdf_to_images(pdf_contents)
 
-        # Create ProcessedPages with base64 encoded images
         pages = []
         for i, image in enumerate(images):
             page_num = i + 1
@@ -201,33 +196,19 @@ async def process_paper_pdf(pdf_contents: bytes, paper_id: Optional[str] = None)
             pages=pages
         )
 
-        # Wait for OCR to finish and apply results to pages
-        ocr_response = await ocr_task
-        apply_ocr_results(document, ocr_response)
-
-        # Step 2: Extract metadata (title, authors) - modifies document in place
+        # Step 2: Extract metadata (title, authors, abstract) - modifies document in place
         logger.info("Step 2: Extracting metadata.")
         await extract_metadata(document)
 
-        # Step 3: Format headers and combine pages - modifies document in place
-        # Note: Without structure extraction, this only combines OCR markdown into final_markdown
-        logger.info("Step 3: Formatting document (combining pages).")
-        await format_headers(document)
-
-        # Step 3b: Format inline image references - modifies document in place
-        logger.info("Step 3b: Formatting inline image references.")
-        await format_images(document)
-
-        # Step 4: Full summary generation (disabled - now generated on-demand via web API)
-        # await generate_five_minute_summary(document)
-
-        # Step 5: Generate abstract summary (cheap, fast - from abstract or first 1000 words)
-        logger.info("Step 5: Generating abstract summary.")
+        # Step 3: Generate abstract summary (from abstract text or page images)
+        # Full 5-minute summary is generated on-demand via web API
+        # await generate_five_minute_summary(document, pdf_url)
+        logger.info("Step 3: Generating abstract summary.")
         await generate_abstract_summary(document)
 
-        # Step 6: Generate embedding for similarity search
-        logger.info("Step 6: Generating embedding.")
+        # Step 4: Generate embedding for similarity search
+        logger.info("Step 4: Generating embedding.")
         document.embedding = await generate_embedding(document.title, document.abstract)
 
-        logger.info("Paper processing pipeline v2 finished (simplified).")
+        logger.info("Paper processing pipeline finished.")
         return document
