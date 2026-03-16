@@ -61,6 +61,7 @@ const PaperCardWithTracking = ({
   onLoadSummary,
   onReadComplete,
   onSeen,
+  onSave,
 }: {
   paper: MinimalPaperItem;
   isExpanded: boolean;
@@ -70,8 +71,9 @@ const PaperCardWithTracking = ({
   summary?: PaperSummaryResponse;
   onToggleExpand: (paperUuid: string) => void;
   onLoadSummary?: (paperUuid: string) => void;
-  onReadComplete: (paperUuid: string, readingRatio: number, activeTimeSeconds: number) => void;
+  onReadComplete: (paperUuid: string, wordCount: number, activeTimeSeconds: number) => void;
   onSeen?: (paperUuid: string) => void;
+  onSave?: (paperUuid: string) => void;
 }) => {
   const impressionRef = usePaperImpression(paper.paperUuid, true, onSeen);
   const wordCount = estimateWordCount(summary?.fiveMinuteSummary);
@@ -93,6 +95,7 @@ const PaperCardWithTracking = ({
       onToggleExpand={onToggleExpand}
       onLoadSummary={onLoadSummary}
       readingTrackerRef={isExpanded ? readingRef : undefined}
+      onSave={onSave}
     />
   );
 };
@@ -117,7 +120,7 @@ export default function ScrollingPapersPage() {
   const observerTarget = useRef<HTMLDivElement>(null);
 
   // Interaction tracking for feed recommendations
-  const { trackExpand, trackRead, trackSeen, getSessionPaperUuids } = useInteractionTracker();
+  const { trackExpand, trackRead, trackSave, trackSeen, getSessionPaperUuids } = useInteractionTracker();
 
   // ============================================================================
   // EVENT HANDLERS
@@ -375,6 +378,7 @@ export default function ScrollingPapersPage() {
                 onLoadSummary={loadPaperSummary}
                 onReadComplete={trackRead}
                 onSeen={trackSeen}
+                onSave={trackSave}
               />
             );
           })}

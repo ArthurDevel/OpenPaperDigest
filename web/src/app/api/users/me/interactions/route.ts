@@ -60,11 +60,11 @@ export async function POST(
 
     await interactionsService.saveInteractions(user.id, body.events);
 
-    // Extract unique paper UUIDs from expanded/read events only for cluster update
-    // Seen and saved events should not influence preference clusters
+    // Extract unique paper UUIDs from expanded/read/saved events for cluster update
+    // Seen events should not influence preference clusters
     const clusterPaperUuids = [...new Set(
       body.events
-        .filter((e) => e.interactionType === 'expanded' || e.interactionType === 'read')
+        .filter((e) => e.interactionType === 'expanded' || e.interactionType === 'read' || e.interactionType === 'saved')
         .map((e) => e.paperUuid)
     )];
 

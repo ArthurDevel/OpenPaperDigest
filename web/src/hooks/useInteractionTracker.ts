@@ -33,8 +33,8 @@ const INTERACTIONS_ENDPOINT = '/api/users/me/interactions';
 export interface InteractionTrackerReturn {
   /** Track a paper expand event */
   trackExpand: (paperUuid: string) => void;
-  /** Track a paper read event with reading ratio and active reading time */
-  trackRead: (paperUuid: string, readingRatio: number, activeTimeSeconds: number) => void;
+  /** Track a paper read event with word count and active reading time */
+  trackRead: (paperUuid: string, wordCount: number, activeTimeSeconds: number) => void;
   /** Track a paper save event (only fires for non-anonymous users) */
   trackSave: (paperUuid: string) => void;
   /** Track a paper seen event (fired when a paper card scrolls into view) */
@@ -156,11 +156,11 @@ export function useInteractionTracker(): InteractionTrackerReturn {
     });
   }, []);
 
-  const trackRead = useCallback((paperUuid: string, readingRatio: number, activeTimeSeconds: number) => {
+  const trackRead = useCallback((paperUuid: string, wordCount: number, activeTimeSeconds: number) => {
     bufferRef.current.push({
       paperUuid,
       interactionType: 'read',
-      metadata: { readingRatio, activeTimeSeconds },
+      metadata: { wordCount, activeTimeSeconds },
     });
   }, []);
 
