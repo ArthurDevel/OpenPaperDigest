@@ -16,6 +16,7 @@ const TAB_ITEMS: TabItem[] = [
   { href: '/user/requests', label: 'My requests' },
   { href: '/user/activity', label: 'My activity' },
   { href: '/user/personalization', label: 'Personalization' },
+  { href: '/user/interests', label: 'My interests' },
 ];
 
 /**
