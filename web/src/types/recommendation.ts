@@ -31,7 +31,7 @@ export interface InteractionEvent {
   paperUuid: string;
   /** Type of interaction */
   interactionType: InteractionType;
-  /** Optional metadata (e.g. { readingRatio: 0.7 } for 'read' type) */
+  /** Optional metadata (e.g. { wordCount: 450, activeTimeSeconds: 120 } for 'read' type) */
   metadata?: Record<string, unknown>;
 }
 

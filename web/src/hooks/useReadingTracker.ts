@@ -19,8 +19,6 @@ import { useRef, useCallback } from 'react';
 // CONSTANTS
 // ============================================================================
 
-/** Words per minute reading speed assumption */
-const READING_SPEED_WPM = 200;
 /** Activity timeout -- user is "inactive" if no event for this many ms */
 const ACTIVITY_TIMEOUT_MS = 15_000;
 /** Throttle interval for activity event listeners */
@@ -53,19 +51,16 @@ export interface ReadingTrackerResult {
  *
  * @param paperUuid - UUID of the paper being read
  * @param wordCount - Number of words in the summary
- * @param onReadComplete - Callback fired with (paperUuid, readingRatio, activeTimeSeconds) on unmount
+ * @param onReadComplete - Callback fired with (paperUuid, wordCount, activeTimeSeconds) on unmount
  * @returns Object with callback ref to attach to the summary div and active reading state
  */
 export function useReadingTracker(
   paperUuid: string,
   wordCount: number,
-  onReadComplete: (paperUuid: string, readingRatio: number, activeTimeSeconds: number) => void
+  onReadComplete: (paperUuid: string, wordCount: number, activeTimeSeconds: number) => void
 ): ReadingTrackerResult {
   const isActivelyReadingRef = useRef(false);
   const cleanupRef = useRef<(() => void) | null>(null);
-
-  // Expected reading time in ms
-  const expectedReadingTimeMs = (wordCount / READING_SPEED_WPM) * 60 * 1000;
 
   // Callback ref: sets up tracking when element mounts, tears down on unmount
   const ref = useCallback((node: HTMLDivElement | null) => {
@@ -133,10 +128,7 @@ export function useReadingTracker(
 
       // Fire callback if any reading time was accumulated
       if (activeTimeMs > 0) {
-        const ratio = expectedReadingTimeMs > 0
-          ? activeTimeMs / expectedReadingTimeMs
-          : 0;
-        onReadComplete(paperUuid, ratio, Math.round(activeTimeMs / 1000));
+        onReadComplete(paperUuid, wordCount, Math.round(activeTimeMs / 1000));
       }
 
       clearInterval(interval);
@@ -146,7 +138,7 @@ export function useReadingTracker(
       node.removeEventListener('touchstart', handleActivity);
       isActivelyReadingRef.current = false;
     };
-  }, [paperUuid, expectedReadingTimeMs, onReadComplete]);
+  }, [paperUuid, wordCount, onReadComplete]);
 
   return {
     ref,

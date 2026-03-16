@@ -29,6 +29,8 @@ interface PaperCardProps {
   onLoadSummary?: (paperUuid: string) => void;
   /** Callback ref from useReadingTracker to attach to the expanded summary content */
   readingTrackerRef?: ((node: HTMLDivElement | null) => void);
+  /** Callback fired when the user saves a paper to their list */
+  onSave?: (paperUuid: string) => void;
 }
 
 const GENERATE_DURATION_MS = 15_000;
@@ -43,6 +45,7 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
   onToggleExpand,
   onLoadSummary,
   readingTrackerRef,
+  onSave,
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -198,7 +201,7 @@ const PaperCard = React.forwardRef<HTMLDivElement, PaperCardProps>(({
             {/* Action buttons - bottom right corner when expanded */}
             <div className="mt-4 flex items-center justify-end gap-2">
               <CopyMarkdownButton paperUuid={paper.paperUuid} fiveMinuteSummary={summary?.fiveMinuteSummary} />
-              <AddToListButtonMobile paperId={paper.paperUuid} />
+              <AddToListButtonMobile paperId={paper.paperUuid} onSave={onSave} />
 
               {paper.slug && (
                 <button

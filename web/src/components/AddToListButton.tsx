@@ -10,6 +10,7 @@ import { setPostLoginCookie } from '@/lib/postLogin';
 type AddToListButtonProps = {
   paperId: string;
   redirectTo?: string;
+  onSave?: (paperId: string) => void;
 };
 
 /**
@@ -19,7 +20,7 @@ type AddToListButtonProps = {
  * @param redirectTo - URL to redirect to after login (defaults to current path)
  * @returns Add to list button component
  */
-export default function AddToListButton({ paperId, redirectTo }: AddToListButtonProps) {
+export default function AddToListButton({ paperId, redirectTo, onSave }: AddToListButtonProps) {
   const { user } = useSession();
   const router = useRouter();
 
@@ -75,6 +76,7 @@ export default function AddToListButton({ paperId, redirectTo }: AddToListButton
       } else {
         await addPaperToUserList(paperId);
         setIsInList(true);
+        onSave?.(paperId);
       }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Failed to update list';
