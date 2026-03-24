@@ -17,6 +17,7 @@ import type {
   InterestCluster,
   InterestClustersResponse,
 } from '@/types/interests';
+import type { MinimalPaper } from '@/types/paper';
 
 // ============================================================================
 // CONSTANTS
@@ -27,6 +28,9 @@ const MAX_KMEANS_ITERATIONS = 20;
 
 /** Interaction types to include (excludes 'seen') */
 const INCLUDED_INTERACTION_TYPES = ['expanded', 'read', 'saved'];
+
+/** Default number of similar papers to return in search */
+const DEFAULT_SEARCH_LIMIT = 20;
 
 // ============================================================================
 // MAIN HANDLERS
@@ -112,7 +116,7 @@ export async function getInterestClusters(
   // Step 4: Parse embeddings and run k-means
   const embeddings = papers.map((p) => parseEmbeddingString(p.embedding));
   const k = Math.min(maxClusters, papers.length);
-  const assignments = kMeans(embeddings, k);
+  const { assignments, centroids } = kMeans(embeddings, k);
 
   // Step 5: Group papers by cluster assignment
   const clusterMap = new Map<number, ClusteredPaper[]>();
@@ -140,12 +144,106 @@ export async function getInterestClusters(
   // Build response, re-index clusters sequentially (0, 1, 2, ...)
   const clusters: InterestCluster[] = [];
   let idx = 0;
-  for (const [, papers] of clusterMap) {
-    clusters.push({ clusterIndex: idx, papers });
+  for (const [originalIdx, clusterPapers] of clusterMap) {
+    clusters.push({
+      clusterIndex: idx,
+      papers: clusterPapers,
+      centroid: centroids[originalIdx],
+    });
     idx++;
   }
 
   return { clusters, totalPapers: papers.length };
+}
+
+/**
+ * Searches for papers similar to a given centroid embedding,
+ * excluding papers the user has already interacted with.
+ * @param userId - Supabase auth.uid() of the user
+ * @param embedding - Centroid embedding vector to search with
+ * @param limit - Maximum number of results to return
+ * @returns Ranked list of similar papers as MinimalPaper items
+ */
+export async function searchSimilarPapers(
+  userId: string,
+  embedding: number[],
+  limit: number = DEFAULT_SEARCH_LIMIT
+): Promise<MinimalPaper[]> {
+  const supabase = await createClient();
+
+  // Get papers the user has already interacted with (to exclude)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: interactionRows, error: interactionError } = await (supabase
+    .from('user_interactions') as any)
+    .select('paper_uuid')
+    .eq('user_id', userId)
+    .in('interaction_type', INCLUDED_INTERACTION_TYPES);
+
+  if (interactionError) {
+    throw new Error(`Failed to fetch interactions: ${interactionError.message}`);
+  }
+
+  const excludeUuids = [
+    ...new Set(
+      ((interactionRows ?? []) as { paper_uuid: string }[]).map((r) => r.paper_uuid)
+    ),
+  ];
+
+  // Search for similar papers via the existing RPC
+  const vectorString = `[${embedding.join(',')}]`;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase.rpc as any)(
+    'match_papers_by_embedding',
+    {
+      query_embedding: vectorString,
+      match_count: limit,
+      exclude_uuids: excludeUuids,
+    }
+  );
+
+  if (error) {
+    throw new Error(`match_papers_by_embedding RPC failed: ${error.message}`);
+  }
+
+  const rows = (data ?? []) as {
+    paper_uuid: string;
+    title: string | null;
+    authors: string | null;
+    similarity: number;
+  }[];
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  // Fetch slugs and thumbnails in parallel
+  const uuids = rows.map((r) => r.paper_uuid);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [slugsResult, thumbnailMap] = await Promise.all([
+    (supabase.from('paper_slugs') as any)
+      .select('paper_uuid, slug')
+      .in('paper_uuid', uuids),
+    getPaperThumbnailUrls(uuids),
+  ]);
+
+  if (slugsResult.error) {
+    throw new Error(`Failed to fetch slugs: ${slugsResult.error.message}`);
+  }
+
+  const slugMap = new Map<string, string>();
+  for (const s of (slugsResult.data ?? []) as { paper_uuid: string; slug: string }[]) {
+    slugMap.set(s.paper_uuid, s.slug);
+  }
+
+  return rows.map((row) => ({
+    paperUuid: row.paper_uuid,
+    title: row.title,
+    authors: row.authors,
+    slug: slugMap.get(row.paper_uuid) ?? null,
+    thumbnailUrl: thumbnailMap.get(row.paper_uuid) ?? null,
+  }));
 }
 
 // ============================================================================
@@ -153,18 +251,31 @@ export async function getInterestClusters(
 // ============================================================================
 
 /**
+ * Result of k-means clustering.
+ */
+interface KMeansResult {
+  /** Cluster assignment for each embedding (index into centroids) */
+  assignments: number[];
+  /** Final centroid vectors */
+  centroids: number[][];
+}
+
+/**
  * Runs k-means clustering on a set of embedding vectors.
  * Uses k-means++ initialization and Lloyd's algorithm.
  * @param embeddings - Array of embedding vectors (all same dimensionality)
  * @param k - Number of clusters to create
- * @returns Array of cluster assignments (one index per embedding)
+ * @returns Cluster assignments and final centroid vectors
  */
-function kMeans(embeddings: number[][], k: number): number[] {
+function kMeans(embeddings: number[][], k: number): KMeansResult {
   const n = embeddings.length;
 
   if (k >= n) {
     // Each paper gets its own cluster
-    return embeddings.map((_, i) => i);
+    return {
+      assignments: embeddings.map((_, i) => i),
+      centroids: embeddings.map((e) => [...e]),
+    };
   }
 
   // K-means++ initialization
@@ -221,7 +332,7 @@ function kMeans(embeddings: number[][], k: number): number[] {
     }
   }
 
-  return assignments;
+  return { assignments, centroids };
 }
 
 /**

@@ -15,7 +15,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useSession } from '@/services/auth';
-import { Loader } from 'lucide-react';
+import { Loader, Search } from 'lucide-react';
 import type { InterestCluster } from '@/types/interests';
 
 // ============================================================================
@@ -93,6 +93,15 @@ export default function UserInterestsPage(): React.JSX.Element {
     setMaxClusters(parseInt(e.target.value, 10));
   };
 
+  /**
+   * Stores a cluster's centroid in sessionStorage and opens the discover page in a new tab.
+   * @param centroid - The cluster centroid embedding vector
+   */
+  const handleFindSimilar = (centroid: number[]): void => {
+    sessionStorage.setItem('interestSearchCentroid', JSON.stringify(centroid));
+    window.open('/discover', '_blank');
+  };
+
   // ============================================================================
   // RENDER
   // ============================================================================
@@ -150,7 +159,11 @@ export default function UserInterestsPage(): React.JSX.Element {
       ) : (
         <div className="space-y-6">
           {clusters.map((cluster) => (
-            <ClusterSection key={cluster.clusterIndex} cluster={cluster} />
+            <ClusterSection
+              key={cluster.clusterIndex}
+              cluster={cluster}
+              onFindSimilar={handleFindSimilar}
+            />
           ))}
         </div>
       )}
@@ -163,11 +176,18 @@ export default function UserInterestsPage(): React.JSX.Element {
 // ============================================================================
 
 /**
- * Renders a single cluster as a section with a heading and a grid of paper cards.
+ * Renders a single cluster as a section with a heading, search button, and a grid of paper cards.
  * @param cluster - The cluster data to display
- * @returns Section with cluster heading and paper grid
+ * @param onFindSimilar - Callback to trigger similar paper search for this cluster's centroid
+ * @returns Section with cluster heading, search button, and paper grid
  */
-function ClusterSection({ cluster }: { cluster: InterestCluster }): React.JSX.Element {
+function ClusterSection({
+  cluster,
+  onFindSimilar,
+}: {
+  cluster: InterestCluster;
+  onFindSimilar: (centroid: number[]) => void;
+}): React.JSX.Element {
   return (
     <div>
       <div className="flex items-center gap-2 mb-2">
@@ -177,6 +197,13 @@ function ClusterSection({ cluster }: { cluster: InterestCluster }): React.JSX.El
         <span className="text-xs text-gray-400 dark:text-gray-500">
           ({cluster.papers.length} {cluster.papers.length === 1 ? 'paper' : 'papers'})
         </span>
+        <button
+          onClick={() => onFindSimilar(cluster.centroid)}
+          className="ml-2 flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 transition-colors"
+        >
+          <Search className="w-3 h-3" />
+          Find similar papers
+        </button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {cluster.papers.map((paper) => {

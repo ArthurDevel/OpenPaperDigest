@@ -7,7 +7,7 @@
  * Responsibilities:
  * - Define the shape of a clustered paper for display
  * - Define the cluster grouping structure
- * - Define the API response shape
+ * - Define the API response shape for clustering
  */
 
 // ============================================================================
@@ -38,6 +38,8 @@ export interface InterestCluster {
   clusterIndex: number;
   /** Papers assigned to this cluster */
   papers: ClusteredPaper[];
+  /** Centroid embedding vector for similarity search */
+  centroid: number[];
 }
 
 /**
