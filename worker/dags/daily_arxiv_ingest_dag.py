@@ -64,6 +64,26 @@ def database_session():
         session.close()
 
 
+def build_arxiv_classification_dict(paper: Dict) -> Dict:
+    """
+    Build the classification JSONB dict from arXiv metadata fields.
+    Only includes keys that have non-empty values.
+
+    @param paper: Dict with optional 'categories', 'doi', 'journal_ref' keys
+    @returns Dict suitable for the classification JSONB column
+    """
+    classification = {}
+    categories = paper.get('categories')
+    if categories:
+        classification['arxiv_categories'] = categories
+        classification['arxiv_primary_category'] = categories[0]
+    if paper.get('doi'):
+        classification['arxiv_doi'] = paper['doi']
+    if paper.get('journal_ref'):
+        classification['arxiv_journal_ref'] = paper['journal_ref']
+    return classification
+
+
 def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dict]:
     """
     Query arXiv API for recent cs.* papers, sorted by submission date.
@@ -135,11 +155,25 @@ def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dic
                     author_names.append(name_elem.text.strip())
             authors_str = ', '.join(author_names) if author_names else None
 
+            # Extract categories, DOI, and journal_ref from XML entry
+            categories = [
+                c.attrib.get('term', '')
+                for c in entry.findall('atom:category', ns)
+                if c.attrib.get('term')
+            ]
+            doi_elem = entry.find('arxiv:doi', ns)
+            doi = (doi_elem.text or '').strip() if doi_elem is not None and doi_elem.text else None
+            journal_ref_elem = entry.find('arxiv:journal_ref', ns)
+            journal_ref = (journal_ref_elem.text or '').strip() if journal_ref_elem is not None and journal_ref_elem.text else None
+
             all_papers.append({
                 'arxiv_id': base_id,
                 'title': title,
                 'authors_str': authors_str,
                 'abstract': abstract,
+                'categories': categories,
+                'doi': doi,
+                'journal_ref': journal_ref,
             })
 
         # If we got fewer results than requested, we've reached the end
@@ -327,6 +361,13 @@ def daily_arxiv_ingest_dag():
                     )
                     added += 1
                     print(f'  Added {arxiv_id}: {title[:70]}...')
+
+                    # Write arXiv classification metadata to the paper record
+                    classification_dict = build_arxiv_classification_dict(paper)
+                    if classification_dict:
+                        session.query(PaperRecord).filter(
+                            PaperRecord.paper_uuid == paper_dto.paper_uuid
+                        ).update({"classification": classification_dict})
 
                 except ValueError as e:
                     if 'already exists' in str(e):

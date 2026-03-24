@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Float, Boolean, Index, JSON, Date
+from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
 
 from shared.db import Base
@@ -43,6 +44,14 @@ class PaperRecord(Base):
     abstract = Column(Text, nullable=True)
     # Pre-computed scoring signals (e.g. {"max_author_h_index": 42})
     signals = Column(JSON, nullable=True)
+    # Semantic Scholar enrichment columns
+    s2_ids = Column(JSONB, nullable=True)
+    s2_metrics = Column(JSONB, nullable=True)
+    classification = Column(JSONB, nullable=True)
+    publication_info = Column(JSONB, nullable=True)
+    s2_tldr = Column(Text, nullable=True)
+    # 768-dim SPECTER v2 embedding from Semantic Scholar
+    s2_embedding = Column(Vector(768), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("paper_uuid", name="uq_papers_paper_uuid"),

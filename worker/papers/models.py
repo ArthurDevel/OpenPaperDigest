@@ -84,10 +84,16 @@ class Paper(BaseModel):
 
     # Pre-computed scoring signals (e.g. {"max_author_h_index": 42, "hf_upvotes": 10})
     signals: Dict[str, Any] = Field(default_factory=dict)
+    # Semantic Scholar enrichment fields
+    s2_ids: Dict[str, Any] = Field(default_factory=dict)
+    s2_metrics: Dict[str, Any] = Field(default_factory=dict)
+    classification: Dict[str, Any] = Field(default_factory=dict)
+    publication_info: Dict[str, Any] = Field(default_factory=dict)
+    s2_tldr: Optional[str] = None
 
-    @field_validator('signals', mode='before')
+    @field_validator('signals', 's2_ids', 's2_metrics', 'classification', 'publication_info', mode='before')
     @classmethod
-    def _deserialize_signals(cls, value: Union[str, Dict, None]) -> Dict[str, Any]:
+    def _deserialize_jsonb(cls, value: Union[str, Dict, None]) -> Dict[str, Any]:
         """Handle JSON string deserialization from database."""
         if value is None:
             return {}
@@ -125,6 +131,11 @@ class Paper(BaseModel):
             signals=self.signals,
             content_hash=self.content_hash,
             pdf_url=self.pdf_url,
+            s2_ids=self.s2_ids,
+            s2_metrics=self.s2_metrics,
+            classification=self.classification,
+            publication_info=self.publication_info,
+            s2_tldr=self.s2_tldr,
         )
     
     class Config:

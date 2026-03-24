@@ -34,7 +34,7 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./data/paperjsons:/app/data/paperjsons
+      - paperjsons:/app/data/paperjsons
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
@@ -55,9 +55,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./worker/dags:/opt/airflow/dags
-      - ./worker/logs:/opt/airflow/logs
-      - ./data/paperjsons:/app/data/paperjsons
+      - airflow-logs:/opt/airflow/logs
+      - paperjsons:/app/data/paperjsons
     depends_on:
       airflow-postgres:
         condition: service_healthy
@@ -90,7 +89,7 @@ services:
       POSTGRES_USER: umami
       POSTGRES_PASSWORD: umami
     volumes:
-      - ./data/umami-postgres:/var/lib/postgresql/data
+      - umami-postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U umami"]
       interval: 5s
@@ -109,7 +108,7 @@ services:
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
     volumes:
-      - ./data/airflow-postgres:/var/lib/postgresql/data
+      - airflow-postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 5s
@@ -117,4 +116,7 @@ services:
       retries: 5
 
 volumes:
+  paperjsons:
+  airflow-logs:
   airflow-postgres:
+  umami-postgres:
