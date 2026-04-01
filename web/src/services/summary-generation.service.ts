@@ -118,30 +118,38 @@ export async function generateSummaryForPaper(paperUuid: string): Promise<Genera
   // Step 2: Build messages for LLM -- use PDF URL for v2 papers, fallback to content.md for v1
   const pdfUrl = existingPaper.pdf_url || (existingPaper.arxiv_id ? `https://arxiv.org/pdf/${existingPaper.arxiv_id}` : null);
 
-  let messages: OpenRouterMessage[];
-  let plugins: Plugin[] | undefined;
+  let response;
 
   if (pdfUrl) {
-    // v2 pipeline: send PDF via file content type with native engine
-    messages = [
-      { role: 'system', content: SUMMARY_PROMPT },
-      { role: 'user', content: [
-        { type: 'text', text: 'Please summarize this research paper.' },
-        { type: 'file', file: { filename: 'paper.pdf', file_data: pdfUrl } },
-      ] },
-    ];
-    plugins = [{ id: 'file-parser', pdf: { engine: 'native' } }];
+    // v2 pipeline: try PDF via file content type with native engine, fall back to content.md
+    try {
+      const pdfMessages: OpenRouterMessage[] = [
+        { role: 'system', content: SUMMARY_PROMPT },
+        { role: 'user', content: [
+          { type: 'text', text: 'Please summarize this research paper.' },
+          { type: 'file', file: { filename: 'paper.pdf', file_data: pdfUrl } },
+        ] },
+      ];
+      const pdfPlugins: Plugin[] = [{ id: 'file-parser', pdf: { engine: 'native' } }];
+      response = await chatCompletion(pdfMessages, FLASH_MODEL, pdfPlugins);
+    } catch (pdfError) {
+      console.warn(`[Summary] PDF pipeline failed for ${paperUuid}, falling back to content.md:`, pdfError instanceof Error ? pdfError.message : pdfError);
+      const contentMarkdown = await downloadPaperMarkdown(paperUuid);
+      const fallbackMessages: OpenRouterMessage[] = [
+        { role: 'system', content: SUMMARY_PROMPT },
+        { role: 'user', content: contentMarkdown },
+      ];
+      response = await chatCompletion(fallbackMessages, FLASH_MODEL);
+    }
   } else {
     // v1 fallback: download content.md from Supabase Storage
     const contentMarkdown = await downloadPaperMarkdown(paperUuid);
-    messages = [
+    const messages: OpenRouterMessage[] = [
       { role: 'system', content: SUMMARY_PROMPT },
       { role: 'user', content: contentMarkdown },
     ];
+    response = await chatCompletion(messages, FLASH_MODEL);
   }
-
-  // Step 3: Generate summary via Gemini 3 Flash
-  const response = await chatCompletion(messages, FLASH_MODEL, plugins);
 
   const generatedSummary = response.text;
 

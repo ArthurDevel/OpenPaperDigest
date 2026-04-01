@@ -94,6 +94,7 @@ export async function chatCompletion(
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    let retryable = true;
     try {
       const response = await fetch(OPENROUTER_API_URL, {
         method: 'POST',
@@ -107,13 +108,25 @@ export async function chatCompletion(
 
       if (!response.ok) {
         const errorBody = await response.text();
+        if (response.status >= 400 && response.status < 500) retryable = false;
         throw new Error(`OpenRouter API error ${response.status}: ${errorBody}`);
       }
 
       const data = await response.json();
+
+      // OpenRouter sometimes returns errors with HTTP 200
+      if (data.error) {
+        const errMsg = data.error.message || JSON.stringify(data.error);
+        const code = data.error.code ?? 0;
+        console.error(`[OpenRouter] API error (code ${code}): ${errMsg}`);
+        if (code >= 400 && code < 500) retryable = false;
+        throw new Error(`OpenRouter API error: ${errMsg}`);
+      }
+
       const choice = data.choices?.[0];
 
       if (!choice?.message?.content) {
+        console.error('[OpenRouter] Empty content. Full response:', JSON.stringify(data, null, 2));
         throw new Error('OpenRouter returned empty response');
       }
 
@@ -125,6 +138,8 @@ export async function chatCompletion(
       };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (!retryable) break;
 
       if (attempt < MAX_RETRIES - 1) {
         const delay = BASE_DELAY_MS * Math.pow(2, attempt);
