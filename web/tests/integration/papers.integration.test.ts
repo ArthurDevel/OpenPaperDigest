@@ -495,9 +495,16 @@ describe('Papers API - Paper by UUID', () => {
   });
 
   describe('GET /api/papers/[uuid]/markdown', () => {
-    it('returns 404 for non-existent paper', async () => {
-      mockQueryReturns(null);
+    // COMMENTED OUT: "Copy Full Document" depends on content.md which v2 pipeline papers don't have.
+    // This was too expensive to regenerate for v2. Bring back once we have an affordable alternative.
+    // it('returns 404 for non-existent paper', async () => {
+    //   ...
+    // });
+    // it('returns markdown for existing paper', async () => {
+    //   ...
+    // });
 
+    it('returns 410 Gone since markdown endpoint is disabled', async () => {
       const appHandler = await import('@/app/api/papers/[uuid]/markdown/route');
       const uuid = generateTestUuid();
 
@@ -507,33 +514,10 @@ describe('Papers API - Paper by UUID', () => {
         test: async ({ fetch }) => {
           const response = await fetch({ method: 'GET' });
 
-          expect(response.status).toBe(404);
+          expect(response.status).toBe(410);
 
           const data = await response.json();
-          expect(data).toHaveProperty('error');
-        },
-      });
-    });
-
-    it('returns markdown for existing paper', async () => {
-      mockQueryReturns({
-        processed_content: JSON.stringify({ final_markdown: '# Test Markdown' }),
-      });
-
-      const appHandler = await import('@/app/api/papers/[uuid]/markdown/route');
-      const uuid = generateTestUuid();
-
-      await testApiHandler({
-        appHandler,
-        params: { uuid },
-        test: async ({ fetch }) => {
-          const response = await fetch({ method: 'GET' });
-
-          expect(response.status).toBe(200);
-
-          // Markdown is returned as plain text, not JSON
-          const text = await response.text();
-          expect(text).toBe('# Test Markdown');
+          expect(data.error).toContain('temporarily disabled');
         },
       });
     });

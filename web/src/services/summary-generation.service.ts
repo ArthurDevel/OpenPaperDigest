@@ -6,15 +6,14 @@
  *
  * Responsibilities:
  * - Check if summary already exists (early return)
- * - For v2 papers: send PDF URL via file content type to LLM
- * - For v1 papers (fallback): download content.md from Supabase Storage
+ * - Send PDF URL via file content type to LLM
+ * - On provider failure: download PDF as base64 and retry
  * - Generate summary via LLM
  * - Atomically save summary (race-safe via set_paper_summary_if_null RPC)
  */
 
 import { createClient } from '@/lib/supabase/server';
-import { downloadPaperMarkdown } from '@/lib/supabase/storage';
-import { chatCompletion } from '@/lib/openrouter';
+import { chatCompletion, downloadPdfAsBase64 } from '@/lib/openrouter';
 import type { OpenRouterMessage, Plugin } from '@/lib/openrouter';
 
 // ============================================================================
@@ -115,13 +114,15 @@ export async function generateSummaryForPaper(paperUuid: string): Promise<Genera
     return { summary: existingSummary, alreadyExisted: true };
   }
 
-  // Step 2: Build messages for LLM -- use PDF URL for v2 papers, fallback to content.md for v1
+  // Step 2: Build messages for LLM -- use PDF URL, fall back to base64 PDF on provider failure
   const pdfUrl = existingPaper.pdf_url || (existingPaper.arxiv_id ? `https://arxiv.org/pdf/${existingPaper.arxiv_id}` : null);
 
   let response;
 
   if (pdfUrl) {
-    // v2 pipeline: try PDF via file content type with native engine, fall back to content.md
+    // Try PDF via file content type with native engine, fall back to base64 PDF
+    const pdfPlugins: Plugin[] = [{ id: 'file-parser', pdf: { engine: 'native' } }];
+
     try {
       const pdfMessages: OpenRouterMessage[] = [
         { role: 'system', content: SUMMARY_PROMPT },
@@ -130,25 +131,23 @@ export async function generateSummaryForPaper(paperUuid: string): Promise<Genera
           { type: 'file', file: { filename: 'paper.pdf', file_data: pdfUrl } },
         ] },
       ];
-      const pdfPlugins: Plugin[] = [{ id: 'file-parser', pdf: { engine: 'native' } }];
       response = await chatCompletion(pdfMessages, FLASH_MODEL, pdfPlugins);
     } catch (pdfError) {
-      console.warn(`[Summary] PDF pipeline failed for ${paperUuid}, falling back to content.md:`, pdfError instanceof Error ? pdfError.message : pdfError);
-      const contentMarkdown = await downloadPaperMarkdown(paperUuid);
+      // OpenRouter failed to fetch the PDF by URL (e.g. large file timeout) -- falling back to base64 PDF
+      console.warn(`[Summary] PDF pipeline failed for ${paperUuid}, falling back to base64 PDF:`, pdfError instanceof Error ? pdfError.message : pdfError);
+
+      const base64DataUri = await downloadPdfAsBase64(pdfUrl);
       const fallbackMessages: OpenRouterMessage[] = [
         { role: 'system', content: SUMMARY_PROMPT },
-        { role: 'user', content: contentMarkdown },
+        { role: 'user', content: [
+          { type: 'text', text: 'Please summarize this research paper.' },
+          { type: 'file', file: { filename: 'paper.pdf', file_data: base64DataUri } },
+        ] },
       ];
-      response = await chatCompletion(fallbackMessages, FLASH_MODEL);
+      response = await chatCompletion(fallbackMessages, FLASH_MODEL, pdfPlugins);
     }
   } else {
-    // v1 fallback: download content.md from Supabase Storage
-    const contentMarkdown = await downloadPaperMarkdown(paperUuid);
-    const messages: OpenRouterMessage[] = [
-      { role: 'system', content: SUMMARY_PROMPT },
-      { role: 'user', content: contentMarkdown },
-    ];
-    response = await chatCompletion(messages, FLASH_MODEL);
+    throw new Error('No PDF URL available for paper');
   }
 
   const generatedSummary = response.text;

@@ -15,6 +15,8 @@
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
+const PDF_MAX_SIZE_BYTES = 50 * 1024 * 1024;
+const PDF_DOWNLOAD_TIMEOUT_MS = 60_000;
 
 // ============================================================================
 // INTERFACES
@@ -149,4 +151,47 @@ export async function chatCompletion(
   }
 
   throw lastError ?? new Error('OpenRouter request failed after retries');
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Download a PDF from a URL and return it as a base64 data URI string.
+ * Validates Content-Type is application/pdf, enforces 50MB max size,
+ * and uses a 60s timeout via AbortController.
+ *
+ * @param url - URL of the PDF to download
+ * @returns Base64 data URI string (data:application/pdf;base64,...)
+ */
+export async function downloadPdfAsBase64(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PDF_DOWNLOAD_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+
+    if (!response.ok) {
+      throw new Error(`PDF download failed with status ${response.status}`);
+    }
+
+    // Validate content type
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!contentType.includes('application/pdf')) {
+      throw new Error(`Expected application/pdf but got ${contentType}`);
+    }
+
+    // Download body and enforce size limit
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > PDF_MAX_SIZE_BYTES) {
+      throw new Error(`PDF exceeds max size: ${buffer.byteLength} bytes (limit ${PDF_MAX_SIZE_BYTES})`);
+    }
+
+    // Convert to base64 data URI
+    const base64 = Buffer.from(buffer).toString('base64');
+    return `data:application/pdf;base64,${base64}`;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }

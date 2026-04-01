@@ -15,7 +15,9 @@ import {
   getPaperThumbnailUrl,
   getPaperFigureUrl,
   downloadPaperContent,
-  downloadPaperMarkdown,
+  // COMMENTED OUT: "Copy Full Document" depends on content.md which v2 pipeline papers don't have.
+  // This was too expensive to regenerate for v2. Bring back once we have an affordable alternative.
+  // downloadPaperMarkdown,
   deletePaperAssets,
 } from '@/lib/supabase/storage';
 import type {
@@ -204,29 +206,31 @@ export async function getPaperSummary(uuid: string): Promise<PaperSummary> {
   };
 }
 
-/**
- * Get the raw markdown content for a paper from Supabase Storage.
- * @param uuid - The paper UUID
- * @returns Markdown string or throws if not found
- */
-export async function getPaperMarkdown(uuid: string): Promise<string> {
-  const supabase = await createClient();
-
-  // Verify paper exists in DB
-  const { data, error } = await supabase
-    .from('papers')
-    .select('paper_uuid')
-    .eq('paper_uuid', uuid)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-
-  if (!data) {
-    throw new Error(`Paper not found: ${uuid}`);
-  }
-
-  return downloadPaperMarkdown(uuid);
-}
+// COMMENTED OUT: "Copy Full Document" depends on content.md which v2 pipeline papers don't have.
+// This was too expensive to regenerate for v2. Bring back once we have an affordable alternative.
+// /**
+//  * Get the raw markdown content for a paper from Supabase Storage.
+//  * @param uuid - The paper UUID
+//  * @returns Markdown string or throws if not found
+//  */
+// export async function getPaperMarkdown(uuid: string): Promise<string> {
+//   const supabase = await createClient();
+//
+//   // Verify paper exists in DB
+//   const { data, error } = await supabase
+//     .from('papers')
+//     .select('paper_uuid')
+//     .eq('paper_uuid', uuid)
+//     .maybeSingle();
+//
+//   if (error) throw new Error(error.message);
+//
+//   if (!data) {
+//     throw new Error(`Paper not found: ${uuid}`);
+//   }
+//
+//   return downloadPaperMarkdown(uuid);
+// }
 
 /**
  * Get the full processed content JSON for a paper.

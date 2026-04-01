@@ -155,19 +155,25 @@ vi.mock('@/lib/supabase/storage', () => ({
   getPaperThumbnailUrl: vi.fn(async (uuid: string) => `https://storage.test/papers/${uuid}/thumbnail.png`),
   getPaperFigureUrl: vi.fn(async (_uuid: string, figureId: string) => `https://storage.test/papers/${_uuid}/figures/${figureId}.png`),
   downloadPaperContent: vi.fn(),
-  downloadPaperMarkdown: vi.fn(),
+  // COMMENTED OUT: "Copy Full Document" depends on content.md which v2 pipeline papers don't have.
+  // This was too expensive to regenerate for v2. Bring back once we have an affordable alternative.
+  // downloadPaperMarkdown: vi.fn(),
   deletePaperAssets: vi.fn(),
 }));
 
 import {
   getPaperSummary,
-  getPaperMarkdown,
+  // COMMENTED OUT: "Copy Full Document" depends on content.md which v2 pipeline papers don't have.
+  // This was too expensive to regenerate for v2. Bring back once we have an affordable alternative.
+  // getPaperMarkdown,
   checkArxivExists,
   enqueueArxiv,
   listMinimalPapers,
   restartPaper,
 } from './papers.service';
-import { downloadPaperMarkdown } from '@/lib/supabase/storage';
+// COMMENTED OUT: "Copy Full Document" depends on content.md which v2 pipeline papers don't have.
+// This was too expensive to regenerate for v2. Bring back once we have an affordable alternative.
+// import { downloadPaperMarkdown } from '@/lib/supabase/storage';
 
 // ============================================================================
 // TESTS
@@ -257,31 +263,33 @@ describe('papers.service', () => {
     });
   });
 
+  // COMMENTED OUT: "Copy Full Document" depends on content.md which v2 pipeline papers don't have.
+  // This was too expensive to regenerate for v2. Bring back once we have an affordable alternative.
   // --------------------------------------------------------------------------
   // getPaperMarkdown - Markdown from Supabase Storage
   // --------------------------------------------------------------------------
-  describe('getPaperMarkdown', () => {
-    it('returns markdown from storage when paper exists', async () => {
-      mockMaybeSingle.mockResolvedValue({
-        data: { paper_uuid: 'test-uuid' },
-        error: null,
-      });
-      vi.mocked(downloadPaperMarkdown).mockResolvedValue('# Paper Title\n\nContent here.');
-
-      const result = await getPaperMarkdown('test-uuid');
-
-      expect(result).toBe('# Paper Title\n\nContent here.');
-      expect(downloadPaperMarkdown).toHaveBeenCalledWith('test-uuid');
-    });
-
-    it('throws when paper not found in DB', async () => {
-      mockMaybeSingle.mockResolvedValue({ data: null, error: null });
-
-      await expect(getPaperMarkdown('nonexistent')).rejects.toThrow(
-        'Paper not found: nonexistent'
-      );
-    });
-  });
+  // describe('getPaperMarkdown', () => {
+  //   it('returns markdown from storage when paper exists', async () => {
+  //     mockMaybeSingle.mockResolvedValue({
+  //       data: { paper_uuid: 'test-uuid' },
+  //       error: null,
+  //     });
+  //     vi.mocked(downloadPaperMarkdown).mockResolvedValue('# Paper Title\n\nContent here.');
+  //
+  //     const result = await getPaperMarkdown('test-uuid');
+  //
+  //     expect(result).toBe('# Paper Title\n\nContent here.');
+  //     expect(downloadPaperMarkdown).toHaveBeenCalledWith('test-uuid');
+  //   });
+  //
+  //   it('throws when paper not found in DB', async () => {
+  //     mockMaybeSingle.mockResolvedValue({ data: null, error: null });
+  //
+  //     await expect(getPaperMarkdown('nonexistent')).rejects.toThrow(
+  //       'Paper not found: nonexistent'
+  //     );
+  //   });
+  // });
 
   // --------------------------------------------------------------------------
   // checkArxivExists - Check if arXiv paper exists and is completed
