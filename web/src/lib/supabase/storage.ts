@@ -195,37 +195,39 @@ export async function downloadPaperContent(paperUuid: string): Promise<StoredPap
   };
 }
 
-/**
- * Download only the markdown content for a paper.
- * Checks metadata.json for pipeline_version first:
- * - v2 papers: returns empty string (no content.md exists)
- * - v1 papers: downloads and returns content.md
- * @param paperUuid - Unique identifier for the paper
- * @returns The raw markdown string from content.md, or empty string for v2 papers
- */
-export async function downloadPaperMarkdown(paperUuid: string): Promise<string> {
-  const supabase = getServiceClient();
-  const bucket = supabase.storage.from(BUCKET_NAME);
-
-  // Check pipeline version from metadata
-  const metadataResult = await bucket.download(`${paperUuid}/metadata.json`);
-  if (metadataResult.data) {
-    const metadataText = await metadataResult.data.text();
-    const metadata = JSON.parse(metadataText) as Record<string, unknown>;
-    if (metadata.pipeline_version === 2) {
-      return '';
-    }
-  }
-
-  // v1 pipeline: download content.md
-  const { data, error } = await bucket.download(`${paperUuid}/content.md`);
-
-  if (error || !data) {
-    throw new Error(`Failed to download content.md for paper ${paperUuid}: ${error?.message}`);
-  }
-
-  return data.text();
-}
+// COMMENTED OUT: "Copy Full Document" depends on content.md which v2 pipeline papers don't have.
+// This was too expensive to regenerate for v2. Bring back once we have an affordable alternative.
+// /**
+//  * Download only the markdown content for a paper.
+//  * Checks metadata.json for pipeline_version first:
+//  * - v2 papers: returns empty string (no content.md exists)
+//  * - v1 papers: downloads and returns content.md
+//  * @param paperUuid - Unique identifier for the paper
+//  * @returns The raw markdown string from content.md, or empty string for v2 papers
+//  */
+// export async function downloadPaperMarkdown(paperUuid: string): Promise<string> {
+//   const supabase = getServiceClient();
+//   const bucket = supabase.storage.from(BUCKET_NAME);
+//
+//   // Check pipeline version from metadata
+//   const metadataResult = await bucket.download(`${paperUuid}/metadata.json`);
+//   if (metadataResult.data) {
+//     const metadataText = await metadataResult.data.text();
+//     const metadata = JSON.parse(metadataText) as Record<string, unknown>;
+//     if (metadata.pipeline_version === 2) {
+//       return '';
+//     }
+//   }
+//
+//   // v1 pipeline: download content.md
+//   const { data, error } = await bucket.download(`${paperUuid}/content.md`);
+//
+//   if (error || !data) {
+//     throw new Error(`Failed to download content.md for paper ${paperUuid}: ${error?.message}`);
+//   }
+//
+//   return data.text();
+// }
 
 // ============================================================================
 // DELETE HELPERS

@@ -1,0 +1,12 @@
+{
+  "name": "openrouter-pdf-debug",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "tsx test-openrouter-pdf.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "tsx": "^4.19.3"
+  }
+}

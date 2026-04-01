@@ -284,19 +284,21 @@ export async function countPapersSince(since: string): Promise<CountPapersSinceR
   return response.json();
 }
 
-/**
- * Fetch the full markdown content for a paper.
- * @param paperUuid - Paper UUID
- * @returns Final markdown string
- */
-export async function fetchPaperMarkdown(paperUuid: string): Promise<string> {
-  const response = await fetch(`${API_URL}/papers/${paperUuid}/markdown`);
-  if (!response.ok) {
-    await handleErrorResponse(response);
-  }
-  const data = await response.json();
-  return data.finalMarkdown;
-}
+// COMMENTED OUT: "Copy Full Document" depends on content.md which v2 pipeline papers don't have.
+// This was too expensive to regenerate for v2. Bring back once we have an affordable alternative.
+// /**
+//  * Fetch the full markdown content for a paper.
+//  * @param paperUuid - Paper UUID
+//  * @returns Final markdown string
+//  */
+// export async function fetchPaperMarkdown(paperUuid: string): Promise<string> {
+//   const response = await fetch(`${API_URL}/papers/${paperUuid}/markdown`);
+//   if (!response.ok) {
+//     await handleErrorResponse(response);
+//   }
+//   const data = await response.json();
+//   return data.finalMarkdown;
+// }
 
 /**
  * Fetch the summary for a paper.
