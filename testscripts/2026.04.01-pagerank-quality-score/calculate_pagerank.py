@@ -34,8 +34,13 @@ PAGERANK_MAX_ITER = 100
 
 def main() -> None:
     """Main entrypoint: load data, build graph, run PageRank, output results."""
-    # Step 1: Load data
-    edges_data = load_json(os.path.join(OUTPUT_DIR, "citation_edges.json"))
+    # Step 1: Load data (prefer expanded edges if available)
+    expanded_path = os.path.join(OUTPUT_DIR, "citation_edges_expanded.json")
+    original_path = os.path.join(OUTPUT_DIR, "citation_edges.json")
+    edges_path = expanded_path if os.path.exists(expanded_path) else original_path
+    print(f"Using edges file: {os.path.basename(edges_path)}")
+
+    edges_data = load_json(edges_path)
     paper_index = load_json(os.path.join(OUTPUT_DIR, "paper_index.json"))
 
     edges = edges_data["edges"]
@@ -66,6 +71,7 @@ def main() -> None:
 
     # Step 8: Save results
     save_results(sorted_papers, paper_index, in_degrees, metadata, graph)
+    save_our_papers(sorted_papers, paper_index, in_degrees, graph)
 
 
 # ============================================================================
@@ -227,6 +233,68 @@ def save_results(
         json.dump(results, f, indent=2)
 
     print(f"Full results saved to {path}")
+
+
+def save_our_papers(
+    sorted_papers: list[tuple[str, float]],
+    paper_index: dict,
+    in_degrees: dict,
+    graph: nx.DiGraph,
+) -> None:
+    """Save rankings filtered to only our DB papers (JSON + markdown).
+
+    @param sorted_papers: Papers sorted by score descending
+    @param paper_index: Our DB papers
+    @param in_degrees: In-degree counts
+    @param graph: The citation graph
+    """
+    out_degrees = dict(graph.out_degree())
+
+    our_papers = [
+        (paper_id, score)
+        for paper_id, score in sorted_papers
+        if paper_id in paper_index
+    ]
+
+    # JSON
+    json_data = [
+        {
+            "rank": rank,
+            "s2_paper_id": pid,
+            "pagerank_score": score,
+            "cited_by_in_graph": in_degrees.get(pid, 0),
+            "references_in_graph": out_degrees.get(pid, 0),
+            "arxiv_id": paper_index[pid].get("arxiv_id"),
+            "title": paper_index[pid].get("title"),
+        }
+        for rank, (pid, score) in enumerate(our_papers, 1)
+    ]
+
+    json_path = os.path.join(OUTPUT_DIR, "pagerank_our_papers.json")
+    with open(json_path, "w") as f:
+        json.dump(json_data, f, indent=2)
+
+    # Markdown
+    md_lines = [
+        "| Rank | Score | Cited by (in-graph) | References (in-graph) | Paper |",
+        "|------|-------|---------------------|-----------------------|-------|",
+    ]
+    for entry in json_data:
+        title = (entry["title"] or "")[:80]
+        arxiv = entry["arxiv_id"] or ""
+        md_lines.append(
+            f"| {entry['rank']} | {entry['pagerank_score']:.7f} "
+            f"| {entry['cited_by_in_graph']} | {entry['references_in_graph']} "
+            f"| {title} ({arxiv}) |"
+        )
+
+    md_path = os.path.join(OUTPUT_DIR, "pagerank_our_papers.md")
+    with open(md_path, "w") as f:
+        f.write("\n".join(md_lines) + "\n")
+
+    print(f"\nOur papers: {len(our_papers)} ranked")
+    print(f"  JSON: {json_path}")
+    print(f"  Markdown: {md_path}")
 
 
 if __name__ == "__main__":
