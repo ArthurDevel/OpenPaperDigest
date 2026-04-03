@@ -5,6 +5,7 @@ Responsibilities:
 - Define S2Author with Semantic Scholar author stats
 - Define S2PaperAuthors linking arxiv papers to their S2 author IDs
 - Define S2PaperMetadata with comprehensive paper metadata (IDs, metrics, venue, etc.)
+- Define S2PaperReference for citation graph edges (source -> cited)
 - Define supporting dataclasses: S2FieldOfStudy, S2PublicationVenue, S2Journal, S2OpenAccessPdf
 """
 
@@ -30,6 +31,14 @@ class S2PaperAuthors:
     s2_paper_id: str
     arxiv_id: Optional[str] = None
     authors: List[S2Author] = field(default_factory=list)
+
+
+@dataclass
+class S2PaperReference:
+    """A single citation edge: source paper references cited paper."""
+    source_s2_id: str
+    cited_s2_id: str
+    is_influential: Optional[bool] = None
 
 
 # ============================================================================

@@ -1,0 +1,6 @@
+psycopg2-binary
+sqlalchemy
+networkx
+numpy
+requests
+python-dotenv

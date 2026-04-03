@@ -52,6 +52,8 @@ class PaperRecord(Base):
     s2_tldr = Column(Text, nullable=True)
     # 768-dim SPECTER v2 embedding from Semantic Scholar
     s2_embedding = Column(Vector(768), nullable=True)
+    # PageRank score and percentile computed from citation graph
+    pagerank = Column(JSONB, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("paper_uuid", name="uq_papers_paper_uuid"),
@@ -89,6 +91,8 @@ class AuthorRecord(Base):
     h_index = Column(Integer, nullable=True)
     stats_updated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    # PageRank score and percentile computed from citation graph
+    pagerank = Column(JSONB, nullable=True)
 
 
 class PaperAuthorRecord(Base):
@@ -104,6 +108,28 @@ class PaperAuthorRecord(Base):
         UniqueConstraint("paper_id", "author_id", name="uq_paper_authors"),
         Index("ix_paper_authors_paper_id", "paper_id"),
         Index("ix_paper_authors_author_id", "author_id"),
+    )
+
+
+class PaperCitationRecord(Base):
+    """SQLAlchemy model for paper_citations table.
+
+    Stores citation edges between papers using Semantic Scholar paper IDs.
+    - Each row represents one citation: source_s2_id cites cited_s2_id.
+    - Sentinel rows (cited_s2_id = NULL) mark papers whose references have been
+      fetched but returned empty, preventing re-fetching.
+    """
+    __tablename__ = "paper_citations"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source_s2_id = Column(String(64), nullable=False)
+    cited_s2_id = Column(String(64), nullable=True)
+    is_influential = Column(Boolean, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_paper_citations_source_s2_id", "source_s2_id"),
+        Index("ix_paper_citations_cited_s2_id", "cited_s2_id"),
     )
 
 
