@@ -21,7 +21,7 @@ from typing import List, Optional
 import requests
 
 from shared.semantic_scholar.models import (
-    S2Author, S2PaperAuthors, S2PaperMetadata,
+    S2Author, S2PaperAuthors, S2PaperMetadata, S2PaperReference,
     S2FieldOfStudy, S2PublicationVenue, S2Journal, S2OpenAccessPdf,
 )
 
@@ -339,3 +339,48 @@ def fetch_paper_metadata_batch(arxiv_ids: List[str]) -> List[S2PaperMetadata]:
         ))
 
     return metadata_list
+
+
+def fetch_paper_references_batch(s2_paper_ids: List[str]) -> List[S2PaperReference]:
+    """
+    Batch fetch references for multiple papers. Up to 500 raw S2 paper IDs per request.
+    Skips null entries (papers S2 cannot find) and null reference targets within entries.
+    Uses input index to correlate source_s2_id back to input order.
+
+    @param s2_paper_ids: List of raw S2 paper IDs (NOT ARXIV: prefixed)
+    @returns List of S2PaperReference edges
+    """
+    url = f'{S2_API_BASE}/paper/batch'
+    # Note: references.isInfluential is not supported by the batch endpoint
+    # (only BasePaper subfields like paperId are valid). isInfluential is only
+    # available via the single-paper GET /paper/{id}/references endpoint.
+    params = {'fields': 'references.paperId'}
+
+    response = _request_with_retry(
+        'post', url,
+        headers=_get_headers(),
+        params=params,
+        json={'ids': s2_paper_ids},
+        timeout=120,
+    )
+    results = response.json()
+
+    references = []
+    for i, paper_data in enumerate(results):
+        if paper_data is None:
+            continue
+
+        source_id = s2_paper_ids[i]
+        for ref in (paper_data.get('references') or []):
+            if ref is None:
+                continue
+            cited_id = ref.get('paperId')
+            if cited_id is None:
+                continue
+            references.append(S2PaperReference(
+                source_s2_id=source_id,
+                cited_s2_id=cited_id,
+                is_influential=ref.get('isInfluential'),
+            ))
+
+    return references

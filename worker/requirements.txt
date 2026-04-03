@@ -33,6 +33,9 @@ httpx
 aiohttp
 email-validator
 
+# Citation graph pipeline
+networkx
+
 # pgvector support for embedding storage
 pgvector
 
