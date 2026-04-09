@@ -17,7 +17,7 @@ Responsibilities:
 import json
 import sys
 import statistics
-from bisect import bisect_right
+from bisect import bisect_left
 from datetime import datetime
 from typing import Dict, List, Tuple
 
@@ -76,8 +76,9 @@ def compute_pagerank(edges: List[Tuple[str, str]]) -> Dict[str, float]:
 
 def compute_percentiles(scores: Dict[str, float]) -> Dict[str, float]:
     """
-    Compute percentile for each score. Percentile = % of items with score <= this.
-    Uses bisect_right for O(log n) per lookup.
+    Compute percentile rank for each score. Uses bisect_left so tied scores
+    get the lowest rank in the group. The top score maps to 100, the bottom
+    to 0 (when total > 1).
 
     @param scores: Dict mapping id to score
     @returns Dict mapping id to percentile (0-100)
@@ -88,10 +89,13 @@ def compute_percentiles(scores: Dict[str, float]) -> Dict[str, float]:
     sorted_scores = sorted(scores.values())
     total = len(sorted_scores)
 
+    if total == 1:
+        return {key: 100.0 for key in scores}
+
     percentiles = {}
     for key, score in scores.items():
-        rank = bisect_right(sorted_scores, score)
-        percentiles[key] = rank / total * 100
+        rank = bisect_left(sorted_scores, score)
+        percentiles[key] = rank / (total - 1) * 100
 
     return percentiles
 

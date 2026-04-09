@@ -21,8 +21,9 @@ from typing import List, Optional
 import requests
 
 from shared.semantic_scholar.models import (
-    S2Author, S2PaperAuthors, S2PaperMetadata, S2PaperReference,
-    S2FieldOfStudy, S2PublicationVenue, S2Journal, S2OpenAccessPdf,
+    S2Author, S2PaperAuthors, S2PaperCitation, S2PaperMetadata,
+    S2PaperReference, S2FieldOfStudy, S2PublicationVenue, S2Journal,
+    S2OpenAccessPdf,
 )
 
 logger = logging.getLogger(__name__)
@@ -384,3 +385,45 @@ def fetch_paper_references_batch(s2_paper_ids: List[str]) -> List[S2PaperReferen
             ))
 
     return references
+
+
+def fetch_paper_citations_batch(s2_paper_ids: List[str]) -> List[S2PaperCitation]:
+    """
+    Batch fetch citations (papers that cite these papers). Up to 500 raw S2 paper IDs per request.
+    Skips null entries (papers S2 cannot find) and null citing paper IDs within entries.
+    Uses input index to correlate cited_s2_id back to input order.
+
+    @param s2_paper_ids: List of raw S2 paper IDs (NOT ARXIV: prefixed)
+    @returns List of S2PaperCitation edges
+    """
+    url = f'{S2_API_BASE}/paper/batch'
+    params = {'fields': 'citations.paperId'}
+
+    response = _request_with_retry(
+        'post', url,
+        headers=_get_headers(),
+        params=params,
+        json={'ids': s2_paper_ids},
+        timeout=120,
+    )
+    results = response.json()
+
+    citations = []
+    for i, paper_data in enumerate(results):
+        if paper_data is None:
+            continue
+
+        cited_id = s2_paper_ids[i]
+        for cit in (paper_data.get('citations') or []):
+            if cit is None:
+                continue
+            citing_id = cit.get('paperId')
+            if citing_id is None:
+                continue
+            citations.append(S2PaperCitation(
+                cited_s2_id=cited_id,
+                citing_s2_id=citing_id,
+                is_influential=None,
+            ))
+
+    return citations
