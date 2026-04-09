@@ -213,18 +213,22 @@ def write_paper_scores(
     if not updates:
         return 0
 
-    # Batch update using VALUES list + JOIN (single round-trip)
-    values_clause = ', '.join(
-        f"({pid}, '{pr_json}'::jsonb)" for pid, pr_json in updates
-    )
-    batch_sql = f"""
-        UPDATE papers AS p
-        SET pagerank = v.pr
-        FROM (VALUES {values_clause}) AS v(id, pr)
-        WHERE p.id = v.id
-    """
-    session.execute(text(batch_sql))
-    session.commit()
+    # Large single-statement updates can hit Postgres statement_timeout after
+    # the graph grows. Update in batches to keep each statement bounded.
+    for i in range(0, len(updates), BATCH_SIZE):
+        batch = updates[i:i + BATCH_SIZE]
+        values_clause = ', '.join(
+            f"({pid}, '{pr_json}'::jsonb)" for pid, pr_json in batch
+        )
+        batch_sql = f"""
+            UPDATE papers AS p
+            SET pagerank = v.pr
+            FROM (VALUES {values_clause}) AS v(id, pr)
+            WHERE p.id = v.id
+        """
+        session.execute(text(batch_sql))
+        session.commit()
+
     return len(updates)
 
 
@@ -258,19 +262,23 @@ def write_author_scores(
     if not updates:
         return 0
 
-    # Batch update using VALUES list + JOIN (single round-trip)
-    values_clause = ', '.join(
-        f"('{aid}', '{pr_json}'::jsonb)" for aid, pr_json in updates
-    )
-    batch_sql = f"""
-        UPDATE authors AS a
-        SET pagerank = v.pr
-        FROM (VALUES {values_clause}) AS v(s2_author_id, pr)
-        WHERE a.s2_author_id = v.s2_author_id
-    """
-    result = session.execute(text(batch_sql))
-    session.commit()
-    return result.rowcount
+    total_updated = 0
+    for i in range(0, len(updates), BATCH_SIZE):
+        batch = updates[i:i + BATCH_SIZE]
+        values_clause = ', '.join(
+            f"('{aid}', '{pr_json}'::jsonb)" for aid, pr_json in batch
+        )
+        batch_sql = f"""
+            UPDATE authors AS a
+            SET pagerank = v.pr
+            FROM (VALUES {values_clause}) AS v(s2_author_id, pr)
+            WHERE a.s2_author_id = v.s2_author_id
+        """
+        result = session.execute(text(batch_sql))
+        session.commit()
+        total_updated += result.rowcount
+
+    return total_updated
 
 
 # ============================================================================
