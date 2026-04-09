@@ -402,3 +402,47 @@ export async function getCumulativeDailyPapers(): Promise<CumulativeDailyPaperIt
   }
   return response.json();
 }
+
+/**
+ * Fetch research frontiers bump chart data.
+ * @returns FrontiersData with themes, weekly ranks, and papers
+ */
+export async function getFrontiersData(): Promise<FrontiersData> {
+  const response = await fetch(`${API_URL}/frontiers`);
+  if (!response.ok) {
+    await handleErrorResponse(response);
+  }
+  return response.json();
+}
+
+/** A single paper within a frontier theme/week cell. */
+export type FrontierPaper = {
+  arxivId: string;
+  title: string;
+  publishedAt: string | null;
+};
+
+/** Per-week data point for a single theme on the bump chart. */
+export type ThemeWeekPoint = {
+  week: string;
+  rank: number;
+  paperCount: number;
+  papers: FrontierPaper[];
+};
+
+/** A single theme line on the bump chart. */
+export type FrontierTheme = {
+  themeId: number;
+  name: string;
+  description: string;
+  status: string;
+  velocityPct: number | 'new';
+  totalPapers: number;
+  weeklyPoints: ThemeWeekPoint[];
+};
+
+/** Full response from the frontiers API. */
+export type FrontiersData = {
+  themes: FrontierTheme[];
+  weeks: string[];
+};

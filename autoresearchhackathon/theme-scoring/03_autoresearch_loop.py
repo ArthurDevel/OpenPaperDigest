@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 SCRIPT_DIR = Path(__file__).parent
 load_dotenv(SCRIPT_DIR / ".env")
 
-PAPERS_FILE = SCRIPT_DIR.parent / "2026.04.09-research-frontiers-detection" / "output" / "papers_by_week.json"
+PAPERS_FILE = SCRIPT_DIR.parent / "research-frontiers-detection" / "output" / "papers_by_week.json"
 EMBEDDINGS_FILE = SCRIPT_DIR / "output" / "embeddings.json"
 OUTPUT_FILE = SCRIPT_DIR / "output" / "loop_results.json"
 BEST_PROMPT_FILE = SCRIPT_DIR / "output" / "best_prompt.txt"
