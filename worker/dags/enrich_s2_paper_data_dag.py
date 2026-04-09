@@ -85,7 +85,7 @@ def fetch_papers_needing_s2_data(exclude_ids: List[str] = None) -> List[Tuple[in
                 and_(
                     cast(PaperRecord.s2_ids, String) == '{}',
                     PaperRecord.created_at < retry_min_age,
-                    PaperRecord.created_at > retry_max_age,
+                    PaperRecord.created_at >= retry_max_age,
                 ),
             ),
         )
