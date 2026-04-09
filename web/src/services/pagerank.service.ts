@@ -20,7 +20,9 @@ import { createClient } from '@/lib/supabase/server';
  * A single point in the pagerank scatter chart.
  */
 export interface PageRankScatterItem {
-  /** ISO timestamp of when the paper was ingested */
+  /** ISO timestamp of when the paper was published on arXiv (null if unknown) */
+  publishedAt: string | null;
+  /** ISO timestamp of when the paper was ingested (fallback) */
   createdAt: string;
   /** Paper title */
   title: string;
@@ -38,6 +40,7 @@ export interface PageRankScatterItem {
 interface PaperAuthorRow {
   papers: {
     id: number;
+    published_at: string | null;
     created_at: string;
     title: string;
     arxiv_id: string;
@@ -62,7 +65,7 @@ export async function getPageRankScatterData(): Promise<PageRankScatterItem[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from('paper_authors')
-    .select('papers(id, created_at, title, arxiv_id), authors(pagerank)')
+    .select('papers(id, published_at, created_at, title, arxiv_id), authors(pagerank)')
     .not('authors.pagerank', 'is', null);
 
   if (error) {
@@ -98,6 +101,7 @@ function aggregateBestPercentilePerPaper(rows: PaperAuthorRow[]): PageRankScatte
     } else {
       paperMap.set(paper.id, {
         item: {
+          publishedAt: paper.published_at,
           createdAt: paper.created_at,
           title: paper.title,
           arxivId: paper.arxiv_id,
@@ -112,5 +116,9 @@ function aggregateBestPercentilePerPaper(rows: PaperAuthorRow[]): PageRankScatte
       ...item,
       bestAuthorPercentile: maxPercentile,
     }))
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    .sort((a, b) => {
+      const aDate = a.publishedAt ?? '\uffff';
+      const bDate = b.publishedAt ?? '\uffff';
+      return aDate.localeCompare(bDate);
+    });
 }

@@ -22,18 +22,18 @@ describe('PageRank API', () => {
   });
 
   describe('GET /api/pagerank', () => {
-    it('returns array of objects with created_at, title, arxiv_id, best_author_percentile fields', async () => {
+    it('returns array of objects with published_at, created_at, title, arxiv_id, best_author_percentile fields', async () => {
       mockNotReturns([
         {
-          papers: { id: 1, created_at: '2025-01-10T00:00:00Z', title: 'Paper A', arxiv_id: '2501.00001' },
+          papers: { id: 1, published_at: '2025-01-09T12:00:00Z', created_at: '2025-01-10T00:00:00Z', title: 'Paper A', arxiv_id: '2501.00001' },
           authors: { pagerank: { percentile: 85.5 } },
         },
         {
-          papers: { id: 1, created_at: '2025-01-10T00:00:00Z', title: 'Paper A', arxiv_id: '2501.00001' },
+          papers: { id: 1, published_at: '2025-01-09T12:00:00Z', created_at: '2025-01-10T00:00:00Z', title: 'Paper A', arxiv_id: '2501.00001' },
           authors: { pagerank: { percentile: 92.3 } },
         },
         {
-          papers: { id: 2, created_at: '2025-01-12T00:00:00Z', title: 'Paper B', arxiv_id: '2501.00002' },
+          papers: { id: 2, published_at: null, created_at: '2025-01-12T00:00:00Z', title: 'Paper B', arxiv_id: '2501.00002' },
           authors: { pagerank: { percentile: 45.0 } },
         },
       ]);
@@ -53,14 +53,16 @@ describe('PageRank API', () => {
 
           // Paper A should have max percentile of 92.3 (two authors: 85.5 and 92.3)
           expect(data[0]).toEqual({
+            publishedAt: '2025-01-09T12:00:00Z',
             createdAt: '2025-01-10T00:00:00Z',
             title: 'Paper A',
             arxivId: '2501.00001',
             bestAuthorPercentile: 92.3,
           });
 
-          // Paper B has single author with 45.0
+          // Paper B has no published_at, falls back to created_at for sorting
           expect(data[1]).toEqual({
+            publishedAt: null,
             createdAt: '2025-01-12T00:00:00Z',
             title: 'Paper B',
             arxivId: '2501.00002',
