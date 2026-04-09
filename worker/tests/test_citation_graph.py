@@ -161,37 +161,38 @@ def test_compute_pagerank_single_edge():
 
 def test_compute_percentiles_basic():
     """
-    Test with known values. The max score gets P100, the median gets P50,
-    and the min score gets the lowest percentile.
+    Test with known values. Uses bisect_left / (total-1) formula:
+    min score -> P0, max score -> P100, evenly distributed between.
     """
     scores = {'a': 1.0, 'b': 2.0, 'c': 3.0, 'd': 4.0}
     percentiles = compute_percentiles(scores)
 
-    # Max score (4.0) should be P100
-    assert percentiles['d'] == 100.0
-
-    # Min score (1.0) should be P25 (1 out of 4 values <= 1.0)
-    assert percentiles['a'] == 25.0
-
-    # Median values
-    assert percentiles['b'] == 50.0
-    assert percentiles['c'] == 75.0
+    # 4 items, denominator = 3
+    # a: bisect_left=0 -> 0/3*100 = 0%
+    # b: bisect_left=1 -> 1/3*100 = 33.33%
+    # c: bisect_left=2 -> 2/3*100 = 66.67%
+    # d: bisect_left=3 -> 3/3*100 = 100%
+    assert percentiles['a'] == pytest.approx(0.0)
+    assert percentiles['b'] == pytest.approx(100 / 3)
+    assert percentiles['c'] == pytest.approx(200 / 3)
+    assert percentiles['d'] == pytest.approx(100.0)
 
 
 def test_compute_percentiles_ties():
     """
     When multiple items have the same score, they should all get the same
-    percentile (bisect_right gives them all the same rank).
+    percentile (bisect_left gives them the lowest rank in the tied group).
     """
     scores = {'a': 1.0, 'b': 2.0, 'c': 2.0, 'd': 3.0}
     percentiles = compute_percentiles(scores)
 
-    # Both b and c have score 2.0 -- bisect_right finds 3 values <= 2.0
+    # 4 items, denominator = 3
+    # b and c both have score 2.0 -- bisect_left finds 1 value < 2.0
     assert percentiles['b'] == percentiles['c']
-    assert percentiles['b'] == 75.0  # 3/4 * 100
+    assert percentiles['b'] == pytest.approx(1 / 3 * 100)  # 33.33%
 
     # Max still gets P100
-    assert percentiles['d'] == 100.0
+    assert percentiles['d'] == pytest.approx(100.0)
 
 
 def test_compute_percentiles_empty():
@@ -399,7 +400,7 @@ def test_full_pipeline(mock_fetch):
     assert percentiles['C'] == 100.0
     # All percentiles should be between 0 and 100
     for p in percentiles.values():
-        assert 0 < p <= 100
+        assert 0 <= p <= 100
 
     # -- Step 5: Compute author scores --
     author_session = MagicMock()
@@ -437,4 +438,4 @@ def test_full_pipeline(mock_fetch):
     author_percentiles = compute_percentiles(author_score_map)
 
     assert author_percentiles['auth2'] == 100.0  # Higher score
-    assert author_percentiles['auth1'] == 50.0   # Lower score (1 of 2)
+    assert author_percentiles['auth1'] == 0.0    # Lower score (1 of 2, gets min rank)

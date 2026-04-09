@@ -28,6 +28,7 @@ export const mockOrder = vi.fn();
 export const mockIn = vi.fn();
 export const mockGte = vi.fn();
 export const mockLte = vi.fn();
+export const mockNot = vi.fn();
 export const mockEq = vi.fn();
 export const mockSelect = vi.fn();
 export const mockInsert = vi.fn();
@@ -48,6 +49,7 @@ const chainable = {
   insert: mockInsert,
   update: mockUpdate,
   delete: mockDelete,
+  not: mockNot,
   eq: mockEq,
   in: mockIn,
   gte: mockGte,
@@ -68,6 +70,7 @@ mockOrder.mockReturnValue(chainable);
 mockIn.mockReturnValue(chainable);
 mockGte.mockReturnValue(chainable);
 mockLte.mockReturnValue(chainable);
+mockNot.mockReturnValue(chainable);
 mockEq.mockReturnValue(chainable);
 mockSelect.mockReturnValue(chainable);
 mockInsert.mockReturnValue(chainable);
@@ -245,6 +248,7 @@ export function resetAllMocks(): void {
   mockIn.mockReturnValue(chainable);
   mockGte.mockReturnValue(chainable);
   mockLte.mockReturnValue(chainable);
+  mockNot.mockReturnValue(chainable);
   mockEq.mockReturnValue(chainable);
   mockSelect.mockReturnValue(chainable);
   mockInsert.mockReturnValue(chainable);
@@ -370,6 +374,17 @@ export function mockLimitReturns(data: unknown[]): void {
  */
 export function mockOrderReturns(data: unknown[]): void {
   mockOrder.mockReturnValueOnce({
+    ...chainable,
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data, error: null }).then(resolve),
+  });
+}
+
+/**
+ * Configure mockNot to return data (for queries with .not() filter).
+ * @param data - Array of data to return
+ */
+export function mockNotReturns(data: unknown[]): void {
+  mockNot.mockReturnValueOnce({
     ...chainable,
     then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data, error: null }).then(resolve),
   });

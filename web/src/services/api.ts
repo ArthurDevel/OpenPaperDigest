@@ -112,6 +112,16 @@ export type CountPapersSinceResponse = {
 };
 
 /**
+ * A single point in the pagerank scatter chart.
+ */
+export type PageRankScatterItem = {
+  createdAt: string;
+  title: string;
+  arxivId: string;
+  bestAuthorPercentile: number;
+};
+
+/**
  * Cumulative daily paper statistics for admin overview.
  */
 export type CumulativeDailyPaperItem = {
@@ -362,6 +372,18 @@ export type AdminUserItem = {
  */
 export async function listUsers(): Promise<AdminUserItem[]> {
   const response = await fetch(`${API_URL}/admin/users`);
+  if (!response.ok) {
+    await handleErrorResponse(response);
+  }
+  return response.json();
+}
+
+/**
+ * Fetch pagerank scatter chart data.
+ * @returns Array of items with paper date, title, arxiv ID, and best author percentile
+ */
+export async function getPageRankScatterData(): Promise<PageRankScatterItem[]> {
+  const response = await fetch(`${API_URL}/pagerank`);
   if (!response.ok) {
     await handleErrorResponse(response);
   }
