@@ -17,8 +17,6 @@ A pipeline that automatically discovers research themes from our ingested papers
 
 The LLM only does classification. All quantitative signals (velocity, dormancy, rank) come from the data.
 
-**Cost**: ~$0.02 per run (Gemini 2.5 Flash via OpenRouter)
-
 ### 2. Autoresearch Loop for Theme Quality (`theme-scoring/`)
 
 A Karpathy-style optimization loop that improves the theme detection prompt itself.
@@ -26,8 +24,6 @@ A Karpathy-style optimization loop that improves the theme detection prompt itse
 - **Metric**: Embedding discrimination score `S = mean_intra / mean_inter` -- measures how coherent themes are internally vs how distinct they are from each other
 - **Loop**: Mutate the prompt -> re-run theme detection -> score -> keep if improved, revert if not
 - **Output**: HTML report showing score evolution across iterations
-
-Baseline score: 1.32 (32% better than random grouping).
 
 ### 3. Frontend (`/frontiers` page)
 
