@@ -7,7 +7,7 @@ Responsibilities:
 - Verify compute_percentiles assigns correct percentiles with ties and edge cases
 - Verify compute_author_scores computes median PageRank per author
 - Verify sentinel row insertion for papers with 0 references
-- Verify fetch_external_nodes_needing_references returns correct external nodes
+- Verify fetch_external_nodes_needing_references returns correct one-hop external nodes
 - Integration test: full pipeline with mocked S2 API and DB session
 """
 
@@ -333,14 +333,13 @@ def test_fetch_papers_needing_references_excludes_existing():
 
 def test_fetch_external_nodes_needing_references():
     """
-    Verify the function returns only nodes appearing as cited_s2_id but NOT
-    as source_s2_id, excluding sentinel rows. The SQL uses LEFT JOIN where
-    source IS NULL to find unfetched external nodes.
+    Verify the function returns only one-hop external nodes: papers directly
+    cited by our papers that do not yet appear as source_s2_id. The SQL anchors
+    the search to the papers table to avoid recursive frontier expansion.
 
     Mock scenario:
-    - 'ext1' appears as cited but never as source -> should be returned
-    - 'ext2' appears as cited but never as source -> should be returned
-    - 'int1' appears as both cited and source -> should NOT be returned
+    - 'ext1' is directly cited by one of our papers and never fetched -> returned
+    - 'ext2' is directly cited by one of our papers and never fetched -> returned
     """
     session = MagicMock()
 
@@ -639,22 +638,18 @@ def test_fetch_papers_needing_inbound_citations_idempotent():
 
 def test_expand_dag_does_not_fetch_inbound_only_nodes():
     """
-    Verify fetch_external_nodes_needing_references does NOT return papers that
-    only appear as source_s2_id (from inbound citation edges). They must also
-    appear as cited_s2_id to be eligible for expansion.
+    Verify fetch_external_nodes_needing_references is anchored to our papers
+    table and therefore does not recurse into farther-out external hops.
 
-    Scenario: paper 'citerX' appears only as source_s2_id from an inbound edge
-    (citerX -> our_paper). The expand DAG query finds nodes that appear as
-    cited_s2_id but NOT as source_s2_id. Since citerX only appears as source,
-    it should NOT be returned.
+    Scenario: an external paper cites another external paper. That farther-out
+    node should not be eligible for expansion because its source paper is not
+    one of our papers.
 
-    The mock returns empty to confirm that citerX-like nodes are excluded by
-    the SQL query logic (LEFT JOIN on cited_s2_id, not source_s2_id).
+    The mock returns empty to confirm the SQL boundary prevents references of
+    references from being selected for expansion.
     """
     session = MagicMock()
 
-    # The query returns only nodes appearing as cited_s2_id but not source_s2_id.
-    # Inbound-only nodes (appearing only as source_s2_id) are NOT returned.
     mock_result = MagicMock()
     mock_result.fetchall.return_value = []
     session.execute.return_value = mock_result
@@ -664,8 +659,8 @@ def test_expand_dag_does_not_fetch_inbound_only_nodes():
     assert result == []
     session.execute.assert_called_once()
 
-    # Verify the SQL uses cited_s2_id as the lookup, not source_s2_id
+    # Verify the SQL is anchored to papers and only expands one hop from our DB
     query_sql = str(session.execute.call_args.args[0])
-    assert 'cited.cited_s2_id' in query_sql
-    # The LEFT JOIN matches cited_s2_id against source_s2_id
-    assert 'source.source_s2_id = cited.cited_s2_id' in query_sql
+    assert "JOIN papers p" in query_sql
+    assert "p.s2_ids->>'s2_paper_id' = pc.source_s2_id" in query_sql
+    assert 'source.source_s2_id = pc.cited_s2_id' in query_sql
