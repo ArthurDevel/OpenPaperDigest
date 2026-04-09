@@ -28,6 +28,72 @@ export interface UseSessionReturn {
   isLoading: boolean;
 }
 
+type SessionListener = (state: UseSessionReturn) => void;
+
+// ============================================================================
+// SHARED SESSION STATE
+// ============================================================================
+
+let sessionState: UseSessionReturn = {
+  user: null,
+  isLoading: true,
+};
+let sessionInitPromise: Promise<void> | null = null;
+let hasSessionSubscription = false;
+const sessionListeners = new Set<SessionListener>();
+
+function emitSessionState(): void {
+  sessionListeners.forEach((listener) => {
+    listener(sessionState);
+  });
+}
+
+function updateSessionState(user: User | null, isLoading: boolean): void {
+  sessionState = { user, isLoading };
+  emitSessionState();
+}
+
+function subscribeToSessionChanges(supabase: SupabaseClient): void {
+  if (hasSessionSubscription) {
+    return;
+  }
+
+  hasSessionSubscription = true;
+
+  supabase.auth.onAuthStateChange((_event, session) => {
+    updateSessionState(session?.user ?? null, false);
+  });
+}
+
+async function ensureSessionLoaded(): Promise<void> {
+  const supabase = createClient();
+
+  subscribeToSessionChanges(supabase);
+
+  if (!sessionState.isLoading) {
+    return;
+  }
+
+  if (sessionInitPromise) {
+    await sessionInitPromise;
+    return;
+  }
+
+  sessionInitPromise = supabase.auth
+    .getUser()
+    .then(({ data: { user } }) => {
+      updateSessionState(user, false);
+    })
+    .catch(() => {
+      updateSessionState(null, false);
+    })
+    .finally(() => {
+      sessionInitPromise = null;
+    });
+
+  await sessionInitPromise;
+}
+
 // ============================================================================
 // CLIENT ACCESS
 // ============================================================================
@@ -49,30 +115,18 @@ export function getSupabaseClient(): SupabaseClient {
  * @returns Object containing user (or null) and loading state
  */
 export function useSession(): UseSessionReturn {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [state, setState] = useState<UseSessionReturn>(sessionState);
 
   useEffect(() => {
-    const supabase = createClient();
-
-    // Get initial session
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUser(user);
-      setIsLoading(false);
-    });
-
-    // Subscribe to auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setIsLoading(false);
-    });
+    sessionListeners.add(setState);
+    void ensureSessionLoaded();
 
     return () => {
-      subscription.unsubscribe();
+      sessionListeners.delete(setState);
     };
   }, []);
 
-  return { user, isLoading };
+  return state;
 }
 
 // ============================================================================
