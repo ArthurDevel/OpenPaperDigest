@@ -89,12 +89,20 @@ export default function PageRankPage() {
     load();
   }, []);
 
-  /**
-   * Format ISO date string for X axis tick labels.
-   */
-  const formatDateTick = (dateStr: string): string => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  // Convert date strings to timestamps for a proper numeric axis
+  const chartData = data.map((item) => ({
+    ...item,
+    timestamp: new Date(item.createdAt).getTime(),
+  }));
+
+  const ONE_DAY = 86_400_000;
+  const now = Date.now();
+  const minTs = chartData.length > 0
+    ? Math.min(...chartData.map((d) => d.timestamp)) - ONE_DAY
+    : now;
+
+  const formatDateTick = (ts: number): string => {
+    return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
   if (isLoading) {
@@ -132,10 +140,12 @@ export default function PageRankPage() {
           <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 20 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis
-              dataKey="createdAt"
+              dataKey="timestamp"
               name="Date"
               tickFormatter={formatDateTick}
-              type="category"
+              type="number"
+              domain={[minTs, now]}
+              scale="time"
             />
             <YAxis
               dataKey="bestAuthorPercentile"
@@ -146,7 +156,7 @@ export default function PageRankPage() {
             <Tooltip content={<ScatterTooltip />} />
             <Scatter
               name="Papers"
-              data={data}
+              data={chartData}
               fill="#6366f1"
               opacity={0.7}
               r={4}

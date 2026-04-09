@@ -1,8 +1,9 @@
 """
 S2 paper data enrichment DAG -- enriches papers with Semantic Scholar metadata.
 
-Runs daily at 10:00 UTC. For each paper with an arxiv_id but no S2 data yet,
-fetches comprehensive metadata from the S2 batch API and updates the DB.
+Runs daily at 10:00 UTC. Two tasks chained:
+1. process_all_papers: enrich papers with S2 metadata (s2_ids, metrics, etc.)
+2. link_missing_authors: link authors for papers that have s2_ids but no paper_authors rows
 
 Responsibilities:
 - Query papers needing S2 enrichment (arxiv_id present, s2_ids NULL or empty)
@@ -10,6 +11,7 @@ Responsibilities:
 - Batch-fetch metadata from Semantic Scholar (500 papers per API call)
 - Update papers with s2_ids, s2_metrics, classification, publication_info, s2_tldr, s2_embedding
 - Mark unmatched papers with s2_ids = {} (retried until RETRY_WINDOW_DAYS expires)
+- Link authors for papers missing paper_authors rows (catches papers where S2 hadn't indexed yet at ingest time)
 """
 
 import sys
@@ -25,9 +27,9 @@ from sqlalchemy.orm import Session
 sys.path.insert(0, '/opt/airflow')
 
 from shared.db import SessionLocal
-from shared.semantic_scholar.client import fetch_paper_metadata_batch
+from shared.semantic_scholar.client import fetch_paper_metadata_batch, fetch_paper_authors_batch
 from shared.semantic_scholar.models import S2PaperMetadata
-from papers.db.models import PaperRecord
+from papers.db.models import PaperRecord, AuthorRecord, PaperAuthorRecord
 
 # ============================================================================
 # CONSTANTS
@@ -173,6 +175,104 @@ def enrich_papers_with_s2_data(
     return {'enriched': enriched, 'no_match': no_match, 'errors': errors}
 
 
+def fetch_papers_missing_authors() -> List[Tuple[int, str]]:
+    """
+    Query papers that have s2_ids set (successfully enriched) but no paper_authors rows.
+    These are papers where S2 hadn't indexed the paper at ingest time, so author
+    linking silently returned 0 results.
+
+    @returns List of (paper_id, arxiv_id) tuples
+    """
+    with database_session() as session:
+        rows = session.query(PaperRecord.id, PaperRecord.arxiv_id).filter(
+            PaperRecord.arxiv_id.isnot(None),
+            PaperRecord.s2_ids.isnot(None),
+            cast(PaperRecord.s2_ids, String) != '{}',
+            ~PaperRecord.id.in_(
+                session.query(PaperAuthorRecord.paper_id).distinct()
+            ),
+        ).order_by(PaperRecord.id.desc()).all()
+
+        return [(row.id, row.arxiv_id) for row in rows]
+
+
+def link_authors_for_papers(papers: List[Tuple[int, str]]) -> Dict[str, int]:
+    """
+    Batch-fetch authors from S2 and create paper_authors + authors records.
+    Processes in BATCH_SIZE chunks.
+
+    @param papers: List of (paper_id, arxiv_id) tuples
+    @returns Dict with authors_linked, authors_created, papers_skipped counts
+    """
+    total_linked = 0
+    total_created = 0
+    total_skipped = 0
+
+    for i in range(0, len(papers), BATCH_SIZE):
+        batch = papers[i:i + BATCH_SIZE]
+        batch_num = (i // BATCH_SIZE) + 1
+        print(f'\n  Batch {batch_num}: linking authors for {len(batch)} papers...')
+
+        arxiv_ids = [arxiv_id for _, arxiv_id in batch]
+        id_by_arxiv = {arxiv_id: paper_id for paper_id, arxiv_id in batch}
+
+        try:
+            batch_results = fetch_paper_authors_batch(arxiv_ids)
+        except Exception as e:
+            print(f'    S2 batch call failed: {e}')
+            total_skipped += len(batch)
+            continue
+
+        for s2_result in batch_results:
+            paper_id = id_by_arxiv.get(s2_result.arxiv_id)
+            if not paper_id:
+                continue
+
+            try:
+                with database_session() as session:
+                    seen_author_ids = set()
+                    for order, s2_author in enumerate(s2_result.authors, start=1):
+                        existing = session.query(AuthorRecord).filter(
+                            AuthorRecord.s2_author_id == s2_author.s2_author_id
+                        ).first()
+
+                        if existing:
+                            author_id = existing.id
+                        else:
+                            new_author = AuthorRecord(
+                                s2_author_id=s2_author.s2_author_id,
+                                name=s2_author.name,
+                            )
+                            session.add(new_author)
+                            session.flush()
+                            author_id = new_author.id
+                            total_created += 1
+
+                        if author_id in seen_author_ids:
+                            continue
+                        seen_author_ids.add(author_id)
+
+                        existing_link = session.query(PaperAuthorRecord).filter(
+                            PaperAuthorRecord.paper_id == paper_id,
+                            PaperAuthorRecord.author_id == author_id,
+                        ).first()
+
+                        if not existing_link:
+                            session.add(PaperAuthorRecord(
+                                paper_id=paper_id,
+                                author_id=author_id,
+                                author_order=order,
+                            ))
+                            total_linked += 1
+            except Exception as e:
+                print(f'    FAIL paper {paper_id} ({s2_result.arxiv_id}): {e}')
+                total_skipped += 1
+
+        print(f'    Linked: {total_linked}, Created: {total_created}')
+
+    return {'authors_linked': total_linked, 'authors_created': total_created, 'papers_skipped': total_skipped}
+
+
 # ============================================================================
 # DAG DEFINITION
 # ============================================================================
@@ -188,9 +288,12 @@ def enrich_papers_with_s2_data(
     doc_md="""
     ### S2 Paper Data Enrichment DAG
 
-    Enriches papers with comprehensive metadata from Semantic Scholar.
-    Processes all papers that have an `arxiv_id` but no `s2_ids` yet,
-    in batches of 500 via the S2 batch API.
+    Two chained tasks:
+    1. **process_all_papers**: Enriches papers with S2 metadata (s2_ids, metrics, etc.)
+    2. **link_missing_authors**: Links authors for papers that have s2_ids but no paper_authors rows
+
+    The author linking step catches papers where S2 hadn't indexed the paper at
+    ingest time, so the daily arXiv ingest's author linking silently returned 0 results.
     """,
 )
 def enrich_s2_paper_data_dag():
@@ -255,7 +358,36 @@ def enrich_s2_paper_data_dag():
             'errors': total_errors,
         }
 
-    process_all_papers()
+    @task
+    def link_missing_authors() -> Dict[str, int]:
+        """
+        Find papers with s2_ids but no paper_authors rows and link their authors.
+        This catches papers where S2 hadn't indexed the paper at ingest time.
+
+        @returns Dict with authors_linked, authors_created, papers_skipped counts
+        """
+        papers = fetch_papers_missing_authors()
+        total = len(papers)
+        print(f'Found {total} papers with s2_ids but no author links')
+
+        if total == 0:
+            print('No papers need author linking.')
+            return {'authors_linked': 0, 'authors_created': 0, 'papers_skipped': 0}
+
+        counts = link_authors_for_papers(papers)
+
+        print('\n' + '=' * 50)
+        print('AUTHOR LINKING REPORT')
+        print('=' * 50)
+        print(f'Papers queried:    {total}')
+        print(f'Authors linked:    {counts["authors_linked"]}')
+        print(f'Authors created:   {counts["authors_created"]}')
+        print(f'Papers skipped:    {counts["papers_skipped"]}')
+        print('=' * 50)
+
+        return counts
+
+    process_all_papers() >> link_missing_authors()
 
 
 enrich_s2_paper_data_dag()
