@@ -175,31 +175,52 @@ def reset_stuck_papers_dag():
         
         print(f"Looking for papers to reset that have been in a final state for {minutes_ago}+ minutes...")
         
+        BATCH_SIZE = 500
+        had_error = False
+
+        # Step 1: Collect IDs of papers to reset (read-only query)
         with database_session() as session:
-            # Step 1: Find stuck papers
             papers_to_reset = _find_papers_to_reset(session, minutes_ago, reset_processing, reset_failed)
-            
-            if not papers_to_reset:
-                print("No papers found to reset.")
-                return {
-                    "reset_count": 0,
-                    "minutes_threshold": minutes_ago,
-                    "message": "No papers were found to reset."
-                }
-            
-            # Step 2: Reset each stuck paper
-            reset_count = 0
-            for paper in papers_to_reset:
-                _reset_paper_to_not_started(session, paper)
-                reset_count += 1
-            
-            print(f"Reset {reset_count} papers back to not_started status")
-            
+            paper_ids = [p.id for p in papers_to_reset]
+
+        if not paper_ids:
+            print("No papers found to reset.")
             return {
-                "reset_count": reset_count,
+                "reset_count": 0,
                 "minutes_threshold": minutes_ago,
-                "message": f"Successfully reset {reset_count} papers"
+                "message": "No papers were found to reset."
             }
+
+        print(f"Found {len(paper_ids)} papers to reset, processing in batches of {BATCH_SIZE}")
+
+        # Step 2: Reset in batches, continue on failure
+        reset_count = 0
+        for i in range(0, len(paper_ids), BATCH_SIZE):
+            batch_ids = paper_ids[i:i + BATCH_SIZE]
+            batch_num = i // BATCH_SIZE + 1
+            try:
+                with database_session() as session:
+                    batch_papers = session.query(PaperRecord).filter(
+                        PaperRecord.id.in_(batch_ids)
+                    ).all()
+                    for paper in batch_papers:
+                        _reset_paper_to_not_started(session, paper)
+                        reset_count += 1
+                print(f"  Batch {batch_num}: reset {len(batch_papers)} papers")
+            except Exception as e:
+                print(f"  Batch {batch_num}: FAILED - {e}")
+                had_error = True
+
+        print(f"Reset {reset_count}/{len(paper_ids)} papers back to not_started status")
+
+        if had_error:
+            raise RuntimeError(f"Some batches failed. Reset {reset_count}/{len(paper_ids)} papers.")
+
+        return {
+            "reset_count": reset_count,
+            "minutes_threshold": minutes_ago,
+            "message": f"Successfully reset {reset_count} papers"
+        }
     
     # Single task with parameter input
     reset_stuck_processing_papers(
