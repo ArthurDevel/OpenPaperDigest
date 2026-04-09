@@ -327,7 +327,7 @@ def _claim_next_job(session: Session) -> Optional[JobInfo]:
             """
             SELECT id FROM papers
             WHERE status = 'not_started'
-            ORDER BY RANDOM()
+            ORDER BY created_at DESC
             LIMIT 1
             FOR UPDATE SKIP LOCKED
             """
