@@ -31,7 +31,7 @@ import numpy as np
 SCRIPT_DIR = Path(__file__).parent
 EMBEDDINGS_PATH = SCRIPT_DIR / "output" / "embeddings.json"
 THEME_ASSIGNMENTS_PATH = (
-    SCRIPT_DIR / ".." / "2026.04.09-research-frontiers-detection" / "output" / "theme_assignments.json"
+    SCRIPT_DIR / ".." / "research-frontiers-detection" / "output" / "theme_assignments.json"
 )
 OUTPUT_PATH = SCRIPT_DIR / "output" / "theme_scores.json"
 
