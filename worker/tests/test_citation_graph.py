@@ -39,8 +39,10 @@ from citation_graph_dag import (
     compute_percentiles,
     compute_author_scores,
     fetch_papers_needing_references,
+    write_paper_scores,
+    write_author_scores,
 )
-from citation_helpers import fetch_and_store_references, fetch_and_store_inbound_citations
+from citation_helpers import fetch_and_store_references, fetch_and_store_inbound_citations, BATCH_SIZE
 from expand_external_references_dag import fetch_external_nodes_needing_references
 from fetch_inbound_citations_dag import fetch_papers_needing_inbound_citations
 
@@ -352,6 +354,73 @@ def test_fetch_external_nodes_needing_references():
     assert result == ['ext1', 'ext2']
     assert len(result) == 2
     session.execute.assert_called_once()
+
+
+# ============================================================================
+# UNIT TESTS: score writes
+# ============================================================================
+
+
+def test_write_paper_scores_batches_updates():
+    """
+    Verify write_paper_scores splits large updates into multiple SQL statements
+    so score writes stay under the DB statement timeout.
+    """
+    session = MagicMock()
+
+    cited_by_result = MagicMock()
+    cited_by_result.fetchall.return_value = [('s2_0', 3), ('s2_500', 1)]
+    papers_result = MagicMock()
+    papers_result.fetchall.return_value = [
+        (i, f's2_{i}') for i in range(BATCH_SIZE + 1)
+    ]
+    session.execute.side_effect = [cited_by_result, papers_result, MagicMock(), MagicMock()]
+
+    scores = {f's2_{i}': float(i + 1) for i in range(BATCH_SIZE + 1)}
+    percentiles = {f's2_{i}': float(i % 100) for i in range(BATCH_SIZE + 1)}
+
+    updated = write_paper_scores(session, scores, percentiles)
+
+    assert updated == BATCH_SIZE + 1
+    assert session.commit.call_count == 2
+    assert session.execute.call_count == 4
+
+    first_update_sql = str(session.execute.call_args_list[2].args[0])
+    second_update_sql = str(session.execute.call_args_list[3].args[0])
+    assert 'UPDATE papers AS p' in first_update_sql
+    assert 'UPDATE papers AS p' in second_update_sql
+
+
+def test_write_author_scores_batches_updates():
+    """
+    Verify write_author_scores splits large updates into multiple SQL statements.
+    """
+    session = MagicMock()
+    first_result = MagicMock()
+    first_result.rowcount = BATCH_SIZE
+    second_result = MagicMock()
+    second_result.rowcount = 1
+    session.execute.side_effect = [first_result, second_result]
+
+    author_data = {
+        f'auth_{i}': {
+            'median_score': float(i + 1),
+            'scored_paper_count': 1,
+        }
+        for i in range(BATCH_SIZE + 1)
+    }
+    percentiles = {f'auth_{i}': float(i % 100) for i in range(BATCH_SIZE + 1)}
+
+    updated = write_author_scores(session, author_data, percentiles)
+
+    assert updated == BATCH_SIZE + 1
+    assert session.commit.call_count == 2
+    assert session.execute.call_count == 2
+
+    first_update_sql = str(session.execute.call_args_list[0].args[0])
+    second_update_sql = str(session.execute.call_args_list[1].args[0])
+    assert 'UPDATE authors AS a' in first_update_sql
+    assert 'UPDATE authors AS a' in second_update_sql
 
 
 # ============================================================================
