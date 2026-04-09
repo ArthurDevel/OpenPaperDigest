@@ -166,6 +166,9 @@ def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dic
             journal_ref_elem = entry.find('arxiv:journal_ref', ns)
             journal_ref = (journal_ref_elem.text or '').strip() if journal_ref_elem is not None and journal_ref_elem.text else None
 
+            published_elem = entry.find('atom:published', ns)
+            published_at = (published_elem.text or '').strip() if published_elem is not None else None
+
             all_papers.append({
                 'arxiv_id': base_id,
                 'title': title,
@@ -174,6 +177,7 @@ def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dic
                 'categories': categories,
                 'doi': doi,
                 'journal_ref': journal_ref,
+                'published_at': published_at,
             })
 
         # If we got fewer results than requested, we've reached the end
@@ -352,12 +356,21 @@ def daily_arxiv_ingest_dag():
 
                 try:
                     # Create paper record with abstract
+                    # Parse arXiv published date string to datetime
+                    pub_at = None
+                    if paper.get('published_at'):
+                        try:
+                            pub_at = datetime.fromisoformat(paper['published_at'].replace('Z', '+00:00'))
+                        except (ValueError, AttributeError):
+                            pass
+
                     paper_dto = create_paper(
                         db=session,
                         arxiv_id=arxiv_id,
                         title=title,
                         authors=paper['authors_str'],
                         abstract=paper['abstract'],
+                        published_at=pub_at,
                     )
                     added += 1
                     print(f'  Added {arxiv_id}: {title[:70]}...')

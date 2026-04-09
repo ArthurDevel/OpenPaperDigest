@@ -181,6 +181,7 @@ export type Database = {
           paper_uuid: string
           pdf_url: string | null
           processing_time_seconds: number | null
+          published_at: string | null
           signals: Json | null
           started_at: string | null
           status: string
@@ -208,6 +209,7 @@ export type Database = {
           paper_uuid: string
           pdf_url?: string | null
           processing_time_seconds?: number | null
+          published_at?: string | null
           signals?: Json | null
           started_at?: string | null
           status: string
@@ -235,6 +237,7 @@ export type Database = {
           paper_uuid?: string
           pdf_url?: string | null
           processing_time_seconds?: number | null
+          published_at?: string | null
           signals?: Json | null
           started_at?: string | null
           status?: string

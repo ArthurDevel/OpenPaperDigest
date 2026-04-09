@@ -70,6 +70,7 @@ class Paper(BaseModel):
     updated_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+    published_at: Optional[datetime] = None
     num_pages: Optional[int] = None
     processing_time_seconds: Optional[float] = None
     total_cost: Optional[float] = None
@@ -124,6 +125,7 @@ class Paper(BaseModel):
             updated_at=self.updated_at or datetime.utcnow(),
             started_at=self.started_at,
             finished_at=self.finished_at,
+            published_at=self.published_at,
             num_pages=self.num_pages,
             processing_time_seconds=self.processing_time_seconds,
             total_cost=self.total_cost,

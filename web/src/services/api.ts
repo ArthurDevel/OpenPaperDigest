@@ -115,6 +115,7 @@ export type CountPapersSinceResponse = {
  * A single point in the pagerank scatter chart.
  */
 export type PageRankScatterItem = {
+  publishedAt: string | null;
   createdAt: string;
   title: string;
   arxivId: string;

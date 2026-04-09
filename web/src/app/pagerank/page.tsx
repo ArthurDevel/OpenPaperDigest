@@ -38,7 +38,7 @@ function ScatterTooltip({ active, payload }: any) {
   if (!active || !payload || !payload.length) return null;
 
   const item = payload[0].payload as PageRankScatterItem;
-  const date = new Date(item.createdAt);
+  const date = new Date(item.publishedAt!);
   const formatted = date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -89,11 +89,13 @@ export default function PageRankPage() {
     load();
   }, []);
 
-  // Convert date strings to timestamps for a proper numeric axis
-  const chartData = data.map((item) => ({
-    ...item,
-    timestamp: new Date(item.createdAt).getTime(),
-  }));
+  // Filter to papers with a known publication date, then convert to timestamps
+  const chartData = data
+    .filter((item) => item.publishedAt != null)
+    .map((item) => ({
+      ...item,
+      timestamp: new Date(item.publishedAt!).getTime(),
+    }));
 
   const ONE_DAY = 86_400_000;
   const now = Date.now();
@@ -131,7 +133,7 @@ export default function PageRankPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Author PageRank by Ingestion Date</h1>
+      <h1 className="text-2xl font-bold mb-6">Author PageRank by Publication Date</h1>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
         Each dot is a paper. Y axis shows the best (highest) author PageRank percentile.
       </p>

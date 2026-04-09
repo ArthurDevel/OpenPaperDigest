@@ -185,7 +185,8 @@ def create_paper(
     authors: Optional[str] = None,
     abstract: Optional[str] = None,
     signals: Optional[Dict[str, Any]] = None,
-    initiated_by_user_id: Optional[str] = None
+    initiated_by_user_id: Optional[str] = None,
+    published_at: Optional[datetime] = None,
 ) -> Paper:
     """
     Create a new paper and add it to the processing queue.
@@ -256,7 +257,8 @@ def create_paper(
         authors=authors,
         status='not_started',  # This queues the paper for processing!
         initiated_by_user_id=initiated_by_user_id,
-        signals=signals or {}
+        signals=signals or {},
+        published_at=published_at,
     )
 
     # Step 4: Persist to database using internal layer
