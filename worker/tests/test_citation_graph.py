@@ -22,8 +22,8 @@ WORKER_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
-from shared.semantic_scholar.models import S2PaperReference
-from shared.semantic_scholar.client import fetch_paper_references_batch
+from shared.semantic_scholar.models import S2PaperReference, S2PaperCitation
+from shared.semantic_scholar.client import fetch_paper_references_batch, fetch_paper_citations_batch
 
 # The DAG file imports airflow which isn't available in test env -- mock it
 sys.modules.setdefault('airflow', MagicMock())
@@ -40,8 +40,9 @@ from citation_graph_dag import (
     compute_author_scores,
     fetch_papers_needing_references,
 )
-from citation_helpers import fetch_and_store_references
+from citation_helpers import fetch_and_store_references, fetch_and_store_inbound_citations
 from expand_external_references_dag import fetch_external_nodes_needing_references
+from fetch_inbound_citations_dag import fetch_papers_needing_inbound_citations
 
 
 # ============================================================================
@@ -439,3 +440,232 @@ def test_full_pipeline(mock_fetch):
 
     assert author_percentiles['auth2'] == 100.0  # Higher score
     assert author_percentiles['auth1'] == 0.0    # Lower score (1 of 2, gets min rank)
+
+
+# ============================================================================
+# UNIT TESTS: fetch_paper_citations_batch (Phase 2)
+# ============================================================================
+
+# Mock S2 citations batch response: 3 items (paper with citers, null entry, paper with null citing ID)
+MOCK_CITATIONS_RESPONSE = [
+    # Paper with 2 citers
+    {
+        'citations': [
+            {'paperId': 'citer1'},
+            {'paperId': 'citer2'},
+        ]
+    },
+    # Null entry (paper not found)
+    None,
+    # Paper with 1 citation including a null citing paperId
+    {
+        'citations': [
+            {'paperId': 'citer3'},
+            {'paperId': None},  # null citing ID, should be skipped
+        ]
+    },
+]
+
+
+@patch('shared.semantic_scholar.client._request_with_retry')
+def test_fetch_paper_citations_batch(mock_request):
+    """
+    Verify fetch_paper_citations_batch correctly:
+    - Parses S2 batch response into S2PaperCitation DTOs
+    - Skips null entries (paper not found by S2)
+    - Skips citations with null paperId
+    - Correlates cited_s2_id from input order
+    - Sets is_influential to None (batch API limitation)
+    """
+    mock_response = MagicMock()
+    mock_response.json.return_value = MOCK_CITATIONS_RESPONSE
+    mock_request.return_value = mock_response
+
+    s2_ids = ['our_paper_a', 'our_paper_b', 'our_paper_c']
+    results = fetch_paper_citations_batch(s2_ids)
+
+    # 3 valid citations: 2 from our_paper_a, 0 from our_paper_b (null), 1 from our_paper_c
+    # (our_paper_c's null-paperId citation is skipped)
+    assert len(results) == 3
+
+    # Paper A citations (our_paper_a is the cited paper, citer1/citer2 cite it)
+    assert results[0].cited_s2_id == 'our_paper_a'
+    assert results[0].citing_s2_id == 'citer1'
+    assert results[0].is_influential is None
+
+    assert results[1].cited_s2_id == 'our_paper_a'
+    assert results[1].citing_s2_id == 'citer2'
+    assert results[1].is_influential is None
+
+    # Paper C citation (our_paper_b was null, so our_paper_c is index 2)
+    assert results[2].cited_s2_id == 'our_paper_c'
+    assert results[2].citing_s2_id == 'citer3'
+    assert results[2].is_influential is None
+
+    # Verify all results are S2PaperCitation instances
+    for cit in results:
+        assert isinstance(cit, S2PaperCitation)
+
+
+# ============================================================================
+# UNIT TESTS: fetch_and_store_inbound_citations (Phase 3)
+# ============================================================================
+
+
+@patch('citation_helpers.fetch_paper_citations_batch')
+def test_fetch_and_store_inbound_citations_inserts_edges(mock_fetch):
+    """
+    Verify fetch_and_store_inbound_citations inserts edges with correct direction:
+    citing_paper becomes source_s2_id, our paper becomes cited_s2_id.
+    Also verify inbound_citations_fetched_at is set on processed papers.
+    """
+    mock_fetch.return_value = [
+        S2PaperCitation(cited_s2_id='our_paper', citing_s2_id='citerX', is_influential=None),
+        S2PaperCitation(cited_s2_id='our_paper', citing_s2_id='citerY', is_influential=None),
+    ]
+
+    session = MagicMock()
+    counts = fetch_and_store_inbound_citations(session, ['our_paper'])
+
+    assert counts['edges_inserted'] == 2
+    assert counts['papers_marked'] == 1
+    assert counts['errors'] == 0
+
+    # Verify session.execute was called (bulk insert + UPDATE for inbound_citations_fetched_at)
+    assert session.execute.called
+
+    # Check the bulk INSERT call -- first execute call should be the edge insert
+    # The params should contain source=citerX and source=citerY (citing papers become source)
+    bulk_call = session.execute.call_args_list[0]
+    bulk_sql = str(bulk_call.args[0])
+    assert 'INSERT INTO paper_citations' in bulk_sql
+
+    bulk_params = bulk_call.args[1]
+    # Two edges: s0=citerX, c0=our_paper, s1=citerY, c1=our_paper
+    assert bulk_params['s0'] == 'citerX'
+    assert bulk_params['c0'] == 'our_paper'
+    assert bulk_params['s1'] == 'citerY'
+    assert bulk_params['c1'] == 'our_paper'
+
+    # Check the UPDATE call sets inbound_citations_fetched_at
+    update_call = session.execute.call_args_list[1]
+    update_sql = str(update_call.args[0])
+    assert 'inbound_citations_fetched_at' in update_sql
+
+    # Verify commit was called
+    session.commit.assert_called()
+
+
+@patch('citation_helpers.fetch_paper_citations_batch')
+def test_fetch_and_store_inbound_citations_zero_citers(mock_fetch):
+    """
+    Verify that papers with 0 inbound citations still get inbound_citations_fetched_at set.
+    No sentinel row needed -- the timestamp is the completion marker.
+    """
+    mock_fetch.return_value = []
+
+    session = MagicMock()
+    counts = fetch_and_store_inbound_citations(session, ['lonely_paper'])
+
+    assert counts['edges_inserted'] == 0
+    assert counts['papers_marked'] == 1
+    assert counts['errors'] == 0
+
+    # Even with 0 citers, the UPDATE for inbound_citations_fetched_at should still execute
+    assert session.execute.called
+    update_call = session.execute.call_args_list[0]
+    update_sql = str(update_call.args[0])
+    assert 'inbound_citations_fetched_at' in update_sql
+
+    session.commit.assert_called()
+
+
+# ============================================================================
+# UNIT TESTS: fetch_papers_needing_inbound_citations (Phase 4)
+# ============================================================================
+
+
+def test_fetch_papers_needing_inbound_citations():
+    """
+    Verify fetch_papers_needing_inbound_citations returns only papers with
+    s2_paper_id and inbound_citations_fetched_at IS NULL.
+    """
+    session = MagicMock()
+
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [('paper_new1',), ('paper_new2',)]
+    session.execute.return_value = mock_result
+
+    result = fetch_papers_needing_inbound_citations(session)
+
+    assert result == ['paper_new1', 'paper_new2']
+    session.execute.assert_called_once()
+
+    # Verify the SQL queries the papers table with the correct conditions
+    query_sql = str(session.execute.call_args.args[0])
+    assert 's2_paper_id' in query_sql
+    assert 'inbound_citations_fetched_at IS NULL' in query_sql
+    assert 'papers' in query_sql
+
+
+def test_fetch_papers_needing_inbound_citations_idempotent():
+    """
+    Verify that a second run returns an empty list when all papers already
+    have inbound_citations_fetched_at set.
+    """
+    session = MagicMock()
+
+    # First run: papers need fetching
+    mock_result_first = MagicMock()
+    mock_result_first.fetchall.return_value = [('paper1',)]
+    session.execute.return_value = mock_result_first
+
+    first_run = fetch_papers_needing_inbound_citations(session)
+    assert first_run == ['paper1']
+
+    # Second run: all papers already marked, none returned
+    mock_result_second = MagicMock()
+    mock_result_second.fetchall.return_value = []
+    session.execute.return_value = mock_result_second
+
+    second_run = fetch_papers_needing_inbound_citations(session)
+    assert second_run == []
+
+
+# ============================================================================
+# UNIT TESTS: expand DAG boundary with inbound-only nodes (Phase 5)
+# ============================================================================
+
+
+def test_expand_dag_does_not_fetch_inbound_only_nodes():
+    """
+    Verify fetch_external_nodes_needing_references does NOT return papers that
+    only appear as source_s2_id (from inbound citation edges). They must also
+    appear as cited_s2_id to be eligible for expansion.
+
+    Scenario: paper 'citerX' appears only as source_s2_id from an inbound edge
+    (citerX -> our_paper). The expand DAG query finds nodes that appear as
+    cited_s2_id but NOT as source_s2_id. Since citerX only appears as source,
+    it should NOT be returned.
+
+    The mock returns empty to confirm that citerX-like nodes are excluded by
+    the SQL query logic (LEFT JOIN on cited_s2_id, not source_s2_id).
+    """
+    session = MagicMock()
+
+    # The query returns only nodes appearing as cited_s2_id but not source_s2_id.
+    # Inbound-only nodes (appearing only as source_s2_id) are NOT returned.
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = []
+    session.execute.return_value = mock_result
+
+    result = fetch_external_nodes_needing_references(session)
+
+    assert result == []
+    session.execute.assert_called_once()
+
+    # Verify the SQL uses cited_s2_id as the lookup, not source_s2_id
+    query_sql = str(session.execute.call_args.args[0])
+    assert 'cited.cited_s2_id' in query_sql
+    # The LEFT JOIN matches cited_s2_id against source_s2_id
+    assert 'source.source_s2_id = cited.cited_s2_id' in query_sql

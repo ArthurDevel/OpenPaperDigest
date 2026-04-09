@@ -54,6 +54,7 @@ class PaperRecord(Base):
     s2_embedding = Column(Vector(768), nullable=True)
     # PageRank score and percentile computed from citation graph
     pagerank = Column(JSONB, nullable=True)
+    inbound_citations_fetched_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("paper_uuid", name="uq_papers_paper_uuid"),

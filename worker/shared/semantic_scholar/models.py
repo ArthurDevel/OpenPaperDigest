@@ -41,6 +41,14 @@ class S2PaperReference:
     is_influential: Optional[bool] = None
 
 
+@dataclass
+class S2PaperCitation:
+    """A single inbound citation edge: citing paper cites our paper."""
+    cited_s2_id: str               # The paper that was queried (our paper, the one being cited)
+    citing_s2_id: str              # The paper that cites it
+    is_influential: Optional[bool] = None  # Always None from batch API
+
+
 # ============================================================================
 # PAPER METADATA MODELS
 # ============================================================================
