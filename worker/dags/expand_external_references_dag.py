@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 sys.path.insert(0, '/opt/airflow')
 
-from dags.citation_graph_dag import database_session, fetch_and_store_references
+from dags.citation_helpers import database_session, fetch_and_store_references
 
 # ============================================================================
 # HELPER FUNCTIONS

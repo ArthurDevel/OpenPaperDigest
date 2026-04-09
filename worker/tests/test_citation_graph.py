@@ -18,7 +18,7 @@ from unittest.mock import patch, MagicMock, call
 import pytest
 
 # Ensure worker root is on sys.path for imports like `shared.semantic_scholar`
-WORKER_ROOT = Path(__file__).resolve().parents[2]
+WORKER_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
@@ -39,8 +39,8 @@ from citation_graph_dag import (
     compute_percentiles,
     compute_author_scores,
     fetch_papers_needing_references,
-    fetch_and_store_references,
 )
+from citation_helpers import fetch_and_store_references
 from expand_external_references_dag import fetch_external_nodes_needing_references
 
 
@@ -260,7 +260,7 @@ def test_compute_author_scores():
 # ============================================================================
 
 
-@patch('citation_graph_dag.fetch_paper_references_batch')
+@patch('citation_helpers.fetch_paper_references_batch')
 def test_sentinel_row_inserted_for_zero_references(mock_fetch):
     """
     Verify that fetch_and_store_references inserts a sentinel row
@@ -287,7 +287,7 @@ def test_sentinel_row_inserted_for_zero_references(mock_fetch):
     assert 'cited' not in params_dict
 
 
-@patch('citation_graph_dag.fetch_paper_references_batch')
+@patch('citation_helpers.fetch_paper_references_batch')
 def test_sentinel_row_not_inserted_when_references_exist(mock_fetch):
     """
     Verify that papers with references do NOT get sentinel rows.
@@ -358,7 +358,7 @@ def test_fetch_external_nodes_needing_references():
 # ============================================================================
 
 
-@patch('citation_graph_dag.fetch_paper_references_batch')
+@patch('citation_helpers.fetch_paper_references_batch')
 def test_full_pipeline(mock_fetch):
     """
     Integration test: mock S2 API and DB session, run DAG task functions in
