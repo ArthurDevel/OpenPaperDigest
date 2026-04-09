@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from typing import Optional, NamedTuple, List, Dict, Any
 
 from airflow.decorators import dag, task
+from airflow.models.param import Param
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -31,6 +32,7 @@ from users.client import set_requests_processed
 MAX_PDF_PAGES = 70
 MAX_PAPERS_PER_RUN = 500
 MAX_PARALLEL_TASKS = 4
+PAPER_PROCESSING_POOL = "paper_processing"
 
 
 # ============================================================================
@@ -311,27 +313,40 @@ async def _download_and_process_paper(job: JobInfo) -> ProcessedDocument:
     return processed_document
 
 
-def _claim_next_job(session: Session) -> Optional[JobInfo]:
+def _claim_next_job(session: Session, date_from: Optional[str] = None, date_to: Optional[str] = None) -> Optional[JobInfo]:
     """
     Claim the next available paper job using database locking.
-    
+
     Args:
         session: Active database session
-        
+        date_from: Optional start date filter (YYYY-MM-DD), inclusive
+        date_to: Optional end date filter (YYYY-MM-DD), inclusive
+
     Returns:
         Optional[JobInfo]: Next job to process, or None if queue is empty
     """
     # Step 1: Find and lock next available job
+    where_clauses = ["status = 'not_started'"]
+    params = {}
+    if date_from:
+        where_clauses.append("created_at >= :date_from")
+        params["date_from"] = date_from
+    if date_to:
+        where_clauses.append("created_at < CAST(:date_to AS date) + interval '1 day'")
+        params["date_to"] = date_to
+
+    where_sql = " AND ".join(where_clauses)
     job_row = session.execute(
         text(
-            """
+            f"""
             SELECT id FROM papers
-            WHERE status = 'not_started'
+            WHERE {where_sql}
             ORDER BY RANDOM()
             LIMIT 1
             FOR UPDATE SKIP LOCKED
             """
-        )
+        ),
+        params
     ).first()
     
     if not job_row:
@@ -363,25 +378,27 @@ def _claim_next_job(session: Session) -> Optional[JobInfo]:
     return job_info
 
 
-def _claim_available_jobs(session: Session, max_jobs: int) -> List[JobInfo]:
+def _claim_available_jobs(session: Session, max_jobs: int, date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[JobInfo]:
     """
     Claim multiple available paper jobs using database locking.
-    
+
     Args:
         session: Active database session
         max_jobs: Maximum number of jobs to claim
-        
+        date_from: Optional start date filter (YYYY-MM-DD), inclusive
+        date_to: Optional end date filter (YYYY-MM-DD), inclusive
+
     Returns:
         List[JobInfo]: List of claimed jobs (may be fewer than max_jobs if queue is empty)
     """
     claimed_jobs = []
-    
+
     for _ in range(max_jobs):
-        job = _claim_next_job(session)
+        job = _claim_next_job(session, date_from=date_from, date_to=date_to)
         if not job:
             break
         claimed_jobs.append(job)
-    
+
     return claimed_jobs
 
 
@@ -490,8 +507,30 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
     schedule="0 */2 * * *",  # Every 2 hours
     catchup=False,
     max_active_runs=1,  # Prevent overlapping runs
-    max_active_tasks=MAX_PARALLEL_TASKS,  # Maximum concurrent paper processing tasks
+    max_active_tasks=16,  # Ceiling; actual concurrency controlled by pool
     tags=["papers", "worker"],
+    params={
+        "max_parallel": Param(
+            default=MAX_PARALLEL_TASKS,
+            type="integer",
+            title="Max Parallel Workers",
+            description="Number of papers to process in parallel. Default is 4 for scheduled runs, increase for manual batch runs.",
+            minimum=1,
+            maximum=16,
+        ),
+        "date_from": Param(
+            default="",
+            type="string",
+            title="Date From (YYYY-MM-DD)",
+            description="Only process papers ingested on or after this date. Leave empty for no filter.",
+        ),
+        "date_to": Param(
+            default="",
+            type="string",
+            title="Date To (YYYY-MM-DD)",
+            description="Only process papers ingested on or before this date. Leave empty for no filter.",
+        ),
+    },
     doc_md="""
     ### Paper Processing Worker DAG
 
@@ -504,24 +543,53 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
     - Handles errors gracefully and marks failed jobs
     - Processes papers in parallel using Airflow dynamic task mapping
 
+    **Manual trigger parameters:**
+    - **max_parallel**: Override number of parallel workers (default 4, max 16)
+    - **date_from / date_to**: Filter papers by ingestion date (created_at)
+
     Simplified pipeline (no section rewriting): faster processing and lower costs.
     Replaces the previous supervisord-based worker with better Airflow integration.
     """,
 )
 def paper_processing_worker_dag():
-    
+
     @task
-    def claim_available_jobs() -> List[int]:
+    def configure_pool(max_parallel: int = MAX_PARALLEL_TASKS) -> None:
+        """Resize the paper processing pool to control concurrency."""
+        from airflow.models.pool import Pool
+        from airflow.utils.session import create_session
+
+        max_parallel = int(max_parallel)
+        with create_session() as session:
+            pool = session.query(Pool).filter(Pool.pool == PAPER_PROCESSING_POOL).first()
+            if pool:
+                pool.slots = max_parallel
+            else:
+                session.add(Pool(pool=PAPER_PROCESSING_POOL, slots=max_parallel, description="Paper processing concurrency", include_deferred=False))
+        print(f"Set pool '{PAPER_PROCESSING_POOL}' to {max_parallel} slots")
+
+    @task
+    def claim_available_jobs(date_from: str = "", date_to: str = "") -> List[int]:
         """
         Claim available paper jobs from the queue.
+
+        Args:
+            date_from: Optional start date filter (YYYY-MM-DD)
+            date_to: Optional end date filter (YYYY-MM-DD)
 
         Returns:
             List[int]: List of job IDs for parallel processing (IDs only to avoid XCom size limits)
         """
+        date_from = date_from or None
+        date_to = date_to or None
+
+        if date_from or date_to:
+            print(f"Date filter: {date_from or 'any'} to {date_to or 'any'}")
+
         print(f"Claiming up to {MAX_PAPERS_PER_RUN} jobs from queue...")
 
         with database_session() as session:
-            jobs = _claim_available_jobs(session, MAX_PAPERS_PER_RUN)
+            jobs = _claim_available_jobs(session, MAX_PAPERS_PER_RUN, date_from=date_from, date_to=date_to)
 
         if not jobs:
             print("No papers found in queue")
@@ -532,7 +600,7 @@ def paper_processing_worker_dag():
         # Return only IDs to keep XCom payload small
         return [job.id for job in jobs]
     
-    @task
+    @task(pool=PAPER_PROCESSING_POOL)
     def process_single_paper(job_id: int) -> Dict[str, Any]:
         """
         Process a single paper job through the complete pipeline.
@@ -584,14 +652,23 @@ def paper_processing_worker_dag():
             "total": processed_count + failed_count
         }
     
-    # Step 1: Claim available jobs
-    claimed_jobs = claim_available_jobs()
-    
-    # Step 2: Process each job in parallel using dynamic task mapping
+    # Step 1: Configure pool size based on max_parallel param
+    pool_configured = configure_pool(max_parallel="{{ params.max_parallel }}")
+
+    # Step 2: Claim available jobs
+    claimed_jobs = claim_available_jobs(
+        date_from="{{ params.date_from }}",
+        date_to="{{ params.date_to }}",
+    )
+
+    # Step 3: Process each job in parallel using dynamic task mapping
     processing_results = process_single_paper.expand(job_id=claimed_jobs)
-    
-    # Step 3: Aggregate results
+
+    # Step 4: Aggregate results
     aggregate_results(processing_results)
+
+    # Ensure pool is configured before processing starts
+    pool_configured >> claimed_jobs >> processing_results
 
 
 paper_processing_worker_dag()
