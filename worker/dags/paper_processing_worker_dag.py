@@ -341,7 +341,7 @@ def _claim_next_job(session: Session, date_from: Optional[str] = None, date_to: 
             f"""
             SELECT id FROM papers
             WHERE {where_sql}
-            ORDER BY RANDOM()
+            ORDER BY created_at DESC
             LIMIT 1
             FOR UPDATE SKIP LOCKED
             """
