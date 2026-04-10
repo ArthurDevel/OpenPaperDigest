@@ -12,12 +12,13 @@ Responsibilities:
 - Persist arXiv classification metadata
 """
 
+import random
 import sys
 import time
 import pendulum
 from contextlib import contextmanager
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from airflow.decorators import dag, task
 from sqlalchemy.orm import Session
@@ -33,10 +34,14 @@ from papers.db.models import PaperRecord
 # ============================================================================
 
 # arXiv API endpoint and query settings
-ARXIV_API_BASE = 'http://export.arxiv.org/api/query'
+ARXIV_API_BASE = 'https://export.arxiv.org/api/query'
 ARXIV_CATEGORY = 'cs.*'
 MAX_RESULTS_PER_QUERY = 200
 ARXIV_API_DELAY = 3.0  # seconds between paginated arXiv API calls
+ARXIV_API_MAX_RETRIES = 4
+ARXIV_API_BASE_BACKOFF_SECONDS = 5.0
+ARXIV_API_MAX_BACKOFF_SECONDS = 60.0
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 # ============================================================================
@@ -83,6 +88,77 @@ def build_arxiv_classification_dict(paper: Dict) -> Dict:
     return classification
 
 
+def _parse_retry_after_seconds(retry_after: Optional[str]) -> Optional[float]:
+    """Parse Retry-After header value into seconds."""
+    if not retry_after:
+        return None
+
+    retry_after = retry_after.strip()
+    if not retry_after:
+        return None
+
+    try:
+        return max(0.0, float(retry_after))
+    except ValueError:
+        pass
+
+    try:
+        from email.utils import parsedate_to_datetime
+
+        retry_at = parsedate_to_datetime(retry_after)
+        return max(0.0, (retry_at - datetime.now(retry_at.tzinfo)).total_seconds())
+    except Exception:
+        return None
+
+
+def _compute_retry_delay(attempt: int, retry_after: Optional[str]) -> float:
+    """Return bounded backoff delay with light jitter."""
+    retry_after_seconds = _parse_retry_after_seconds(retry_after)
+    if retry_after_seconds is not None:
+        return retry_after_seconds
+
+    exponential_delay = min(
+        ARXIV_API_MAX_BACKOFF_SECONDS,
+        ARXIV_API_BASE_BACKOFF_SECONDS * (2 ** attempt),
+    )
+    return exponential_delay + random.uniform(0.0, 2.0)
+
+
+def _fetch_arxiv_page(query_url: str) -> bytes:
+    """Fetch a single arXiv API page with retry on transient failures."""
+    import httpx
+
+    for attempt in range(ARXIV_API_MAX_RETRIES + 1):
+        try:
+            response = httpx.get(query_url, timeout=60, follow_redirects=True)
+        except httpx.RequestError:
+            if attempt >= ARXIV_API_MAX_RETRIES:
+                raise
+            delay = _compute_retry_delay(attempt, None)
+            print(
+                f'  arXiv request failed, waiting {delay:.1f}s '
+                f'(attempt {attempt + 1}/{ARXIV_API_MAX_RETRIES})'
+            )
+            time.sleep(delay)
+            continue
+
+        if response.status_code not in RETRYABLE_STATUS_CODES:
+            response.raise_for_status()
+            return response.content
+
+        if attempt >= ARXIV_API_MAX_RETRIES:
+            response.raise_for_status()
+
+        delay = _compute_retry_delay(attempt, response.headers.get('Retry-After'))
+        print(
+            f'  arXiv returned {response.status_code}, waiting {delay:.1f}s '
+            f'(attempt {attempt + 1}/{ARXIV_API_MAX_RETRIES})'
+        )
+        time.sleep(delay)
+
+    raise RuntimeError('Unreachable arXiv retry state')
+
+
 def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dict]:
     """
     Query arXiv API for recent cs.* papers, sorted by submission date.
@@ -93,9 +169,7 @@ def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dic
     @param max_results: Maximum number of papers to fetch per page
     @returns List of dicts with arxiv_id, title, authors_str, abstract
     """
-    from shared.arxiv.models import ArxivMetadata
     import xml.etree.ElementTree as ET
-    import httpx
 
     # Query for papers submitted in the last 2 days (buffer for indexing delays)
     now = pendulum.now('UTC')
@@ -114,10 +188,7 @@ def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dic
             f"&sortBy=submittedDate&sortOrder=descending"
         )
 
-        response = httpx.get(query_url, timeout=60, follow_redirects=True)
-        response.raise_for_status()
-
-        root = ET.fromstring(response.content)
+        root = ET.fromstring(_fetch_arxiv_page(query_url))
         ns = {
             'atom': 'http://www.w3.org/2005/Atom',
             'arxiv': 'http://arxiv.org/schemas/atom',
