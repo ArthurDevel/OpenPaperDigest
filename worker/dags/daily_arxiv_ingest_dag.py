@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import List, Dict, Optional
 
 from airflow.decorators import dag, task
+from airflow.models.param import Param
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, '/opt/airflow')
@@ -159,23 +160,35 @@ def _fetch_arxiv_page(query_url: str) -> bytes:
     raise RuntimeError('Unreachable arXiv retry state')
 
 
-def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dict]:
+def fetch_new_arxiv_papers(
+    max_results: int = MAX_RESULTS_PER_QUERY,
+    override_from: Optional[str] = None,
+    override_to: Optional[str] = None,
+) -> List[Dict]:
     """
     Query arXiv API for recent cs.* papers, sorted by submission date.
 
     Uses submittedDate range to only get papers from the last 2 days,
     with a buffer to handle timezone differences and delayed indexing.
+    When override_from/override_to are provided, uses those dates instead.
 
     @param max_results: Maximum number of papers to fetch per page
+    @param override_from: Optional start date (YYYY-MM-DD) to override the default 2-day window
+    @param override_to: Optional end date (YYYY-MM-DD) to override the default 2-day window
     @returns List of dicts with arxiv_id, title, authors_str, abstract
     """
     import xml.etree.ElementTree as ET
 
-    # Query for papers submitted in the last 2 days (buffer for indexing delays)
-    now = pendulum.now('UTC')
-    two_days_ago = now.subtract(days=2)
-    date_from = two_days_ago.format('YYYYMMDD') + '0000'
-    date_to = now.format('YYYYMMDD') + '2359'
+    if override_from:
+        date_from = override_from.replace('-', '') + '0000'
+    else:
+        two_days_ago = pendulum.now('UTC').subtract(days=2)
+        date_from = two_days_ago.format('YYYYMMDD') + '0000'
+
+    if override_to:
+        date_to = override_to.replace('-', '') + '2359'
+    else:
+        date_to = pendulum.now('UTC').format('YYYYMMDD') + '2359'
 
     all_papers = []
     start = 0
@@ -272,6 +285,18 @@ def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dic
     catchup=False,
     max_active_runs=1,
     tags=['papers', 'ingestion', 'arxiv', 'daily'],
+    params={
+        'date_from': Param(
+            default='',
+            type='string',
+            description='Start date (YYYY-MM-DD) for manual backfill. Leave empty for default 2-day window.',
+        ),
+        'date_to': Param(
+            default='',
+            type='string',
+            description='End date (YYYY-MM-DD) for manual backfill. Leave empty for today.',
+        ),
+    },
     doc_md="""
     ### Daily arXiv Ingest DAG
 
@@ -280,19 +305,33 @@ def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dic
     1. Fetches metadata (title, authors, abstract) from arXiv API
     2. Creates a paper record queued for processing
     3. Stores arXiv-native classification metadata
+
+    **Manual backfill:** Trigger with `date_from` / `date_to` params (YYYY-MM-DD)
+    to ingest a custom date range. Existing papers are safely skipped.
     """,
 )
 def daily_arxiv_ingest_dag():
 
     @task
-    def ingest_papers() -> Dict[str, int]:
+    def ingest_papers(**context) -> Dict[str, int]:
         """
         Fetch new arXiv cs.* papers and ingest them with arXiv metadata only.
 
         @returns Dict with added/skipped/failed counts
         """
-        print('Fetching new arXiv cs.* papers...')
-        papers = fetch_new_arxiv_papers()
+        params = context.get('params', {})
+        override_from = params.get('date_from', '').strip() or None
+        override_to = params.get('date_to', '').strip() or None
+
+        if override_from:
+            print(f'Manual backfill: {override_from} to {override_to or "today"}')
+        else:
+            print('Fetching new arXiv cs.* papers (default 2-day window)...')
+
+        papers = fetch_new_arxiv_papers(
+            override_from=override_from,
+            override_to=override_to,
+        )
         print(f'Found {len(papers)} papers from arXiv API')
 
         added = 0
