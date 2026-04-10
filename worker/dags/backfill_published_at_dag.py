@@ -93,40 +93,46 @@ def fetch_published_dates_batch(arxiv_ids: List[str]) -> Dict[str, Optional[date
 def backfill_published_at():
     """
     Fetch arXiv publication dates for all papers missing published_at.
-    Processes in batches with rate limiting to respect arXiv API limits.
+    Queries the DB directly (no XCom) and processes in batches with rate
+    limiting to respect arXiv API limits.
     """
 
     @task
-    def get_papers_missing_published_at() -> List[Dict[str, str]]:
-        with database_session() as session:
-            papers = session.query(PaperRecord.id, PaperRecord.arxiv_id).filter(
-                PaperRecord.arxiv_id.isnot(None),
-                PaperRecord.published_at.is_(None),
-            ).order_by(PaperRecord.id.desc()).all()
-
-            result = [{"id": p.id, "arxiv_id": p.arxiv_id} for p in papers]
-            print(f"Found {len(result)} papers missing published_at")
-            return result
-
-    @task
-    def backfill_dates(papers: List[Dict[str, str]]) -> Dict[str, Any]:
+    def backfill_dates() -> Dict[str, Any]:
         updated = 0
         failed = 0
         not_found = 0
+        offset = 0
 
-        # Group into batches
-        batches = [papers[i:i + BATCH_SIZE] for i in range(0, len(papers), BATCH_SIZE)]
-        print(f"Processing {len(batches)} batches of up to {BATCH_SIZE} papers")
+        # Count total for logging
+        with database_session() as session:
+            total = session.query(PaperRecord.id).filter(
+                PaperRecord.arxiv_id.isnot(None),
+                PaperRecord.published_at.is_(None),
+            ).count()
+        print(f"Found {total} papers missing published_at")
 
-        for batch_idx, batch in enumerate(batches):
-            arxiv_ids = [p["arxiv_id"] for p in batch]
-            id_to_db_id = {p["arxiv_id"]: p["id"] for p in batch}
+        while True:
+            # Fetch one batch of papers directly from the DB each iteration
+            with database_session() as session:
+                batch = session.query(PaperRecord.id, PaperRecord.arxiv_id).filter(
+                    PaperRecord.arxiv_id.isnot(None),
+                    PaperRecord.published_at.is_(None),
+                ).order_by(PaperRecord.id.desc()).limit(BATCH_SIZE).offset(offset).all()
+
+            if not batch:
+                break
+
+            arxiv_ids = [p.arxiv_id for p in batch]
+            id_to_db_id = {p.arxiv_id: p.id for p in batch}
 
             try:
                 date_map = fetch_published_dates_batch(arxiv_ids)
             except Exception as e:
-                print(f"  Batch {batch_idx + 1} API error: {e}")
+                batch_num = offset // BATCH_SIZE + 1
+                print(f"  Batch {batch_num} API error: {e}")
                 failed += len(batch)
+                offset += BATCH_SIZE
                 time.sleep(API_DELAY)
                 continue
 
@@ -143,13 +149,22 @@ def backfill_published_at():
                     ).update({"published_at": published_at})
                     updated += 1
 
-            if (batch_idx + 1) % 10 == 0:
-                print(f"  Progress: {batch_idx + 1}/{len(batches)} batches, {updated} updated")
+            # Rows that got updated are no longer returned by the query,
+            # so only advance offset for rows that weren't updated
+            batch_not_updated = len(batch) - sum(
+                1 for aid in arxiv_ids
+                if date_map.get(aid) is not None
+            )
+            offset += batch_not_updated
+
+            batch_num = (updated + not_found + failed + batch_not_updated) // BATCH_SIZE
+            if batch_num % 10 == 0:
+                print(f"  Progress: {updated} updated, {not_found} not found, {failed} failed")
 
             time.sleep(API_DELAY)
 
         summary = {
-            "total": len(papers),
+            "total": total,
             "updated": updated,
             "not_found": not_found,
             "failed": failed,
@@ -157,8 +172,7 @@ def backfill_published_at():
         print(f"Backfill complete: {summary}")
         return summary
 
-    papers = get_papers_missing_published_at()
-    backfill_dates(papers)
+    backfill_dates()
 
 
 backfill_published_at_dag = backfill_published_at()

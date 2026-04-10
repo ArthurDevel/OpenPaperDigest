@@ -37,9 +37,9 @@ S2_API_BASE = 'https://api.semanticscholar.org/graph/v1'
 # The free-tier rate limit is shared globally across ALL unauthenticated users.
 # Burst fast and retry with exponential backoff — waiting a fixed delay just
 # lets other users consume the pool. Tested in testscripts/7_test_rate_limits.py.
-RETRY_BASE_DELAY = 0.1  # seconds, doubles each retry
-RETRY_BACKOFF = 2.0
-MAX_RETRIES = 5
+MAX_RETRIES = 10
+# Each delay repeated twice before doubling: 0.1, 0.1, 0.2, 0.2, 0.4, 0.4, 0.8, 0.8, 1.6, 1.6
+RETRY_DELAYS = [0.1 * (2 ** (i // 2)) for i in range(MAX_RETRIES)]
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -65,15 +65,14 @@ def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
     @param kwargs: Additional arguments passed to requests.get/post
     @returns Response object
     """
-    delay = RETRY_BASE_DELAY
     for attempt in range(MAX_RETRIES):
         response = getattr(requests, method)(url, **kwargs)
         if response.status_code != 429:
             response.raise_for_status()
             return response
+        delay = RETRY_DELAYS[attempt]
         logger.warning(f"S2 rate limited (429), retrying in {delay:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})")
         time.sleep(delay)
-        delay *= RETRY_BACKOFF
 
     # Final attempt, let it raise
     response = getattr(requests, method)(url, **kwargs)
