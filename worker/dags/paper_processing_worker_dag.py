@@ -83,6 +83,27 @@ class JobInfo(NamedTuple):
 
 
 # ============================================================================
+# PARAMETER HELPERS
+# ============================================================================
+
+def _normalize_optional_date_param(value: Optional[str]) -> Optional[str]:
+    """
+    Normalize nullable Airflow date params before using them in SQL filters.
+
+    Airflow templating/manual trigger UI can surface empty values as None, "",
+    or stringified nulls like "None".
+    """
+    if value is None:
+        return None
+
+    normalized = str(value).strip()
+    if not normalized or normalized.lower() in {"none", "null"}:
+        return None
+
+    return normalized
+
+
+# ============================================================================
 # DATABASE HELPERS
 # ============================================================================
 
@@ -192,6 +213,9 @@ def _claim_next_job(session: Session, date_from: Optional[str] = None, date_to: 
     Returns:
         Optional[JobInfo]: Next job to process, or None if queue is empty
     """
+    date_from = _normalize_optional_date_param(date_from)
+    date_to = _normalize_optional_date_param(date_to)
+
     # Step 1: Find and lock next available job
     where_clauses = ["status = 'not_started'"]
     params = {}
@@ -432,19 +456,16 @@ def paper_processing_worker_dag():
         print(f"Set pool '{PAPER_PROCESSING_POOL}' to {max_parallel} slots")
 
     @task
-    def claim_available_jobs(date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[int]:
+    def claim_available_jobs(**context) -> List[int]:
         """
         Claim available paper jobs from the queue.
-
-        Args:
-            date_from: Optional start date filter (YYYY-MM-DD)
-            date_to: Optional end date filter (YYYY-MM-DD)
 
         Returns:
             List[int]: List of job IDs for parallel processing (IDs only to avoid XCom size limits)
         """
-        date_from = date_from or None
-        date_to = date_to or None
+        params = context.get("params", {})
+        date_from = _normalize_optional_date_param(params.get("date_from"))
+        date_to = _normalize_optional_date_param(params.get("date_to"))
 
         if date_from or date_to:
             print(f"Date filter: {date_from or 'any'} to {date_to or 'any'}")
@@ -519,10 +540,7 @@ def paper_processing_worker_dag():
     pool_configured = configure_pool(max_parallel="{{ params.max_parallel }}")
 
     # Step 2: Claim available jobs
-    claimed_jobs = claim_available_jobs(
-        date_from="{{ params.date_from }}",
-        date_to="{{ params.date_to }}",
-    )
+    claimed_jobs = claim_available_jobs()
 
     # Step 3: Process each job in parallel using dynamic task mapping
     processing_results = process_single_paper.expand(job_id=claimed_jobs)
