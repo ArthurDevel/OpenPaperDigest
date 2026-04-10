@@ -8,7 +8,11 @@ Verifies that build_arxiv_classification_dict correctly:
 
 import sys
 from pathlib import Path
+from typing import List
 from unittest.mock import MagicMock
+
+import httpx
+import pendulum
 
 # Ensure worker root is on sys.path for imports like `shared.arxiv`
 WORKER_ROOT = Path(__file__).resolve().parents[3]
@@ -19,7 +23,11 @@ if str(WORKER_ROOT) not in sys.path:
 sys.modules.setdefault('airflow', MagicMock())
 sys.modules.setdefault('airflow.decorators', MagicMock())
 
-from dags.daily_arxiv_ingest_dag import build_arxiv_classification_dict
+from dags.daily_arxiv_ingest_dag import (
+    ARXIV_API_BASE,
+    build_arxiv_classification_dict,
+    fetch_new_arxiv_papers,
+)
 
 
 class TestBuildArxivClassificationDict:
@@ -90,3 +98,46 @@ class TestBuildArxivClassificationDict:
             'arxiv_categories': ['stat.ML'],
             'arxiv_primary_category': 'stat.ML',
         }
+
+
+def test_fetch_new_arxiv_papers_retries_after_429(monkeypatch):
+    request = httpx.Request(
+        'GET',
+        f'{ARXIV_API_BASE}?search_query=cat:cs.*+AND+submittedDate:[202604080000+TO+202604102359]&start=0&max_results=2&sortBy=submittedDate&sortOrder=descending',
+    )
+    rate_limited = httpx.Response(
+        429,
+        request=request,
+        headers={'Retry-After': '7'},
+        content=b'rate limited',
+    )
+    success = httpx.Response(
+        200,
+        request=request,
+        content=b"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>http://arxiv.org/abs/2604.12345v1</id>
+    <title>Retry-safe ingest</title>
+    <summary>Abstract text</summary>
+    <author><name>Alice Example</name></author>
+    <category term="cs.AI" />
+    <published>2026-04-09T12:00:00Z</published>
+  </entry>
+</feed>
+""",
+    )
+
+    responses = iter([rate_limited, success])
+    sleeps: List[float] = []
+
+    monkeypatch.setattr('dags.daily_arxiv_ingest_dag.pendulum.now', lambda _tz: pendulum.datetime(2026, 4, 10, tz='UTC'))
+    monkeypatch.setattr(httpx, 'get', lambda *args, **kwargs: next(responses))
+    monkeypatch.setattr('dags.daily_arxiv_ingest_dag.time.sleep', lambda seconds: sleeps.append(seconds))
+
+    papers = fetch_new_arxiv_papers(max_results=2)
+
+    assert len(papers) == 1
+    assert papers[0]['arxiv_id'] == '2604.12345'
+    assert papers[0]['title'] == 'Retry-safe ingest'
+    assert sleeps == [7.0]
