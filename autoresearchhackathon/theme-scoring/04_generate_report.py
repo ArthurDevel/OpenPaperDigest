@@ -163,8 +163,57 @@ def build_html(data):
   .badge-reverted {{ background: rgba(239, 68, 68, 0.15); color: #ef4444; }}
   .mutation-text {{ color: #94a3b8; font-size: 0.8rem; max-width: 250px; }}
 
+  /* How it works */
+  .how-it-works {{
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }}
+  .how-title {{
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+  }}
+  .how-steps {{
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }}
+  .step {{
+    flex: 1;
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+  }}
+  .step-num {{
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #334155;
+    color: #e2e8f0;
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }}
+  .step-content {{ flex: 1; }}
+  .step-label {{ font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem; }}
+  .step-desc {{ color: #94a3b8; font-size: 0.78rem; line-height: 1.5; }}
+  .step-arrow {{
+    flex-shrink: 0;
+    color: #475569;
+    font-size: 1.25rem;
+    padding-top: 0.2rem;
+  }}
+
   @media (max-width: 640px) {{
     .stats-row {{ grid-template-columns: 1fr; }}
+    .how-steps {{ flex-direction: column; }}
+    .step-arrow {{ transform: rotate(90deg); align-self: center; }}
   }}
 </style>
 </head>
@@ -176,6 +225,43 @@ def build_html(data):
 
   <div class="chart-container">
     {svg_chart}
+  </div>
+
+  <div class="how-it-works">
+    <div class="how-title">How each iteration works</div>
+    <div class="how-steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-label">Mutate</div>
+          <div class="step-desc">Ask the LLM to suggest a change to the theme detection prompt (e.g., "add MECE requirement", "ask for keywords per theme").</div>
+        </div>
+      </div>
+      <div class="step-arrow">&rarr;</div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-label">Detect</div>
+          <div class="step-desc">Send the mutated prompt + all paper titles and abstracts to the LLM. It creates research themes and assigns each paper to 1-2 themes.</div>
+        </div>
+      </div>
+      <div class="step-arrow">&rarr;</div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-label">Score</div>
+          <div class="step-desc">Compute S = mean_intra / mean_inter using paper embeddings. No LLM involved, pure math.</div>
+        </div>
+      </div>
+      <div class="step-arrow">&rarr;</div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <div class="step-label">Keep or revert</div>
+          <div class="step-desc">If score improved, keep the new prompt. If not, revert to the previous one.</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="formula-box">
