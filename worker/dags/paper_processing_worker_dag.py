@@ -365,7 +365,7 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
 
 
 @dag(
-    dag_id="paper_processing_worker",
+    dag_id="processing_paper_processing_worker",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule="0 */2 * * *",  # Every 2 hours
     catchup=False,

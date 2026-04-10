@@ -525,7 +525,7 @@ def refresh_paper_signals(paper_ids: List[int]) -> Dict[str, int]:
 
 
 @dag(
-    dag_id='enrich_s2_paper_data',
+    dag_id='enrichment_enrich_s2_paper_data',
     start_date=pendulum.datetime(2026, 3, 24, tz='UTC'),
     schedule='0 10 * * *',  # Daily at 10:00 UTC
     catchup=False,
