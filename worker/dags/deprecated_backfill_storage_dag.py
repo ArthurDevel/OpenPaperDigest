@@ -33,7 +33,7 @@ def _decode_data_url(data_url):
 
 
 @dag(
-    dag_id="backfill_storage",
+    dag_id="deprecated_backfill_storage",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule=None,
     catchup=False,

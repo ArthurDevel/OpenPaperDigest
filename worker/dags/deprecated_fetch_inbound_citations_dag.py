@@ -39,7 +39,7 @@ def fetch_papers_needing_inbound_citations(session: Session) -> List[str]:
 
 
 @dag(
-    dag_id='fetch_inbound_citations',
+    dag_id='deprecated_fetch_inbound_citations',
     start_date=pendulum.datetime(2026, 4, 9, tz='UTC'),
     schedule=None,
     catchup=False,

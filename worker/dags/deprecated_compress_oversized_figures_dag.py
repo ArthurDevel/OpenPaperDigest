@@ -128,7 +128,7 @@ def compress_figure(image_bytes: bytes) -> tuple:
 # ============================================================================
 
 @dag(
-    dag_id="compress_oversized_figures",
+    dag_id="deprecated_compress_oversized_figures",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule="0 1 * * *",
     catchup=False,

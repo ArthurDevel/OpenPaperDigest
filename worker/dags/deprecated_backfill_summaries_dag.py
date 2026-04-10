@@ -61,7 +61,7 @@ def database_session():
 # ============================================================================
 
 @dag(
-    dag_id="backfill_summaries",
+    dag_id="deprecated_backfill_summaries",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule=None,
     catchup=False,

@@ -39,7 +39,7 @@ def fetch_external_nodes_needing_references(session: Session) -> List[str]:
 
 
 @dag(
-    dag_id='expand_external_references',
+    dag_id='deprecated_expand_external_references',
     start_date=pendulum.datetime(2026, 4, 2, tz='UTC'),
     schedule=None,
     catchup=False,

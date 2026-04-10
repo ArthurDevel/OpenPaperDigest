@@ -278,7 +278,7 @@ def database_session():
 # ============================================================================
 
 @dag(
-    dag_id="daily_deepmind_research_papers",
+    dag_id="deprecated_daily_deepmind_research_papers",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule="0 7 * * *",  # 7 AM daily (same as other research paper DAGs)
     catchup=False,

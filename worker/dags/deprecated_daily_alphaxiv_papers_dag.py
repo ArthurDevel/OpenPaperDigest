@@ -178,7 +178,7 @@ def database_session():
 
 
 @dag(
-    dag_id="daily_alphaxiv_papers",
+    dag_id="deprecated_daily_alphaxiv_papers",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule="0 7 * * *",  # 7 AM daily (1 hour after HuggingFace)
     catchup=False,

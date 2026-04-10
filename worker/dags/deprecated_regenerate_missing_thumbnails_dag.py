@@ -53,7 +53,7 @@ def database_session():
 # ============================================================================
 
 @dag(
-    dag_id="regenerate_missing_thumbnails",
+    dag_id="deprecated_regenerate_missing_thumbnails",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule=None,
     catchup=False,

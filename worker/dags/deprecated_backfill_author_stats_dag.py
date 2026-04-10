@@ -344,7 +344,7 @@ def update_paper_signals(only_paper_ids: set = None) -> Dict[str, int]:
 
 
 @dag(
-    dag_id="backfill_author_stats",
+    dag_id="deprecated_backfill_author_stats",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule=None,
     catchup=False,
