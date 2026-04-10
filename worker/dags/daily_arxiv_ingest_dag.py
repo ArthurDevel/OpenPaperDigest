@@ -195,7 +195,7 @@ def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dic
 
 
 @dag(
-    dag_id='daily_arxiv_ingest',
+    dag_id='source_daily_arxiv_ingest',
     start_date=pendulum.datetime(2026, 3, 6, tz='UTC'),
     schedule='0 8 * * *',  # Daily at 08:00 UTC (after arXiv daily update)
     catchup=False,
