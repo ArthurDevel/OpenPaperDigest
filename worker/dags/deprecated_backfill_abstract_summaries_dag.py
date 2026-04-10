@@ -155,7 +155,7 @@ def save_abstract_summary(session: Session, paper_uuid: str, abstract_summary: s
 
 
 @dag(
-    dag_id="backfill_abstract_summaries",
+    dag_id="deprecated_backfill_abstract_summaries",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule=None,
     catchup=False,

@@ -21,7 +21,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import WebDriverException
 import re
 
 
@@ -29,7 +28,8 @@ import re
 # CONSTANTS
 # ============================================================================
 
-MICROSOFT_RESEARCH_URL = "https://www.microsoft.com/en-us/research/publications"
+DEEPMIND_RESEARCH_BASE_URL = "https://deepmind.google/research/publications"
+PUBLICATIONS_PER_PAGE = 30  # DeepMind has ~30 publications per page
 
 
 # ============================================================================
@@ -93,12 +93,12 @@ def compute_pdf_hash(pdf_url: str) -> str:
         ValueError: If the downloaded content is not a valid PDF
         Exception: If download fails
     """
-    # Add headers to avoid being blocked by Microsoft
+    # Add headers to avoid being blocked
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/pdf,*/*',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.microsoft.com/',
+        'Referer': 'https://deepmind.google/',
     }
 
     response = requests.get(pdf_url, timeout=30, headers=headers, allow_redirects=True)
@@ -112,35 +112,9 @@ def compute_pdf_hash(pdf_url: str) -> str:
     return pdf_hash
 
 
-def close_extra_tabs(driver):
-    """
-    Close any extra tabs opened by pages, keeping only the main tab.
-
-    Args:
-        driver: Selenium WebDriver instance
-    """
-    try:
-        window_handles = driver.window_handles
-        if len(window_handles) > 1:
-            # Switch to main tab (first one)
-            main_tab = window_handles[0]
-            driver.switch_to.window(main_tab)
-            
-            # Close all other tabs
-            for handle in window_handles[1:]:
-                driver.switch_to.window(handle)
-                driver.close()
-            
-            # Switch back to main tab
-            driver.switch_to.window(main_tab)
-    except Exception:
-        # If driver is crashed or unusable, ignore
-        pass
-
-
 def scrape_individual_publication(driver, pub_url: str, index: int) -> Optional[Dict[str, Any]]:
     """
-    Visit an individual publication page and extract paper link from Related Resources sidebar.
+    Visit an individual publication page and extract paper link.
 
     Args:
         driver: Selenium WebDriver instance
@@ -153,44 +127,34 @@ def scrape_individual_publication(driver, pub_url: str, index: int) -> Optional[
     try:
         driver.get(pub_url)
         time.sleep(2)
-        
-        # Close any extra tabs opened by the page
-        close_extra_tabs(driver)
 
         # Extract title
         title = None
         try:
             title_element = driver.find_element(By.CSS_SELECTOR, "h1")
             title = title_element.text.strip()
-        except Exception:
-            try:
-                title = driver.title
-            except Exception:
-                # Driver might be crashed, will be caught below
-                pass
+        except:
+            title = driver.title
 
         # Extract publication date
         pub_date = None
         try:
             date_element = driver.find_element(By.CSS_SELECTOR, ".date, .publication-date, time")
             pub_date = date_element.text.strip()
-        except Exception:
+        except:
             pass
 
-        # Look for paper link in the "Related resources" sidebar ONLY
+        # Look for paper links (arXiv or PDF)
         paper_url = None
         arxiv_id = None
         pdf_hash = None
 
         try:
-            # Find the "Related resources" aside section
-            related_resources = driver.find_element(By.CSS_SELECTOR, 'aside[aria-label="Related resources"]')
+            # Find all links on the page
+            all_links = driver.find_elements(By.TAG_NAME, "a")
 
-            # Find all buttons in this section
-            buttons = related_resources.find_elements(By.CSS_SELECTOR, "a.btn.btn-primary.btn-lg")
-
-            for button in buttons:
-                href = button.get_attribute('href')
+            for link in all_links:
+                href = link.get_attribute('href')
                 if not href:
                     continue
 
@@ -212,7 +176,7 @@ def scrape_individual_publication(driver, pub_url: str, index: int) -> Optional[
                     break
 
         except Exception as e:
-            print(f"    No Related resources section found or error: {e}")
+            print(f"    Error finding paper links: {e}")
 
         # Skip publications without paper links
         if not paper_url:
@@ -239,17 +203,48 @@ def scrape_individual_publication(driver, pub_url: str, index: int) -> Optional[
 
         return pub_data
 
-    except WebDriverException as e:
-        # Check if this is a tab crash
-        if "tab crashed" in str(e).lower():
-            print(f"  Tab crashed while scraping publication {index}, skipping")
-            return None
-        # Re-raise other WebDriverExceptions
-        print(f"  Error scraping publication {index}: {e}")
-        raise
     except Exception as e:
         print(f"  Error scraping publication {index}: {e}")
         raise
+
+
+def get_publication_links_from_page(driver, page_url: str) -> List[str]:
+    """
+    Extract all publication links from a listings page.
+
+    Args:
+        driver: Selenium WebDriver instance
+        page_url: URL of the listings page
+
+    Returns:
+        List[str]: List of publication URLs
+    """
+    driver.get(page_url)
+    time.sleep(3)
+
+    publication_links = []
+    
+    try:
+        # Look for links that contain '/publications/' in the href
+        all_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='/publications/']")
+        seen_urls = set()
+        
+        for link in all_links:
+            href = link.get_attribute('href')
+            # Make sure it's a specific publication page, not the main listing
+            if href and href not in seen_urls and '/publications/' in href:
+                # Check if it looks like a publication detail page
+                path_after_publications = href.split('/publications/')[-1]
+                # Exclude the base URL and page URLs
+                if (path_after_publications and 
+                    path_after_publications.strip('/') and 
+                    not path_after_publications.startswith('page/')):
+                    seen_urls.add(href)
+                    publication_links.append(href)
+    except Exception as e:
+        print(f"Error finding publication links: {e}")
+
+    return publication_links
 
 
 # ============================================================================
@@ -283,119 +278,83 @@ def database_session():
 # ============================================================================
 
 @dag(
-    dag_id="daily_microsoft_research_papers",
+    dag_id="deprecated_daily_deepmind_research_papers",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule="0 7 * * *",  # 7 AM daily (same as other research paper DAGs)
     catchup=False,
-    tags=["microsoft-research", "papers"],
+    tags=["deepmind-research", "papers"],
     params={
         "papers_to_add": Param(
             type="integer",
             default=10,
             title="Number of Papers to Add",
-            description="Number of papers to add to the processing queue. Will scrape publications until this many papers with accessible PDFs/arXiv links are found.",
+            description="Number of papers to add to the processing queue. Will scrape publications until this many papers with accessible PDFs/arXiv links are found. DeepMind has ~30 publications per page.",
             minimum=1,
             maximum=200
         )
     },
     doc_md="""
-    ### Daily Microsoft Research Papers DAG
+    ### Daily DeepMind Research Papers DAG
 
-    This DAG scrapes papers from Microsoft Research publications page and adds them to the processing queue.
+    This DAG scrapes papers from DeepMind research publications page and adds them to the processing queue.
     - Scrapes recent publications using Selenium
-    - Extracts paper URLs (both arXiv and Microsoft-hosted PDFs)
+    - Extracts paper URLs (both arXiv and direct PDFs)
     - Computes PDF hashes for uniqueness verification
     - Adds papers to the processing queue for summarization
     - When run on its daily schedule, it fetches the most recent publications.
-    - When run manually, you can customize the number of papers to add.
+    - When run manually, you can customize the number of papers to add (max 200).
 
     Note: Only publications with accessible paper links (arXiv or PDF) are added.
+    DeepMind has approximately 30 publications per page.
     """,
 )
-def daily_microsoft_research_papers_dag():
+def daily_deepmind_research_papers_dag():
 
     @task
     def scrape_publications(**context) -> List[Dict[str, Any]]:
         """
-        Scrape Microsoft Research publications and extract paper links.
+        Scrape DeepMind research publications and extract paper links.
         Stops after finding the requested number of papers with accessible links.
 
         Returns:
             List[Dict[str, Any]]: List of publications with paper information
         """
         papers_to_add = int(context["params"]["papers_to_add"])
-        print(f"Scraping Microsoft Research: {MICROSOFT_RESEARCH_URL}")
+        print(f"Scraping DeepMind Research: {DEEPMIND_RESEARCH_BASE_URL}")
         print(f"  Looking for {papers_to_add} papers with accessible links")
+        print(f"  Publications per page: ~{PUBLICATIONS_PER_PAGE}")
+        
+        # Calculate max pages needed (with buffer)
+        max_pages_needed = (papers_to_add // PUBLICATIONS_PER_PAGE) + 2
+        max_pages = min(max_pages_needed, 10)  # Safety limit
+        print(f"  Will search up to {max_pages} pages")
 
         driver = setup_driver()
 
         try:
-            driver.get(MICROSOFT_RESEARCH_URL)
-            print("Page loaded, waiting for content to render...")
-
-            # Wait for publication cards to load
-            try:
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "article, .publication-item, .m-publication"))
-                )
-                print("Publications detected!")
-            except Exception as e:
-                print(f"Warning: Timeout waiting for publications: {e}")
-
-            # Give extra time for JavaScript to fully render
-            time.sleep(3)
-
-            # Process publications page by page until we have enough papers
-            print(f"\n--- Processing publications to find {papers_to_add} papers ---\n")
             result = []
             processed_count = 0
             current_page = 1
-            max_pages = 10  # Safety limit to avoid infinite loops
 
             while len(result) < papers_to_add and current_page <= max_pages:
-                # Navigate to the current page
+                # Construct page URL
                 if current_page == 1:
-                    page_url = MICROSOFT_RESEARCH_URL
+                    page_url = f"{DEEPMIND_RESEARCH_BASE_URL}/"
                 else:
-                    page_url = f"{MICROSOFT_RESEARCH_URL}?pg={current_page}"
+                    page_url = f"{DEEPMIND_RESEARCH_BASE_URL}/page/{current_page}/"
 
                 print(f"\n--- Page {current_page}: {page_url} ---")
-                driver.get(page_url)
-                time.sleep(3)
-                
-                # Close any extra tabs opened by the page
-                close_extra_tabs(driver)
 
-                # Extract publication URLs from current page
-                publication_links = []
-                try:
-                    cards = driver.find_elements(By.CSS_SELECTOR, "article.m-publication, .publication-item, article")
+                # Get all publication links from this page
+                pub_links = get_publication_links_from_page(driver, page_url)
+                print(f"  Found {len(pub_links)} publication URLs on page {current_page}")
 
-                    for card in cards:
-                        try:
-                            link = card.find_element(By.CSS_SELECTOR, "a[href*='/publication/']")
-                            href = link.get_attribute('href')
-                            if href and href not in publication_links:
-                                publication_links.append(href)
-                        except:
-                            continue
-                except:
-                    pass
-
-                # Fallback: find all links containing '/publication/'
-                if not publication_links:
-                    all_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='/publication/']")
-                    seen_urls = set()
-                    for link in all_links:
-                        href = link.get_attribute('href')
-                        if href and href not in seen_urls:
-                            seen_urls.add(href)
-                            publication_links.append(href)
-
-                print(f"  Found {len(publication_links)} publication URLs on page {current_page}")
+                if not pub_links:
+                    print(f"  No publications found on page {current_page}, stopping pagination")
+                    break
 
                 # Process publications from this page
-                for pub_url in publication_links:
+                for pub_url in pub_links:
                     # Stop if we've found enough papers
                     if len(result) >= papers_to_add:
                         print(f"\n  Found {papers_to_add} papers. Stopping.")
@@ -407,10 +366,11 @@ def daily_microsoft_research_papers_dag():
                     pub_data = scrape_individual_publication(driver, pub_url, processed_count)
 
                     if pub_data:
+                        pub_data["page_number"] = current_page
                         result.append(pub_data)
                         print(f"    Papers found: {len(result)}/{papers_to_add}")
 
-                    time.sleep(2)  # Be nice to the server
+                    time.sleep(1)  # Be nice to the server
 
                 # Stop if we've found enough papers
                 if len(result) >= papers_to_add:
@@ -438,15 +398,16 @@ def daily_microsoft_research_papers_dag():
             print("No papers found with accessible links")
             return
 
-        print(f"\n=== Microsoft Research Publications - {len(papers_data)} Found ===\n")
+        print(f"\n=== DeepMind Research Publications - {len(papers_data)} Found ===\n")
 
         for rank, paper in enumerate(papers_data, 1):
             title = paper.get('title', 'Unknown Title')
             paper_url = paper.get('paper_url', 'N/A')
             arxiv_id = paper.get('arxiv_id')
             pdf_hash = paper.get('pdf_hash')
+            page_number = paper.get('page_number', '?')
 
-            print(f"#{rank} - {title}")
+            print(f"#{rank} (Page {page_number}) - {title}")
             print(f"     Paper URL: {paper_url}")
             if arxiv_id:
                 print(f"     ArXiv ID: {arxiv_id}")
@@ -455,7 +416,7 @@ def daily_microsoft_research_papers_dag():
                 print(f"     PDF Hash: {pdf_hash}")
             print("")
 
-        print(f"\n=== End of Microsoft Research Publications ===\n")
+        print(f"\n=== End of DeepMind Research Publications ===\n")
 
     @task
     def add_papers_to_queue(papers_data: List[Dict[str, Any]]) -> None:
@@ -486,9 +447,10 @@ def daily_microsoft_research_papers_dag():
 
                     # Create signals dict
                     signals = {
-                        "sources": ["MicrosoftResearch"],
-                        "microsoft_fetch_info": {
+                        "sources": ["DeepMindResearch"],
+                        "deepmind_fetch_info": {
                             "publication_url": paper.get('url'),
+                            "page_number": paper.get('page_number'),
                         }
                     }
 
@@ -512,7 +474,7 @@ def daily_microsoft_research_papers_dag():
                             signals=signals,
                             initiated_by_user_id=None
                         )
-                        print(f"Added Microsoft-hosted paper to queue (rank #{rank})")
+                        print(f"Added DeepMind-hosted paper to queue (rank #{rank})")
 
                     added_count += 1
                     print(f"  Title: {title[:80]}...")
@@ -544,4 +506,4 @@ def daily_microsoft_research_papers_dag():
     add_papers_to_queue(papers)
 
 
-daily_microsoft_research_papers_dag()
+daily_deepmind_research_papers_dag()

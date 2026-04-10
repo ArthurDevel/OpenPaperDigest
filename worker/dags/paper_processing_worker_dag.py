@@ -18,7 +18,7 @@ sys.path.insert(0, '/opt/airflow')
 from shared.db import SessionLocal
 from papers.models import Paper
 from papers.client import save_paper, create_paper_slug
-from papers.db.models import PaperRecord, AuthorRecord, PaperAuthorRecord
+from papers.db.models import PaperRecord
 from shared.arxiv.client import fetch_pdf_for_processing
 from paperprocessor.client import process_paper_pdf
 from paperprocessor.models import ProcessedDocument
@@ -106,158 +106,6 @@ def database_session():
         raise
     finally:
         session.close()
-
-
-# ============================================================================
-# AUTHOR LINKING
-# ============================================================================
-
-
-def _refresh_and_score_paper(paper_id: int, author_ids: set) -> None:
-    """
-    Fetch stats for the paper's authors from Semantic Scholar and write
-    max_author_h_index into signals. Raises on failure so the paper is
-    marked as failed.
-
-    @param paper_id: Database ID of the paper
-    @param author_ids: Set of author DB IDs to refresh
-    """
-    from shared.semantic_scholar.client import fetch_author_stats_batch
-    from sqlalchemy import func
-
-    if not author_ids:
-        raise Exception(f"No authors found for paper {paper_id}, cannot compute h-index")
-
-    # Refresh stats for authors that don't have them yet
-    with database_session() as session:
-        stale_authors = session.query(AuthorRecord).filter(
-            AuthorRecord.id.in_(author_ids),
-            AuthorRecord.stats_updated_at.is_(None),
-        ).all()
-        s2_to_db = {a.s2_author_id: a.id for a in stale_authors}
-
-    if s2_to_db:
-        batch_results = fetch_author_stats_batch(list(s2_to_db.keys()))
-        # Build a map of db_id -> stats for bulk update
-        stats_by_db_id = {}
-        for stats in batch_results:
-            db_id = s2_to_db.get(stats.s2_author_id)
-            if db_id:
-                stats_by_db_id[db_id] = stats
-
-        # Update all stale authors in a single session
-        if stats_by_db_id:
-            with database_session() as session:
-                records = session.query(AuthorRecord).filter(
-                    AuthorRecord.id.in_(stats_by_db_id.keys())
-                ).all()
-                now = datetime.utcnow()
-                for record in records:
-                    stats = stats_by_db_id[record.id]
-                    record.name = stats.name
-                    record.affiliations = stats.affiliations
-                    record.homepage = stats.homepage
-                    record.paper_count = stats.paper_count
-                    record.citation_count = stats.citation_count
-                    record.h_index = stats.h_index
-                    record.stats_updated_at = now
-
-    # Compute max_author_h_index and write to paper signals in one session
-    with database_session() as session:
-        row = session.query(
-            func.max(AuthorRecord.h_index).label("max_h_index"),
-        ).join(
-            PaperAuthorRecord, PaperAuthorRecord.author_id == AuthorRecord.id
-        ).filter(
-            PaperAuthorRecord.paper_id == paper_id,
-            AuthorRecord.h_index.isnot(None),
-        ).first()
-
-        if not row or row.max_h_index is None:
-            raise Exception(f"Could not compute max_author_h_index for paper {paper_id}")
-
-        paper = session.query(PaperRecord).filter(
-            PaperRecord.id == paper_id
-        ).first()
-        if paper:
-            existing_signals = paper.signals or {}
-            existing_signals["max_author_h_index"] = row.max_h_index
-            paper.signals = existing_signals
-            print(f"  Set max_author_h_index={row.max_h_index} for paper {paper_id}")
-
-
-def _link_authors_for_paper(arxiv_id: str) -> None:
-    """
-    Link authors from Semantic Scholar for a single arXiv paper.
-    Raises on failure so the paper is marked as failed.
-
-    @param arxiv_id: arXiv identifier to look up in S2
-    """
-    from shared.semantic_scholar.client import fetch_paper_authors
-
-    s2_result = fetch_paper_authors(arxiv_id)
-
-    if not s2_result.authors:
-        raise Exception(f"No authors returned from Semantic Scholar for {arxiv_id}")
-
-    with database_session() as session:
-        record = session.query(PaperRecord).filter(
-            PaperRecord.arxiv_id == arxiv_id
-        ).first()
-        if not record:
-            return
-
-        # Batch-load all existing authors by s2_author_id in one query
-        s2_ids = [a.s2_author_id for a in s2_result.authors]
-        existing_authors = session.query(AuthorRecord).filter(
-            AuthorRecord.s2_author_id.in_(s2_ids)
-        ).all()
-        s2_id_to_author = {a.s2_author_id: a for a in existing_authors}
-
-        # Create missing authors and build full ID map
-        seen_author_ids = set()
-        author_id_order = []  # (author_id, order) pairs to link
-        for order, s2_author in enumerate(s2_result.authors, start=1):
-            existing = s2_id_to_author.get(s2_author.s2_author_id)
-            if existing:
-                author_id = existing.id
-            else:
-                new_author = AuthorRecord(
-                    s2_author_id=s2_author.s2_author_id,
-                    name=s2_author.name,
-                )
-                session.add(new_author)
-                session.flush()
-                author_id = new_author.id
-                s2_id_to_author[s2_author.s2_author_id] = new_author
-
-            if author_id in seen_author_ids:
-                continue
-            seen_author_ids.add(author_id)
-            author_id_order.append((author_id, order))
-
-        # Batch-load all existing links for this paper in one query
-        existing_links = session.query(PaperAuthorRecord.author_id).filter(
-            PaperAuthorRecord.paper_id == record.id,
-            PaperAuthorRecord.author_id.in_(seen_author_ids),
-        ).all()
-        linked_author_ids = {row[0] for row in existing_links}
-
-        # Insert only missing links
-        authors_linked = 0
-        for author_id, order in author_id_order:
-            if author_id not in linked_author_ids:
-                session.add(PaperAuthorRecord(
-                    paper_id=record.id,
-                    author_id=author_id,
-                    author_order=order,
-                ))
-                authors_linked += 1
-
-        print(f"  Linked {authors_linked} authors for {arxiv_id}")
-
-        # Fetch stats and compute max_author_h_index signal
-        _refresh_and_score_paper(record.id, seen_author_ids)
 
 
 # ============================================================================
@@ -500,10 +348,6 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
             session.flush()  # Ensure slug is committed before marking requests
             await set_requests_processed(session, saved_paper.arxiv_id, paper_slug_dto.slug)
         
-        # Step 3: Link authors and compute h-index signal
-        if job.arxiv_id:
-            _link_authors_for_paper(job.arxiv_id)
-
         processing_time = (datetime.utcnow() - processing_start).total_seconds()
         print(f"Successfully completed job {job.id} in {processing_time:.1f} seconds")
         

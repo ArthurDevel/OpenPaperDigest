@@ -44,7 +44,7 @@ def database_session():
 
 
 @dag(
-    dag_id="daily_huggingface_papers",
+    dag_id="deprecated_daily_huggingface_papers",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule="0 6 * * *",  # 6 AM daily
     catchup=False,

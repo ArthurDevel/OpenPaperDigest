@@ -2,7 +2,7 @@ import pendulum
 from airflow.decorators import dag, task
 
 @dag(
-    dag_id="hello_world",
+    dag_id="deprecated_hello_world",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule=None,
     catchup=False,

@@ -113,7 +113,7 @@ def save_embedding(paper_uuid: str, embedding: List[float]) -> None:
 # ============================================================================
 
 @dag(
-    dag_id="backfill_embeddings",
+    dag_id="deprecated_backfill_embeddings",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule=None,
     catchup=False,

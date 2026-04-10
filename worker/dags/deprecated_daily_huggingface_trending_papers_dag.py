@@ -81,7 +81,7 @@ def extract_arxiv_id_from_path(path: str) -> Optional[str]:
 
 
 @dag(
-    dag_id="daily_huggingface_trending_papers",
+    dag_id="deprecated_daily_huggingface_trending_papers",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule="0 12 * * *",  # Noon daily
     catchup=False,
@@ -373,4 +373,3 @@ def daily_huggingface_trending_papers_dag():
 
 
 daily_huggingface_trending_papers_dag()
-

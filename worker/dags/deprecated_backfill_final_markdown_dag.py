@@ -117,7 +117,7 @@ async def extract_final_markdown_from_pdf(pdf_contents: bytes) -> str:
 # ============================================================================
 
 @dag(
-    dag_id="backfill_final_markdown",
+    dag_id="deprecated_backfill_final_markdown",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule=None,
     catchup=False,

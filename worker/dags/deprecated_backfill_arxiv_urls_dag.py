@@ -37,7 +37,7 @@ def database_session():
 
 
 @dag(
-    dag_id="backfill_arxiv_urls",
+    dag_id="deprecated_backfill_arxiv_urls",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule=None,  # Manual trigger only
     catchup=False,

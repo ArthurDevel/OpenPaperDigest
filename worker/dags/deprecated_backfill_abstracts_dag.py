@@ -127,7 +127,7 @@ def save_abstract(paper_uuid: str, abstract: str) -> None:
 
 
 @dag(
-    dag_id="backfill_abstracts",
+    dag_id="deprecated_backfill_abstracts",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule=None,
     catchup=False,

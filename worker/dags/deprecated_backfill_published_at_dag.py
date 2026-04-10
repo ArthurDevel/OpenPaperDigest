@@ -83,7 +83,7 @@ def fetch_published_dates_batch(arxiv_ids: List[str]) -> Dict[str, Optional[date
 
 
 @dag(
-    dag_id="backfill_published_at",
+    dag_id="deprecated_backfill_published_at",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule=None,
     catchup=False,

@@ -1,24 +1,23 @@
 """
 Daily arXiv ingest DAG -- monitors all cs.* categories for new papers.
 
-Runs daily. For each new paper, fetches metadata (title, authors, abstract)
-from the arXiv API and author IDs from Semantic Scholar, then queues the paper
-for processing with all data attached upfront.
+Runs daily. For each new paper, fetches arXiv-native metadata and queues the
+paper for processing. Semantic Scholar enrichment happens later in the
+dedicated enrichment DAG.
 
 Responsibilities:
 - Query arXiv API for papers published in the last day across cs.*
 - Deduplicate against papers already in the database
 - Create paper records with abstract pre-filled
-- Link authors via Semantic Scholar (best-effort, non-blocking)
+- Persist arXiv classification metadata
 """
 
 import sys
-import asyncio
 import time
 import pendulum
 from contextlib import contextmanager
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from airflow.decorators import dag, task
 from sqlalchemy.orm import Session
@@ -27,7 +26,7 @@ sys.path.insert(0, '/opt/airflow')
 
 from shared.db import SessionLocal
 from papers.client import create_paper
-from papers.db.models import PaperRecord, AuthorRecord, PaperAuthorRecord
+from papers.db.models import PaperRecord
 
 # ============================================================================
 # CONSTANTS
@@ -190,121 +189,6 @@ def fetch_new_arxiv_papers(max_results: int = MAX_RESULTS_PER_QUERY) -> List[Dic
     return all_papers
 
 
-def link_authors_batch(paper_records: List[Dict]) -> Dict[str, int]:
-    """
-    Batch-fetch author IDs from Semantic Scholar and link them to papers.
-    Uses /paper/batch endpoint (1 API call for up to 500 papers).
-    Best-effort: failures are logged but don't block ingestion.
-
-    @param paper_records: List of dicts with id (DB pk) and arxiv_id
-    @returns Dict with authors_linked and authors_created counts
-    """
-    from shared.semantic_scholar.client import fetch_paper_authors_batch
-
-    arxiv_ids = [p["arxiv_id"] for p in paper_records]
-    arxiv_to_paper = {p["arxiv_id"]: p for p in paper_records}
-
-    try:
-        batch_results = fetch_paper_authors_batch(arxiv_ids)
-    except Exception as e:
-        print(f"    S2 batch lookup failed: {e}")
-        return {"authors_linked": 0, "authors_created": 0}
-
-    authors_linked = 0
-    authors_created = 0
-
-    # One session per paper: pool_pre_ping=True on the engine handles stale
-    # connections transparently, so each database_session() is resilient to
-    # transient DNS/connection failures without manual reconnect logic.
-    for s2_result in batch_results:
-        paper = arxiv_to_paper.get(s2_result.arxiv_id)
-        if not paper:
-            continue
-
-        try:
-            with database_session() as session:
-                seen_author_ids = set()  # S2 can return duplicate authors per paper
-                for order, s2_author in enumerate(s2_result.authors, start=1):
-                    existing = session.query(AuthorRecord).filter(
-                        AuthorRecord.s2_author_id == s2_author.s2_author_id
-                    ).first()
-
-                    if existing:
-                        author_id = existing.id
-                    else:
-                        new_author = AuthorRecord(
-                            s2_author_id=s2_author.s2_author_id,
-                            name=s2_author.name,
-                        )
-                        session.add(new_author)
-                        session.flush()
-                        author_id = new_author.id
-                        authors_created += 1
-
-                    if author_id in seen_author_ids:
-                        continue
-                    seen_author_ids.add(author_id)
-
-                    existing_link = session.query(PaperAuthorRecord).filter(
-                        PaperAuthorRecord.paper_id == paper["id"],
-                        PaperAuthorRecord.author_id == author_id,
-                    ).first()
-
-                    if not existing_link:
-                        session.add(PaperAuthorRecord(
-                            paper_id=paper["id"],
-                            author_id=author_id,
-                            author_order=order,
-                        ))
-                        authors_linked += 1
-        except Exception as e:
-            print(f"    FAIL paper {paper['arxiv_id']}: {e}")
-
-    return {"authors_linked": authors_linked, "authors_created": authors_created}
-
-
-def update_paper_signals(paper_records: List[Dict]) -> int:
-    """
-    Compute max_author_h_index for the given papers and write into signals JSONB.
-    Uses whatever h-index data is already available for linked authors.
-
-    @param paper_records: List of dicts with id (DB pk)
-    @returns Number of papers updated
-    """
-    from sqlalchemy import func
-
-    if not paper_records:
-        return 0
-
-    paper_ids = [p["id"] for p in paper_records]
-    updated = 0
-
-    with database_session() as session:
-        rows = session.query(
-            PaperAuthorRecord.paper_id,
-            func.max(AuthorRecord.h_index).label("max_h_index"),
-        ).join(
-            AuthorRecord, PaperAuthorRecord.author_id == AuthorRecord.id
-        ).filter(
-            PaperAuthorRecord.paper_id.in_(paper_ids),
-            AuthorRecord.h_index.isnot(None),
-        ).group_by(
-            PaperAuthorRecord.paper_id
-        ).all()
-
-        for row in rows:
-            paper = session.query(PaperRecord).filter(
-                PaperRecord.id == row.paper_id
-            ).first()
-            if paper:
-                existing_signals = paper.signals or {}
-                existing_signals["max_author_h_index"] = row.max_h_index
-                paper.signals = existing_signals
-                updated += 1
-
-    return updated
-
-
 # ============================================================================
 # DAG DEFINITION
 # ============================================================================
@@ -324,7 +208,7 @@ def update_paper_signals(paper_records: List[Dict]) -> int:
     2 days. For each new paper:
     1. Fetches metadata (title, authors, abstract) from arXiv API
     2. Creates a paper record queued for processing
-    3. Links author IDs from Semantic Scholar (best-effort)
+    3. Stores arXiv-native classification metadata
     """,
 )
 def daily_arxiv_ingest_dag():
@@ -332,7 +216,7 @@ def daily_arxiv_ingest_dag():
     @task
     def ingest_papers() -> Dict[str, int]:
         """
-        Fetch new arXiv cs.* papers and ingest them with metadata + author links.
+        Fetch new arXiv cs.* papers and ingest them with arXiv metadata only.
 
         @returns Dict with added/skipped/failed counts
         """
@@ -343,8 +227,6 @@ def daily_arxiv_ingest_dag():
         added = 0
         skipped = 0
         failed = 0
-        authors_linked_total = 0
-
         with database_session() as session:
             for paper in papers:
                 arxiv_id = paper['arxiv_id']
@@ -394,31 +276,6 @@ def daily_arxiv_ingest_dag():
                     failed += 1
                     continue
 
-        # Link authors in a separate pass using batch endpoint (best-effort)
-        print('\nLinking authors via Semantic Scholar (batch)...')
-        arxiv_ids_to_link = [p['arxiv_id'] for p in papers if p.get('arxiv_id')]
-        paper_records_for_linking = []
-
-        with database_session() as session:
-            for arxiv_id in arxiv_ids_to_link:
-                record = session.query(PaperRecord).filter(
-                    PaperRecord.arxiv_id == arxiv_id
-                ).first()
-                if record:
-                    paper_records_for_linking.append({
-                        "id": record.id,
-                        "arxiv_id": arxiv_id,
-                    })
-
-        if paper_records_for_linking:
-            link_result = link_authors_batch(paper_records_for_linking)
-            authors_linked_total = link_result["authors_linked"]
-            print(f'  Linked {link_result["authors_linked"]} authors, created {link_result["authors_created"]} new')
-
-        # Update paper signals with max author h-index for newly ingested papers
-        print('\nUpdating paper signals (max_author_h_index)...')
-        signals_updated = update_paper_signals(paper_records_for_linking)
-
         # Report
         print('\n' + '=' * 50)
         print('DAILY ARXIV INGEST REPORT')
@@ -427,8 +284,6 @@ def daily_arxiv_ingest_dag():
         print(f'Added:               {added}')
         print(f'Skipped (existing):  {skipped}')
         print(f'Failed:              {failed}')
-        print(f'Authors linked:      {authors_linked_total}')
-        print(f'Signals updated:     {signals_updated}')
         print('=' * 50)
 
         return {
@@ -436,8 +291,6 @@ def daily_arxiv_ingest_dag():
             'added': added,
             'skipped': skipped,
             'failed': failed,
-            'authors_linked': authors_linked_total,
-            'signals_updated': signals_updated,
         }
 
     ingest_papers()

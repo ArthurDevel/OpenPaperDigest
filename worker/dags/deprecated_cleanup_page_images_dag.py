@@ -20,7 +20,7 @@ sys.path.insert(0, '/opt/airflow')
 
 
 @dag(
-    dag_id='cleanup_page_images',
+    dag_id='deprecated_cleanup_page_images',
     start_date=pendulum.datetime(2025, 1, 1, tz='UTC'),
     schedule=None,
     catchup=False,

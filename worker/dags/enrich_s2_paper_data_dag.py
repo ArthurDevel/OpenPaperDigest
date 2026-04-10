@@ -1,17 +1,20 @@
 """
-S2 paper data enrichment DAG -- enriches papers with Semantic Scholar metadata.
+S2 paper data enrichment DAG -- owns Semantic Scholar-derived paper state.
 
-Runs daily at 10:00 UTC. Two tasks chained:
+Runs daily at 10:00 UTC with four chained tasks:
 1. process_all_papers: enrich papers with S2 metadata (s2_ids, metrics, etc.)
-2. link_missing_authors: link authors for papers that have s2_ids but no paper_authors rows
+2. sync_author_links: create/update author links for enriched papers
+3. refresh_author_stats_task: refresh Semantic Scholar author stats
+4. refresh_paper_signals_task: recompute paper signals derived from authors
 
 Responsibilities:
 - Query papers needing S2 enrichment (arxiv_id present, s2_ids NULL or empty)
 - Retry papers with s2_ids = {} that are 1-7 days old (S2 may not have indexed them on first attempt)
 - Batch-fetch metadata from Semantic Scholar (500 papers per API call)
-- Update papers with s2_ids, s2_metrics, classification, publication_info, s2_tldr, s2_embedding
-- Mark unmatched papers with s2_ids = {} (retried until RETRY_WINDOW_DAYS expires)
-- Link authors for papers missing paper_authors rows (catches papers where S2 hadn't indexed yet at ingest time)
+- Update papers with S2 metadata and explicit enrichment progress timestamps
+- Link authors only from this DAG
+- Refresh author stats only from this DAG
+- Refresh author-derived paper signals only from this DAG
 """
 
 import sys
@@ -21,13 +24,17 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 
 from airflow.decorators import dag, task
-from sqlalchemy import or_, and_, cast, String
+from sqlalchemy import or_, and_, cast, String, func
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, '/opt/airflow')
 
 from shared.db import SessionLocal
-from shared.semantic_scholar.client import fetch_paper_metadata_batch, fetch_paper_authors_batch
+from shared.semantic_scholar.client import (
+    fetch_author_stats_batch,
+    fetch_paper_authors_batch,
+    fetch_paper_metadata_batch,
+)
 from shared.semantic_scholar.models import S2PaperMetadata
 from papers.db.models import PaperRecord, AuthorRecord, PaperAuthorRecord
 
@@ -36,6 +43,7 @@ from papers.db.models import PaperRecord, AuthorRecord, PaperAuthorRecord
 # ============================================================================
 
 BATCH_SIZE = 500
+STALE_DAYS = 7
 
 
 # ============================================================================
@@ -65,14 +73,18 @@ def database_session():
 RETRY_WINDOW_DAYS = 7
 
 
-def fetch_papers_needing_s2_data(exclude_ids: List[str] = None) -> List[Tuple[int, str]]:
+def fetch_papers_needing_s2_data(
+    exclude_ids: List[str] = None,
+    include_exhausted_no_match: bool = False,
+) -> List[Tuple[int, str]]:
     """
     Query papers that have an arxiv_id but no S2 data yet, plus papers where
     S2 returned no match on the first attempt (s2_ids = {}) that are between
-    1 and 7 days old. Papers older than 7 days with s2_ids = {} are assumed
-    to be genuinely absent from S2 and are not retried.
+    1 and 7 days old. When `include_exhausted_no_match` is true, include all
+    papers with `s2_ids = {}` regardless of age for manual backfill runs.
 
     @param exclude_ids: arXiv IDs to exclude (e.g. failed in current run)
+    @param include_exhausted_no_match: include old `{}` rows in manual backfills
     @returns List of (paper_id, arxiv_id) tuples
     """
     now = datetime.utcnow()
@@ -86,8 +98,13 @@ def fetch_papers_needing_s2_data(exclude_ids: List[str] = None) -> List[Tuple[in
                 PaperRecord.s2_ids.is_(None),
                 and_(
                     cast(PaperRecord.s2_ids, String) == '{}',
-                    PaperRecord.created_at < retry_min_age,
-                    PaperRecord.created_at > retry_max_age,
+                    or_(
+                        include_exhausted_no_match,
+                        and_(
+                            PaperRecord.created_at < retry_min_age,
+                            PaperRecord.created_at > retry_max_age,
+                        ),
+                    ),
                 ),
             ),
         )
@@ -140,6 +157,7 @@ def enrich_papers_with_s2_data(
     """
     # Build lookup: arxiv_id -> S2PaperMetadata
     metadata_by_arxiv = {m.arxiv_id: m for m in metadata_list if m.arxiv_id}
+    attempted_at = datetime.utcnow()
 
     enriched = 0
     no_match = 0
@@ -151,6 +169,7 @@ def enrich_papers_with_s2_data(
             if not record:
                 continue
 
+            record.s2_last_attempted_at = attempted_at
             s2_meta = metadata_by_arxiv.get(arxiv_id)
 
             if s2_meta:
@@ -160,14 +179,21 @@ def enrich_papers_with_s2_data(
                 record.publication_info = s2_meta.to_publication_info_dict()
                 record.s2_tldr = s2_meta.tldr
                 record.s2_embedding = s2_meta.embedding
+                record.s2_enriched_at = attempted_at
+                record.s2_enrichment_error = None
                 enriched += 1
             else:
-                # Empty dict sentinel -- paper won't be retried
+                # Empty dict sentinel -- paper may still be retried within the retry window.
                 record.s2_ids = {}
+                record.s2_enrichment_error = 'No Semantic Scholar match found'
                 no_match += 1
 
         except Exception as e:
             print(f'    ERROR enriching paper {paper_id} ({arxiv_id}): {e}')
+            record = session.query(PaperRecord).filter(PaperRecord.id == paper_id).first()
+            if record:
+                record.s2_last_attempted_at = attempted_at
+                record.s2_enrichment_error = str(e)
             errors += 1
 
     session.commit()
@@ -175,11 +201,25 @@ def enrich_papers_with_s2_data(
     return {'enriched': enriched, 'no_match': no_match, 'errors': errors}
 
 
-def fetch_papers_missing_authors() -> List[Tuple[int, str]]:
+def mark_s2_batch_failure(papers: List[Tuple[int, str]], error_message: str) -> None:
+    """Stamp a failed S2 metadata batch so the paper record reflects the attempt."""
+    if not papers:
+        return
+
+    paper_ids = [paper_id for paper_id, _ in papers]
+    attempted_at = datetime.utcnow()
+
+    with database_session() as session:
+        records = session.query(PaperRecord).filter(PaperRecord.id.in_(paper_ids)).all()
+        for record in records:
+            record.s2_last_attempted_at = attempted_at
+            record.s2_enrichment_error = error_message
+
+
+def fetch_papers_needing_author_sync() -> List[Tuple[int, str]]:
     """
-    Query papers that have s2_ids set (successfully enriched) but no paper_authors rows.
-    These are papers where S2 hadn't indexed the paper at ingest time, so author
-    linking silently returned 0 results.
+    Query papers that have S2 IDs but have not yet had author linking synced
+    by the enrichment DAG.
 
     @returns List of (paper_id, arxiv_id) tuples
     """
@@ -188,9 +228,7 @@ def fetch_papers_missing_authors() -> List[Tuple[int, str]]:
             PaperRecord.arxiv_id.isnot(None),
             PaperRecord.s2_ids.isnot(None),
             cast(PaperRecord.s2_ids, String) != '{}',
-            ~PaperRecord.id.in_(
-                session.query(PaperAuthorRecord.paper_id).distinct()
-            ),
+            PaperRecord.author_links_synced_at.is_(None),
         ).order_by(PaperRecord.id.desc()).all()
 
         return [(row.id, row.arxiv_id) for row in rows]
@@ -207,6 +245,8 @@ def link_authors_for_papers(papers: List[Tuple[int, str]]) -> Dict[str, int]:
     total_linked = 0
     total_created = 0
     total_skipped = 0
+    total_synced = 0
+    author_ids_touched = set()
 
     for i in range(0, len(papers), BATCH_SIZE):
         batch = papers[i:i + BATCH_SIZE]
@@ -221,15 +261,30 @@ def link_authors_for_papers(papers: List[Tuple[int, str]]) -> Dict[str, int]:
         except Exception as e:
             print(f'    S2 batch call failed: {e}')
             total_skipped += len(batch)
+            with database_session() as session:
+                attempted_at = datetime.utcnow()
+                for paper_id, _ in batch:
+                    record = session.query(PaperRecord).filter(PaperRecord.id == paper_id).first()
+                    if record:
+                        record.s2_enrichment_error = f'Author sync failed: {e}'
+                        record.s2_last_attempted_at = attempted_at
             continue
 
+        returned_arxiv_ids = set()
         for s2_result in batch_results:
             paper_id = id_by_arxiv.get(s2_result.arxiv_id)
             if not paper_id:
                 continue
+            returned_arxiv_ids.add(s2_result.arxiv_id)
 
             try:
                 with database_session() as session:
+                    paper_record = session.query(PaperRecord).filter(
+                        PaperRecord.id == paper_id
+                    ).first()
+                    if not paper_record:
+                        continue
+
                     seen_author_ids = set()
                     for order, s2_author in enumerate(s2_result.authors, start=1):
                         existing = session.query(AuthorRecord).filter(
@@ -248,6 +303,7 @@ def link_authors_for_papers(papers: List[Tuple[int, str]]) -> Dict[str, int]:
                             author_id = new_author.id
                             total_created += 1
 
+                        author_ids_touched.add(author_id)
                         if author_id in seen_author_ids:
                             continue
                         seen_author_ids.add(author_id)
@@ -264,13 +320,203 @@ def link_authors_for_papers(papers: List[Tuple[int, str]]) -> Dict[str, int]:
                                 author_order=order,
                             ))
                             total_linked += 1
+                    paper_record.author_links_synced_at = datetime.utcnow()
+                    paper_record.s2_enrichment_error = None
+                    total_synced += 1
             except Exception as e:
                 print(f'    FAIL paper {paper_id} ({s2_result.arxiv_id}): {e}')
+                with database_session() as session:
+                    record = session.query(PaperRecord).filter(PaperRecord.id == paper_id).first()
+                    if record:
+                        record.s2_enrichment_error = f'Author sync failed: {e}'
                 total_skipped += 1
+
+        missing_ids = set(arxiv_ids) - returned_arxiv_ids
+        if missing_ids:
+            total_skipped += len(missing_ids)
+            with database_session() as session:
+                attempted_at = datetime.utcnow()
+                for arxiv_id in missing_ids:
+                    paper_id = id_by_arxiv.get(arxiv_id)
+                    if paper_id is None:
+                        continue
+                    record = session.query(PaperRecord).filter(PaperRecord.id == paper_id).first()
+                    if record:
+                        record.s2_last_attempted_at = attempted_at
+                        record.s2_enrichment_error = 'Author sync returned no result'
 
         print(f'    Linked: {total_linked}, Created: {total_created}')
 
-    return {'authors_linked': total_linked, 'authors_created': total_created, 'papers_skipped': total_skipped}
+    return {
+        'authors_linked': total_linked,
+        'authors_created': total_created,
+        'papers_skipped': total_skipped,
+        'papers_synced': total_synced,
+        'authors_touched': len(author_ids_touched),
+    }
+
+
+def refresh_author_stats(stale_days: int = STALE_DAYS, only_author_ids: Optional[set] = None) -> Dict[str, int]:
+    """
+    Refresh author stats for authors with missing or stale data.
+
+    @param stale_days: Number of days after which stats are considered stale
+    @param only_author_ids: If provided, only refresh these author IDs
+    @returns Dict with refreshed and failed counts
+    """
+    cutoff = datetime.utcnow() - timedelta(days=stale_days)
+    refreshed = 0
+    failed = 0
+
+    while True:
+        with database_session() as session:
+            query = session.query(AuthorRecord).filter(
+                (AuthorRecord.stats_updated_at.is_(None)) |
+                (AuthorRecord.stats_updated_at < cutoff)
+            )
+            if only_author_ids:
+                query = query.filter(AuthorRecord.id.in_(only_author_ids))
+            stale_authors = query.limit(1000).all()
+            s2_to_db = {author.s2_author_id: author.id for author in stale_authors}
+
+        if not s2_to_db:
+            break
+
+        s2_ids = list(s2_to_db.keys())
+        print(f'  Fetching stats for {len(s2_ids)} authors...')
+
+        try:
+            batch_results = fetch_author_stats_batch(s2_ids)
+        except Exception as e:
+            print(f'  Batch author stats fetch failed: {e}')
+            failed += len(s2_ids)
+            break
+
+        returned_ids = set()
+        for stats in batch_results:
+            returned_ids.add(stats.s2_author_id)
+            db_id = s2_to_db.get(stats.s2_author_id)
+            if not db_id:
+                continue
+            try:
+                with database_session() as session:
+                    record = session.query(AuthorRecord).filter(AuthorRecord.id == db_id).first()
+                    if record:
+                        record.name = stats.name
+                        record.affiliations = stats.affiliations
+                        record.homepage = stats.homepage
+                        record.paper_count = stats.paper_count
+                        record.citation_count = stats.citation_count
+                        record.h_index = stats.h_index
+                        record.stats_updated_at = datetime.utcnow()
+                        refreshed += 1
+            except Exception as e:
+                print(f'  FAIL saving author {stats.s2_author_id}: {e}')
+                failed += 1
+
+        missing_ids = set(s2_ids) - returned_ids
+        if missing_ids:
+            failed += len(missing_ids)
+            with database_session() as session:
+                for s2_id in missing_ids:
+                    db_id = s2_to_db.get(s2_id)
+                    if not db_id:
+                        continue
+                    record = session.query(AuthorRecord).filter(AuthorRecord.id == db_id).first()
+                    if record:
+                        record.stats_updated_at = datetime.utcnow()
+
+        if only_author_ids:
+            break
+
+    return {'refreshed': refreshed, 'failed': failed}
+
+
+def fetch_papers_needing_signal_refresh() -> List[int]:
+    """
+    Query papers whose author-derived signals are missing or older than the
+    latest author stats update.
+
+    @returns List of paper IDs needing signal refresh
+    """
+    with database_session() as session:
+        rows = session.query(
+            PaperRecord.id,
+        ).join(
+            PaperAuthorRecord, PaperAuthorRecord.paper_id == PaperRecord.id
+        ).join(
+            AuthorRecord, AuthorRecord.id == PaperAuthorRecord.author_id
+        ).filter(
+            PaperRecord.author_links_synced_at.isnot(None),
+            or_(
+                PaperRecord.signals_refreshed_at.is_(None),
+                AuthorRecord.stats_updated_at.is_(None),
+                AuthorRecord.stats_updated_at > PaperRecord.signals_refreshed_at,
+            ),
+        ).distinct().order_by(PaperRecord.id.desc()).all()
+
+        return [row[0] for row in rows]
+
+
+def refresh_paper_signals(paper_ids: List[int]) -> Dict[str, int]:
+    """
+    Compute and persist `max_author_h_index` for the given papers.
+
+    A paper is still stamped as refreshed even when none of its linked authors
+    currently have an h-index, which prevents infinite retries for papers with
+    legitimately missing author metrics.
+    """
+    if not paper_ids:
+        return {'updated': 0, 'failed': 0}
+
+    updated = 0
+    failed = 0
+
+    for i in range(0, len(paper_ids), BATCH_SIZE):
+        batch_ids = paper_ids[i:i + BATCH_SIZE]
+        batch_num = (i // BATCH_SIZE) + 1
+        print(f'  Batch {batch_num}: refreshing signals for {len(batch_ids)} papers...')
+
+        try:
+            with database_session() as session:
+                rows = session.query(
+                    PaperAuthorRecord.paper_id,
+                    func.max(AuthorRecord.h_index).label('max_h_index'),
+                ).join(
+                    AuthorRecord, PaperAuthorRecord.author_id == AuthorRecord.id
+                ).filter(
+                    PaperAuthorRecord.paper_id.in_(batch_ids),
+                    AuthorRecord.h_index.isnot(None),
+                ).group_by(
+                    PaperAuthorRecord.paper_id
+                ).all()
+
+                max_h_index_by_paper = {row.paper_id: row.max_h_index for row in rows}
+                papers = session.query(PaperRecord).filter(PaperRecord.id.in_(batch_ids)).all()
+
+                refreshed_at = datetime.utcnow()
+                for paper in papers:
+                    signals = dict(paper.signals or {})
+                    max_h_index = max_h_index_by_paper.get(paper.id)
+                    if max_h_index is None:
+                        signals.pop('max_author_h_index', None)
+                    else:
+                        signals['max_author_h_index'] = max_h_index
+                    paper.signals = signals
+                    paper.signals_refreshed_at = refreshed_at
+                    if paper.s2_enrichment_error and paper.s2_enrichment_error.startswith('Signal refresh failed'):
+                        paper.s2_enrichment_error = None
+
+                updated += len(papers)
+        except Exception as e:
+            print(f'  FAIL signal refresh batch {batch_num}: {e}')
+            failed += len(batch_ids)
+            with database_session() as session:
+                records = session.query(PaperRecord).filter(PaperRecord.id.in_(batch_ids)).all()
+                for record in records:
+                    record.s2_enrichment_error = f'Signal refresh failed: {e}'
+
+    return {'updated': updated, 'failed': failed}
 
 
 # ============================================================================
@@ -288,12 +534,11 @@ def link_authors_for_papers(papers: List[Tuple[int, str]]) -> Dict[str, int]:
     doc_md="""
     ### S2 Paper Data Enrichment DAG
 
-    Two chained tasks:
+    Four chained tasks:
     1. **process_all_papers**: Enriches papers with S2 metadata (s2_ids, metrics, etc.)
-    2. **link_missing_authors**: Links authors for papers that have s2_ids but no paper_authors rows
-
-    The author linking step catches papers where S2 hadn't indexed the paper at
-    ingest time, so the daily arXiv ingest's author linking silently returned 0 results.
+    2. **sync_author_links**: Links authors for papers whose S2 metadata is ready
+    3. **refresh_author_stats_task**: Refreshes author h-index and citation stats
+    4. **refresh_paper_signals_task**: Recomputes paper signals derived from authors
     """,
 )
 def enrich_s2_paper_data_dag():
@@ -330,6 +575,7 @@ def enrich_s2_paper_data_dag():
                 print(f'  S2 returned {len(metadata_list)} matches for {len(arxiv_ids)} papers')
             except Exception as e:
                 print(f'  S2 batch fetch FAILED: {e}')
+                mark_s2_batch_failure(batch, f'S2 metadata fetch failed: {e}')
                 total_errors += len(batch)
                 continue
 
@@ -359,35 +605,81 @@ def enrich_s2_paper_data_dag():
         }
 
     @task
-    def link_missing_authors() -> Dict[str, int]:
+    def sync_author_links() -> Dict[str, int]:
         """
-        Find papers with s2_ids but no paper_authors rows and link their authors.
-        This catches papers where S2 hadn't indexed the paper at ingest time.
+        Find papers whose S2 metadata is ready and sync their author links.
 
         @returns Dict with authors_linked, authors_created, papers_skipped counts
         """
-        papers = fetch_papers_missing_authors()
+        papers = fetch_papers_needing_author_sync()
         total = len(papers)
-        print(f'Found {total} papers with s2_ids but no author links')
+        print(f'Found {total} papers needing author sync')
 
         if total == 0:
-            print('No papers need author linking.')
-            return {'authors_linked': 0, 'authors_created': 0, 'papers_skipped': 0}
+            print('No papers need author sync.')
+            return {
+                'authors_linked': 0,
+                'authors_created': 0,
+                'papers_skipped': 0,
+                'papers_synced': 0,
+                'authors_touched': 0,
+            }
 
         counts = link_authors_for_papers(papers)
 
         print('\n' + '=' * 50)
-        print('AUTHOR LINKING REPORT')
+        print('AUTHOR SYNC REPORT')
         print('=' * 50)
         print(f'Papers queried:    {total}')
         print(f'Authors linked:    {counts["authors_linked"]}')
         print(f'Authors created:   {counts["authors_created"]}')
+        print(f'Papers synced:     {counts["papers_synced"]}')
         print(f'Papers skipped:    {counts["papers_skipped"]}')
         print('=' * 50)
 
         return counts
 
-    process_all_papers() >> link_missing_authors()
+    @task
+    def refresh_author_stats_task() -> Dict[str, int]:
+        """
+        Refresh stale or missing Semantic Scholar author stats.
+        """
+        counts = refresh_author_stats()
+
+        print('\n' + '=' * 50)
+        print('AUTHOR STATS REPORT')
+        print('=' * 50)
+        print(f'Authors refreshed: {counts["refreshed"]}')
+        print(f'Authors failed:    {counts["failed"]}')
+        print('=' * 50)
+
+        return counts
+
+    @task
+    def refresh_paper_signals_task() -> Dict[str, int]:
+        """
+        Refresh author-derived paper signals after metadata and stats sync.
+        """
+        paper_ids = fetch_papers_needing_signal_refresh()
+        total = len(paper_ids)
+        print(f'Found {total} papers needing signal refresh')
+
+        if total == 0:
+            print('No papers need signal refresh.')
+            return {'updated': 0, 'failed': 0}
+
+        counts = refresh_paper_signals(paper_ids)
+
+        print('\n' + '=' * 50)
+        print('PAPER SIGNAL REPORT')
+        print('=' * 50)
+        print(f'Papers refreshed:  {counts["updated"]}')
+        print(f'Papers failed:     {counts["failed"]}')
+        print('=' * 50)
+
+        return counts
+
+    process_all_papers() >> sync_author_links() >> refresh_author_stats_task() >> refresh_paper_signals_task()
 
 
 enrich_s2_paper_data_dag()
