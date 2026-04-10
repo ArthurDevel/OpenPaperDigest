@@ -46,6 +46,28 @@ python 03_autoresearch_loop.py
 python 04_generate_report.py
 ```
 
+## Database Tables
+
+Migration: `migrations/versions/20260409_000041_add_research_frontiers_tables.py`
+
+**`autoresearchhackathon_research_themes`** -- theme registry
+- `id` (int, PK)
+- `name` (text, unique) -- e.g. "Reinforcement Learning for LLMs/Agents"
+- `description` (text)
+- `status` (text, default "active")
+- `created_at` (timestamp)
+
+**`autoresearchhackathon_paper_themes`** -- paper-to-theme assignments per week
+- `id` (int, PK)
+- `paper_id` (FK -> papers.id)
+- `theme_id` (FK -> autoresearchhackathon_research_themes.id)
+- `week` (date) -- the Monday of the ISO week this assignment belongs to
+- `assigned_at` (timestamp)
+
+Indexes on `(theme_id, week)` and `(paper_id)`.
+
+All trend metrics (velocity, status, rank) are computed at query time from these two tables -- no denormalized data.
+
 ## The Autoresearch Angle
 
 The system doesn't just detect research frontiers -- it uses autoresearch to optimize its own detection methodology. The Karpathy Loop is applied to the theme detection prompt: one file (the prompt), one metric (embedding discrimination score), iterate until quality improves.
