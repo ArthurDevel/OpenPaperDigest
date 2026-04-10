@@ -1,7 +1,9 @@
 """Focused tests for the citation maintenance pipeline."""
 
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -36,6 +38,7 @@ from citation_helpers import (
     fetch_and_store_references,
 )
 from expand_external_references_dag import fetch_external_nodes_needing_references
+from enrich_s2_paper_data_dag import refresh_paper_signals
 from fetch_inbound_citations_dag import fetch_papers_needing_inbound_citations
 
 
@@ -238,3 +241,49 @@ def test_write_author_scores_batches_updates():
 
     assert updated == BATCH_SIZE + 1
     assert session.commit.call_count == 2
+
+
+def test_refresh_paper_signals_batches_updates(monkeypatch):
+    total_papers = BATCH_SIZE + 1
+    paper_ids = list(range(1, total_papers + 1))
+    sessions = []
+
+    def make_session(batch_ids):
+        session = MagicMock()
+        rows = [SimpleNamespace(paper_id=paper_id, max_h_index=paper_id + 10) for paper_id in batch_ids]
+        papers = [
+            SimpleNamespace(
+                id=paper_id,
+                signals={'existing': True},
+                signals_refreshed_at=None,
+                s2_enrichment_error=None,
+            )
+            for paper_id in batch_ids
+        ]
+
+        aggregate_query = MagicMock()
+        aggregate_query.join.return_value.filter.return_value.group_by.return_value.all.return_value = rows
+
+        paper_query = MagicMock()
+        paper_query.filter.return_value.all.return_value = papers
+
+        session.query.side_effect = [aggregate_query, paper_query]
+        session._papers = papers
+        sessions.append(session)
+        return session
+
+    batches = [paper_ids[i:i + BATCH_SIZE] for i in range(0, len(paper_ids), BATCH_SIZE)]
+    session_iter = iter(make_session(batch_ids) for batch_ids in batches)
+
+    @contextmanager
+    def fake_database_session():
+        yield next(session_iter)
+
+    monkeypatch.setattr('enrich_s2_paper_data_dag.database_session', fake_database_session)
+
+    counts = refresh_paper_signals(paper_ids)
+
+    assert counts == {'updated': total_papers, 'failed': 0}
+    assert len(sessions) == 2
+    assert all(paper.signals['max_author_h_index'] == paper.id + 10 for session in sessions for paper in session._papers)
+    assert all(paper.signals_refreshed_at is not None for session in sessions for paper in session._papers)

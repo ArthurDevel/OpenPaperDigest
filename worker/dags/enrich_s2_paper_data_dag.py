@@ -460,36 +460,54 @@ def refresh_paper_signals(paper_ids: List[int]) -> Dict[str, int]:
     if not paper_ids:
         return {'updated': 0, 'failed': 0}
 
-    with database_session() as session:
-        rows = session.query(
-            PaperAuthorRecord.paper_id,
-            func.max(AuthorRecord.h_index).label('max_h_index'),
-        ).join(
-            AuthorRecord, PaperAuthorRecord.author_id == AuthorRecord.id
-        ).filter(
-            PaperAuthorRecord.paper_id.in_(paper_ids),
-            AuthorRecord.h_index.isnot(None),
-        ).group_by(
-            PaperAuthorRecord.paper_id
-        ).all()
+    updated = 0
+    failed = 0
 
-        max_h_index_by_paper = {row.paper_id: row.max_h_index for row in rows}
-        papers = session.query(PaperRecord).filter(PaperRecord.id.in_(paper_ids)).all()
+    for i in range(0, len(paper_ids), BATCH_SIZE):
+        batch_ids = paper_ids[i:i + BATCH_SIZE]
+        batch_num = (i // BATCH_SIZE) + 1
+        print(f'  Batch {batch_num}: refreshing signals for {len(batch_ids)} papers...')
 
-        refreshed_at = datetime.utcnow()
-        for paper in papers:
-            signals = dict(paper.signals or {})
-            max_h_index = max_h_index_by_paper.get(paper.id)
-            if max_h_index is None:
-                signals.pop('max_author_h_index', None)
-            else:
-                signals['max_author_h_index'] = max_h_index
-            paper.signals = signals
-            paper.signals_refreshed_at = refreshed_at
-            if paper.s2_enrichment_error and paper.s2_enrichment_error.startswith('Signal refresh failed'):
-                paper.s2_enrichment_error = None
+        try:
+            with database_session() as session:
+                rows = session.query(
+                    PaperAuthorRecord.paper_id,
+                    func.max(AuthorRecord.h_index).label('max_h_index'),
+                ).join(
+                    AuthorRecord, PaperAuthorRecord.author_id == AuthorRecord.id
+                ).filter(
+                    PaperAuthorRecord.paper_id.in_(batch_ids),
+                    AuthorRecord.h_index.isnot(None),
+                ).group_by(
+                    PaperAuthorRecord.paper_id
+                ).all()
 
-    return {'updated': len(paper_ids), 'failed': 0}
+                max_h_index_by_paper = {row.paper_id: row.max_h_index for row in rows}
+                papers = session.query(PaperRecord).filter(PaperRecord.id.in_(batch_ids)).all()
+
+                refreshed_at = datetime.utcnow()
+                for paper in papers:
+                    signals = dict(paper.signals or {})
+                    max_h_index = max_h_index_by_paper.get(paper.id)
+                    if max_h_index is None:
+                        signals.pop('max_author_h_index', None)
+                    else:
+                        signals['max_author_h_index'] = max_h_index
+                    paper.signals = signals
+                    paper.signals_refreshed_at = refreshed_at
+                    if paper.s2_enrichment_error and paper.s2_enrichment_error.startswith('Signal refresh failed'):
+                        paper.s2_enrichment_error = None
+
+                updated += len(papers)
+        except Exception as e:
+            print(f'  FAIL signal refresh batch {batch_num}: {e}')
+            failed += len(batch_ids)
+            with database_session() as session:
+                records = session.query(PaperRecord).filter(PaperRecord.id.in_(batch_ids)).all()
+                for record in records:
+                    record.s2_enrichment_error = f'Signal refresh failed: {e}'
+
+    return {'updated': updated, 'failed': failed}
 
 
 # ============================================================================
