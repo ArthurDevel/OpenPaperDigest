@@ -538,14 +538,14 @@ async def _process_paper_job_complete(job: JobInfo) -> None:
             maximum=16,
         ),
         "date_from": Param(
-            default="",
-            type="string",
+            default=None,
+            type=["null", "string"],
             title="Date From (YYYY-MM-DD)",
             description="Only process papers ingested on or after this date. Leave empty for no filter.",
         ),
         "date_to": Param(
-            default="",
-            type="string",
+            default=None,
+            type=["null", "string"],
             title="Date To (YYYY-MM-DD)",
             description="Only process papers ingested on or before this date. Leave empty for no filter.",
         ),
@@ -588,7 +588,7 @@ def paper_processing_worker_dag():
         print(f"Set pool '{PAPER_PROCESSING_POOL}' to {max_parallel} slots")
 
     @task
-    def claim_available_jobs(date_from: str = "", date_to: str = "") -> List[int]:
+    def claim_available_jobs(date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[int]:
         """
         Claim available paper jobs from the queue.
 
