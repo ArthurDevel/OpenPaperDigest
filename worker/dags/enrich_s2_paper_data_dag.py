@@ -73,14 +73,18 @@ def database_session():
 RETRY_WINDOW_DAYS = 7
 
 
-def fetch_papers_needing_s2_data(exclude_ids: List[str] = None) -> List[Tuple[int, str]]:
+def fetch_papers_needing_s2_data(
+    exclude_ids: List[str] = None,
+    include_exhausted_no_match: bool = False,
+) -> List[Tuple[int, str]]:
     """
     Query papers that have an arxiv_id but no S2 data yet, plus papers where
     S2 returned no match on the first attempt (s2_ids = {}) that are between
-    1 and 7 days old. Papers older than 7 days with s2_ids = {} are assumed
-    to be genuinely absent from S2 and are not retried.
+    1 and 7 days old. When `include_exhausted_no_match` is true, include all
+    papers with `s2_ids = {}` regardless of age for manual backfill runs.
 
     @param exclude_ids: arXiv IDs to exclude (e.g. failed in current run)
+    @param include_exhausted_no_match: include old `{}` rows in manual backfills
     @returns List of (paper_id, arxiv_id) tuples
     """
     now = datetime.utcnow()
@@ -94,8 +98,13 @@ def fetch_papers_needing_s2_data(exclude_ids: List[str] = None) -> List[Tuple[in
                 PaperRecord.s2_ids.is_(None),
                 and_(
                     cast(PaperRecord.s2_ids, String) == '{}',
-                    PaperRecord.created_at < retry_min_age,
-                    PaperRecord.created_at > retry_max_age,
+                    or_(
+                        include_exhausted_no_match,
+                        and_(
+                            PaperRecord.created_at < retry_min_age,
+                            PaperRecord.created_at > retry_max_age,
+                        ),
+                    ),
                 ),
             ),
         )
