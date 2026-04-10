@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 
 import pendulum
 from airflow.decorators import dag, task
+from airflow.exceptions import AirflowFailException
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, '/opt/airflow')
@@ -146,6 +147,11 @@ def source_backfill_dag():
                         print(f'  FAIL arxiv_url {paper_uuid}: {exc}')
                         failed += 1
 
+        if failed > 0 and updated == 0:
+            raise AirflowFailException(
+                f'All {failed}/{total} arxiv_url backfills failed'
+            )
+
         return {'total': total, 'updated': updated, 'failed': failed}
 
     @task
@@ -161,7 +167,6 @@ def source_backfill_dag():
 
         total = len(rows)
         updated = 0
-        failed = 0
         not_found = 0
 
         for i in range(0, total, ARXIV_PUBLISHED_AT_BATCH_SIZE):
@@ -172,9 +177,9 @@ def source_backfill_dag():
             try:
                 published_dates = fetch_published_dates_batch(arxiv_ids)
             except Exception as exc:
-                print(f'  FAIL published_at batch {i // ARXIV_PUBLISHED_AT_BATCH_SIZE + 1}: {exc}')
-                failed += len(batch)
-                continue
+                raise AirflowFailException(
+                    f'published_at batch {i // ARXIV_PUBLISHED_AT_BATCH_SIZE + 1} failed: {exc}'
+                ) from exc
 
             with database_session() as session:
                 for arxiv_id in arxiv_ids:
@@ -191,7 +196,7 @@ def source_backfill_dag():
 
             time.sleep(ARXIV_API_DELAY)
 
-        return {'total': total, 'updated': updated, 'failed': failed, 'not_found': not_found}
+        return {'total': total, 'updated': updated, 'not_found': not_found}
 
     @task
     def backfill_abstracts() -> Dict[str, int]:
@@ -232,8 +237,9 @@ def source_backfill_dag():
                             record.abstract = abstract
                             updated += 1
                 except Exception as exc:
-                    print(f'  FAIL abstract {paper_uuid} ({arxiv_id}): {exc}')
-                    failed += 1
+                    raise AirflowFailException(
+                        f'abstract backfill failed for {paper_uuid} ({arxiv_id}): {exc}'
+                    ) from exc
 
         return {'total': total, 'updated': updated, 'failed': failed, 'skipped': skipped}
 
