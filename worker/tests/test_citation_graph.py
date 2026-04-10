@@ -37,9 +37,9 @@ from citation_helpers import (
     fetch_and_store_inbound_citations,
     fetch_and_store_references,
 )
-from expand_external_references_dag import fetch_external_nodes_needing_references
+from deprecated_expand_external_references_dag import fetch_external_nodes_needing_references
 from enrich_s2_paper_data_dag import refresh_paper_signals
-from fetch_inbound_citations_dag import fetch_papers_needing_inbound_citations
+from deprecated_fetch_inbound_citations_dag import fetch_papers_needing_inbound_citations
 
 
 MOCK_REFERENCES_RESPONSE = [
