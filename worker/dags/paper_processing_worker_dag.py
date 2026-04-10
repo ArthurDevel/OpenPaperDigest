@@ -138,24 +138,31 @@ def _refresh_and_score_paper(paper_id: int, author_ids: set) -> None:
 
     if s2_to_db:
         batch_results = fetch_author_stats_batch(list(s2_to_db.keys()))
+        # Build a map of db_id -> stats for bulk update
+        stats_by_db_id = {}
         for stats in batch_results:
             db_id = s2_to_db.get(stats.s2_author_id)
-            if not db_id:
-                continue
+            if db_id:
+                stats_by_db_id[db_id] = stats
+
+        # Update all stale authors in a single session
+        if stats_by_db_id:
             with database_session() as session:
-                record = session.query(AuthorRecord).filter(
-                    AuthorRecord.id == db_id
-                ).first()
-                if record:
+                records = session.query(AuthorRecord).filter(
+                    AuthorRecord.id.in_(stats_by_db_id.keys())
+                ).all()
+                now = datetime.utcnow()
+                for record in records:
+                    stats = stats_by_db_id[record.id]
                     record.name = stats.name
                     record.affiliations = stats.affiliations
                     record.homepage = stats.homepage
                     record.paper_count = stats.paper_count
                     record.citation_count = stats.citation_count
                     record.h_index = stats.h_index
-                    record.stats_updated_at = datetime.utcnow()
+                    record.stats_updated_at = now
 
-    # Compute and write max_author_h_index
+    # Compute max_author_h_index and write to paper signals in one session
     with database_session() as session:
         row = session.query(
             func.max(AuthorRecord.h_index).label("max_h_index"),
@@ -200,13 +207,18 @@ def _link_authors_for_paper(arxiv_id: str) -> None:
         if not record:
             return
 
-        seen_author_ids = set()
-        authors_linked = 0
-        for order, s2_author in enumerate(s2_result.authors, start=1):
-            existing = session.query(AuthorRecord).filter(
-                AuthorRecord.s2_author_id == s2_author.s2_author_id
-            ).first()
+        # Batch-load all existing authors by s2_author_id in one query
+        s2_ids = [a.s2_author_id for a in s2_result.authors]
+        existing_authors = session.query(AuthorRecord).filter(
+            AuthorRecord.s2_author_id.in_(s2_ids)
+        ).all()
+        s2_id_to_author = {a.s2_author_id: a for a in existing_authors}
 
+        # Create missing authors and build full ID map
+        seen_author_ids = set()
+        author_id_order = []  # (author_id, order) pairs to link
+        for order, s2_author in enumerate(s2_result.authors, start=1):
+            existing = s2_id_to_author.get(s2_author.s2_author_id)
             if existing:
                 author_id = existing.id
             else:
@@ -217,17 +229,24 @@ def _link_authors_for_paper(arxiv_id: str) -> None:
                 session.add(new_author)
                 session.flush()
                 author_id = new_author.id
+                s2_id_to_author[s2_author.s2_author_id] = new_author
 
             if author_id in seen_author_ids:
                 continue
             seen_author_ids.add(author_id)
+            author_id_order.append((author_id, order))
 
-            existing_link = session.query(PaperAuthorRecord).filter(
-                PaperAuthorRecord.paper_id == record.id,
-                PaperAuthorRecord.author_id == author_id,
-            ).first()
+        # Batch-load all existing links for this paper in one query
+        existing_links = session.query(PaperAuthorRecord.author_id).filter(
+            PaperAuthorRecord.paper_id == record.id,
+            PaperAuthorRecord.author_id.in_(seen_author_ids),
+        ).all()
+        linked_author_ids = {row[0] for row in existing_links}
 
-            if not existing_link:
+        # Insert only missing links
+        authors_linked = 0
+        for author_id, order in author_id_order:
+            if author_id not in linked_author_ids:
                 session.add(PaperAuthorRecord(
                     paper_id=record.id,
                     author_id=author_id,
