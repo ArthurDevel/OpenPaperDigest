@@ -1,6 +1,6 @@
 """Add research frontiers tables for autoresearch hackathon.
 
-Revision ID: 20260409_000041
+Revision ID: 20260409_000044
 Revises: 20260409_000040
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = '20260409_000041'
+revision = '20260409_000044'
 down_revision = '20260409_000040'
 branch_labels = None
 depends_on = None

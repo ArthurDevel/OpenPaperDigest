@@ -52,6 +52,11 @@ class PaperRecord(Base):
     s2_tldr = Column(Text, nullable=True)
     # 768-dim SPECTER v2 embedding from Semantic Scholar
     s2_embedding = Column(Vector(768), nullable=True)
+    s2_enriched_at = Column(DateTime(timezone=True), nullable=True)
+    s2_last_attempted_at = Column(DateTime(timezone=True), nullable=True)
+    s2_enrichment_error = Column(Text, nullable=True)
+    author_links_synced_at = Column(DateTime(timezone=True), nullable=True)
+    signals_refreshed_at = Column(DateTime(timezone=True), nullable=True)
     # PageRank score and percentile computed from citation graph
     pagerank = Column(JSONB, nullable=True)
     inbound_citations_fetched_at = Column(DateTime(timezone=True), nullable=True)
@@ -132,6 +137,28 @@ class PaperCitationRecord(Base):
     __table_args__ = (
         Index("ix_paper_citations_source_s2_id", "source_s2_id"),
         Index("ix_paper_citations_cited_s2_id", "cited_s2_id"),
+    )
+
+
+class CitationNodeStateRecord(Base):
+    """Tracks citation-fetch progress for internal and external graph nodes."""
+    __tablename__ = "citation_node_state"
+
+    s2_paper_id = Column(String(64), primary_key=True)
+    paper_id = Column(BigInteger, ForeignKey("papers.id"), nullable=True)
+    is_internal = Column(Boolean, nullable=False, default=False)
+    hop = Column(Integer, nullable=True)
+    discovered_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    outbound_fetched_at = Column(DateTime(timezone=True), nullable=True)
+    inbound_fetched_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_citation_node_state_paper_id", "paper_id"),
+        Index("ix_citation_node_state_is_internal_hop", "is_internal", "hop"),
+        Index("ix_citation_node_state_outbound_fetched_at", "outbound_fetched_at"),
+        Index("ix_citation_node_state_inbound_fetched_at", "inbound_fetched_at"),
     )
 
 
